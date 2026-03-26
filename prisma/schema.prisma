@@ -1,4 +1,50 @@
+// Prisma Schema for StellarFlow Backend
+// PostgreSQL database schema for price history tracking
+
 generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Price History Model
+// Stores historical exchange rates for sparkline charts
+model PriceHistory {
+  id          Int       @id @default(autoincrement())
+  currency    String    @db.VarChar(10)  // e.g., "GHS", "KES"
+  rate        Decimal   @db.Decimal(20, 10)  // High precision for exchange rates
+  source      String    @db.VarChar(100)  // Source API name
+  timestamp   DateTime  @db.Timestamp(3)  // When the rate was recorded
+  
+  // Indexes for efficient sparkline queries
+  @@index([currency, timestamp])
+  @@index([timestamp])
+  
+  // Unique constraint to prevent duplicate entries at same timestamp from same source
+  @@unique([currency, source, timestamp])
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// Currency Configuration Model
+// Stores supported currencies and their metadata
+model Currency {
+  code        String    @id @db.VarChar(10)  // e.g., "GHS", "KES"
+  name        String    @db.VarChar(100)      // Full name e.g., "Ghanaian Cedi"
+  symbol      String    @db.VarChar(5)        // Currency symbol e.g., "₵", "KES"
+  decimals    Int       @default(2)           // Decimal places for display
+  isActive    Boolean   @default(true)        // Whether this currency is currently supported
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  // Relations
+  priceHistory PriceHistory[]
+}generator client {
   provider = "prisma-client-js"
 }
 
