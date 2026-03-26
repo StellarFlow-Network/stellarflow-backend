@@ -9,6 +9,7 @@ import { GHSRateFetcher } from "./ghsFetcher";
 import { NGNRateFetcher } from "./ngnFetcher";
 import { StellarService } from "../stellarService";
 import { getIO } from "../../lib/socket";
+import prisma from "../../lib/prisma";
 
 export class MarketRateService {
   private fetchers: Map<string, MarketRateFetcher> = new Map();
@@ -66,6 +67,28 @@ export class MarketRateService {
         rate,
         expiry: new Date(Date.now() + this.CACHE_DURATION_MS),
       });
+
+      // Persist to price history for sparkline charts
+      try {
+        await prisma.priceHistory.upsert({
+          where: {
+            currency_source_timestamp: {
+              currency: currency.toUpperCase(),
+              source: rate.source,
+              timestamp: rate.timestamp,
+            },
+          },
+          update: {},
+          create: {
+            currency: currency.toUpperCase(),
+            rate: rate.rate,
+            source: rate.source,
+            timestamp: rate.timestamp,
+          },
+        });
+      } catch (dbError) {
+        console.error("Failed to persist price history:", dbError);
+      }
 
       // Broadcast fresh price to all connected dashboard clients
       try {

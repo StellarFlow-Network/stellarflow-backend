@@ -4,6 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { Horizon } from "@stellar/stellar-sdk";
 import marketRatesRouter from "./routes/marketRates";
+import historyRouter from "./routes/history";
 import prisma from "./lib/prisma";
 import { initSocket } from "./lib/socket";
 
@@ -46,6 +47,7 @@ app.use(express.json());
 
 // Routes
 app.use("/api/market-rates", marketRatesRouter);
+app.use("/api/history", historyRouter);
 
 // Health check endpoint
 app.get("/health", async (req, res) => {
