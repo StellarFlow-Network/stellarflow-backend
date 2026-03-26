@@ -1,4 +1,3 @@
-cat > src/services/webhook.ts << 'EOF'
 import axios from 'axios';
 
 export class WebhookService {
@@ -85,4 +84,3 @@ export class WebhookService {
 }
 
 export const webhookService = new WebhookService();
-EOF

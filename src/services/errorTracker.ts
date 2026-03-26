@@ -1,4 +1,3 @@
-cat > src/services/errorTracker.ts << 'EOF'
 export class ErrorTracker {
   private failureCounters: Map<string, { count: number; errors: any[] }> = new Map();
   private readonly threshold = 3;
@@ -26,4 +25,3 @@ export class ErrorTracker {
 }
 
 export const errorTracker = new ErrorTracker();
-EOF
