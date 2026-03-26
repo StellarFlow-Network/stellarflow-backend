@@ -26,3 +26,4 @@ export class ErrorTracker {
 }
 
 export const errorTracker = new ErrorTracker();
+export const errorTracker = new ErrorTracker();

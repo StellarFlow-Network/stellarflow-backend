@@ -1,4 +1,5 @@
 import axios from "axios";
+import axios from 'axios';
 
 export class WebhookService {
   private webhookUrl: string | undefined;
@@ -207,4 +208,5 @@ export class WebhookService {
   }
 }
 
+export const webhookService = new WebhookService();
 export const webhookService = new WebhookService();
