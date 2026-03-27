@@ -1,4 +1,4 @@
-import { MarketRateFetcher, MarketRate } from './types';
+import { MarketRateFetcher, MarketRate } from "./types";
 export declare class GHSRateFetcher implements MarketRateFetcher {
     private readonly coinGeckoUrl;
     private readonly usdToGhsUrl;

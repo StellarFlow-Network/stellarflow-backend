@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "tsx test/marketRates.test.ts",
+    "download:ngn-rates": "tsx scripts/download-ngn-rates.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

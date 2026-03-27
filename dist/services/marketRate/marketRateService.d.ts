@@ -1,7 +1,8 @@
-import { FetcherResponse } from './types';
+import { FetcherResponse, AggregatedFetcherResponse } from "./types";
 export declare class MarketRateService {
     private fetchers;
     private cache;
+    private stellarService;
     private readonly CACHE_DURATION_MS;
     constructor();
     private initializeFetchers;
@@ -9,6 +10,7 @@ export declare class MarketRateService {
     getAllRates(): Promise<FetcherResponse[]>;
     healthCheck(): Promise<Record<string, boolean>>;
     getSupportedCurrencies(): string[];
+    getLatestPrices(): Promise<AggregatedFetcherResponse>;
     clearCache(): void;
     getCacheStatus(): Record<string, {
         cached: boolean;

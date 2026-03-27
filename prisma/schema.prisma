@@ -42,14 +42,6 @@ model Currency {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   
-  // Relations
-  priceHistory PriceHistory[]
-}generator client {
-  provider = "prisma-client-js"
-}
-
-datasource db {
-  provider = "postgresql"
 }
 
 model PriceRecord {
@@ -70,7 +62,7 @@ model ProviderReputation {
   successfulRequests Int    @default(0)       // Successful responses
   failedRequests  Int       @default(0)       // Failed responses
   incorrectResponses Int   @default(0)        // Responses with invalid/incorrect data
-  averageLatency  Float?    @db.Float         // Average response time in ms
+  averageLatency  Float?                        // Average response time in ms
   lastSuccess     DateTime?                    // Last successful response timestamp
   lastFailure     DateTime?                    // Last failed response timestamp
   lastIncorrect   DateTime?                    // Last incorrect response timestamp
@@ -78,7 +70,7 @@ model ProviderReputation {
   consecutiveIncorrect Int @default(0)        // Current streak of consecutive incorrect responses
   
   // Reliability metrics
-  reliabilityScore Float?   @db.Float         // Calculated score (0-100)
+  reliabilityScore Float?                        // Calculated score (0-100)
   lastUpdated     DateTime  @updatedAt
   
   createdAt       DateTime  @default(now())
