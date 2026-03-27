@@ -7,6 +7,7 @@ import swaggerUi from "swagger-ui-express";
 import marketRatesRouter from "./routes/marketRates";
 import historyRouter from "./routes/history";
 import statsRouter from "./routes/stats";
+import intelligenceRouter from "./routes/intelligence";
 import priceUpdatesRouter from "./routes/priceUpdates";
 import prisma from "./lib/prisma";
 import { initSocket } from "./lib/socket";
@@ -99,6 +100,7 @@ app.get(
 app.use("/api/market-rates", marketRatesRouter);
 app.use("/api/history", historyRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/intelligence", intelligenceRouter);
 app.use("/api/price-updates", priceUpdatesRouter);
 
 // Health check endpoint
