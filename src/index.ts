@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import { Horizon } from "@stellar/stellar-sdk";
 import marketRatesRouter from "./routes/marketRates";
 import historyRouter from "./routes/history";
+import statsRouter from "./routes/stats";
 import priceUpdatesRouter from "./routes/priceUpdates";
 import prisma from "./lib/prisma";
 import { initSocket } from "./lib/socket";
@@ -51,6 +52,7 @@ app.use(express.json());
 // Routes
 app.use("/api/market-rates", marketRatesRouter);
 app.use("/api/history", historyRouter);
+app.use("/api/stats", statsRouter);
 app.use("/api/price-updates", priceUpdatesRouter);
 
 // Health check endpoint
@@ -103,6 +105,12 @@ app.get("/", (req, res) => {
         currencies: "/api/market-rates/currencies",
         cache: "/api/market-rates/cache",
         clearCache: "POST /api/market-rates/cache/clear",
+      },
+      stats: {
+        volume: "/api/stats/volume?date=YYYY-MM-DD",
+      },
+      history: {
+        assetHistory: "/api/history/:asset?range=1d|7d|30d|90d",
       },
     },
   });
