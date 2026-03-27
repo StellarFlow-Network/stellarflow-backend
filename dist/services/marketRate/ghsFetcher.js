@@ -1,5 +1,5 @@
 import axios from "axios";
-import { calculateMedian } from "./types";
+import { calculateMedian, filterOutliers } from "./types";
 import { errorTracker } from "../errorTracker";
 import { webhookService } from "../webhook";
 export class GHSRateFetcher {
@@ -29,6 +29,7 @@ export class GHSRateFetcher {
                     rate: stellarPrice.ghs,
                     timestamp: lastUpdatedAt,
                     source: "CoinGecko (direct)",
+                    trustLevel: "standard",
                 });
                 // Success - reset error tracker
                 errorTracker.trackSuccess("GHS-price-fetch");
@@ -69,6 +70,7 @@ export class GHSRateFetcher {
                         rate: stellarPrice.usd * usdToGhsRate,
                         timestamp: fxTimestamp > lastUpdatedAt ? fxTimestamp : lastUpdatedAt,
                         source: "CoinGecko + ExchangeRate API",
+                        trustLevel: "trusted",
                     });
                     // Success - reset error tracker
                     errorTracker.trackSuccess("GHS-price-fetch");
@@ -104,6 +106,7 @@ export class GHSRateFetcher {
                             rate: xlmUsd * ghsRate,
                             timestamp: new Date(),
                             source: "Alternative XLM pricing",
+                            trustLevel: "new",
                         });
                         // Success - reset error tracker
                         errorTracker.trackSuccess("GHS-price-fetch");
@@ -116,14 +119,15 @@ export class GHSRateFetcher {
         }
         // If we have prices, calculate median
         if (prices.length > 0) {
-            const rateValues = prices.map((p) => p.rate);
+            let rateValues = prices.map((p) => p.rate).filter(p => p > 0);
+            rateValues = filterOutliers(rateValues);
             const medianRate = calculateMedian(rateValues);
             const mostRecentTimestamp = prices.reduce((latest, p) => (p.timestamp > latest ? p.timestamp : latest), prices[0]?.timestamp ?? new Date());
             return {
                 currency: "GHS",
-                rate: medianRate,
+                rate: weightedRate,
                 timestamp: mostRecentTimestamp,
-                source: `Median of ${prices.length} sources`,
+                source: `Median of ${prices.length} sources (outliers filtered)`,
             };
         }
         // All strategies failed - track failure and send notification if 3 consecutive failures

@@ -1,7 +1,8 @@
+
 import { Router } from "express";
+import { getRate, getAllRates } from "../controllers/marketRatesController";
 import { MarketRateService } from "../services/marketRate";
 
-const router = Router();
 const marketRateService = new MarketRateService();
 
 /**
@@ -37,30 +38,10 @@ const marketRateService = new MarketRateService();
  *       '500':
  *         description: Internal server error
  */
-// Get rate for specific currency
-router.get("/rate/:currency", async (req, res) => {
-  try {
-    const { currency } = req.params;
-    const result = await marketRateService.getRate(currency);
+const router = Router();
 
-    if (result.success) {
-      res.json({
-        success: true,
-        data: result.data,
-      });
-    } else {
-      res.status(404).json({
-        success: false,
-        error: result.error,
-      });
-    }
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Internal server error",
-    });
-  }
-});
+// Get rate for specific currency
+router.get("/rate/:currency", getRate);
 
 /**
  * @swagger
@@ -92,28 +73,9 @@ router.get("/rate/:currency", async (req, res) => {
  *         description: Internal server error
  */
 // Get all available rates
-router.get("/rates", async (req, res) => {
-  try {
-    const results = await marketRateService.getAllRates();
+router.get("/rates", getAllRates);
 
-    const rates = results
-      .filter((result) => result.success)
-      .map((result) => result.data);
 
-    const errors = results.filter((result) => !result.success);
-
-    res.json({
-      success: true,
-      data: rates,
-      errors: errors.length > 0 ? errors.map((e) => e.error) : undefined,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Internal server error",
-    });
-  }
-});
 
 /**
  * @swagger

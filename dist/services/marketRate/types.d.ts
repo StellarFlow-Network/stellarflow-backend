@@ -14,6 +14,8 @@ export interface MarketRate {
     comparisonRate?: number;
     comparisonTimestamp?: Date;
     contractSubmissionSkipped?: boolean;
+    pendingMultiSig?: boolean;
+    multiSigPriceId?: number;
 }
 /**
  * Market Rate Fetcher Interface
@@ -92,6 +94,10 @@ export interface HealthCheckResponse {
     error?: string;
 }
 /**
+ * Source trust tier used when weighting multi-source rates.
+ */
+export type SourceTrustLevel = "trusted" | "standard" | "new";
+/**
  * Calculate the median of an array of numbers
  * This helps prevent a single bad API from ruining the data
  * @param values - Array of price numbers from different sources
@@ -105,10 +111,21 @@ export declare function calculateMedian(values: number[]): number;
  * @returns The arithmetic mean, or 0 for an empty array
  */
 export declare function calculateAverage(prices: number[]): number;
+export interface WeightedPriceInput {
+    value: number;
+    trustLevel?: SourceTrustLevel;
+    weight?: number;
+}
+/**
+ * Calculate weighted average from source values.
+ * Use explicit `weight` when provided, otherwise derive by trust level.
+ */
+export declare function calculateWeightedAverage(values: WeightedPriceInput[]): number;
 /**
  * Rate Fetch Statistics
  * Performance and reliability metrics
  */
+export { filterOutliers, isOutlier, percentDeviation } from '../../logic/outlierFilter';
 export interface RateFetchStats {
     totalRequests: number;
     successfulRequests: number;

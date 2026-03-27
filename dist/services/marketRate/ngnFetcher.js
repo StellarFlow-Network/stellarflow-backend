@@ -1,5 +1,5 @@
 import axios from "axios";
-import { calculateMedian } from "./types";
+import { calculateMedian, filterOutliers } from "./types";
 function parseAmount(value) {
     if (value == null)
         return null;
@@ -90,6 +90,7 @@ export class NGNRateFetcher {
                         rate: usd * vt.ngnPerUsd,
                         timestamp: ts,
                         source: "VTpass variation + CoinGecko (XLM/USD)",
+                        trustLevel: "new",
                     });
                 }
             }
@@ -116,6 +117,7 @@ export class NGNRateFetcher {
                     rate: stellarPrice.ngn,
                     timestamp: lastUpdatedAt,
                     source: "CoinGecko (direct NGN)",
+                    trustLevel: "standard",
                 });
             }
         }
@@ -154,6 +156,7 @@ export class NGNRateFetcher {
                         rate: stellarPrice.usd * usdToNgn,
                         timestamp: fxTimestamp > lastUpdatedAt ? fxTimestamp : lastUpdatedAt,
                         source: "CoinGecko + ExchangeRate API (USD→NGN)",
+                        trustLevel: "trusted",
                     });
                 }
             }
@@ -162,14 +165,15 @@ export class NGNRateFetcher {
             console.debug("CoinGecko + ExchangeRate API (NGN) failed");
         }
         if (prices.length > 0) {
-            const rateValues = prices.map((p) => p.rate);
+            let rateValues = prices.map((p) => p.rate).filter(p => p > 0);
+            rateValues = filterOutliers(rateValues);
             const medianRate = calculateMedian(rateValues);
             const mostRecentTimestamp = prices.reduce((latest, p) => (p.timestamp > latest ? p.timestamp : latest), prices[0]?.timestamp ?? new Date());
             return {
                 currency: "NGN",
-                rate: medianRate,
+                rate: weightedRate,
                 timestamp: mostRecentTimestamp,
-                source: `Median of ${prices.length} sources`,
+                source: `Median of ${prices.length} sources (outliers filtered)`,
             };
         }
         throw new Error("All NGN rate sources failed");

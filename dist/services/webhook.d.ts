@@ -25,4 +25,5 @@ export declare class WebhookService {
     private formatReviewMessage;
 }
 export declare const webhookService: WebhookService;
+export declare const webhookService: WebhookService;
 //# sourceMappingURL=webhook.d.ts.map

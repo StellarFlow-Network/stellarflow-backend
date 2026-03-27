@@ -5,6 +5,9 @@ export class StellarService {
     server;
     keypair;
     network;
+    MAX_RETRIES = 3;
+    FEE_INCREMENT_PERCENTAGE = 0.5; // 50% increase each retry
+    RETRY_DELAY_MS = 2000; // 2 seconds delay between retries
     constructor() {
         const secret = process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
         if (!secret) {
@@ -29,17 +32,17 @@ export class StellarService {
         return Math.max(fee, 100).toString(); // floor at Stellar's base fee (100 stroops)
     }
     /**
-     * Submit a price update to the Stellar network with a unique memo ID
+     * Submit a price update to the Stellar network with a unique memo ID.
+     * Leverages submitTransactionWithRetries for automatic fee bumping if stuck.
      * @param currency - The currency code (e.g., "NGN", "KES")
      * @param price - The current price/rate
      * @param memoId - Unique ID for auditing
      */
     async submitPriceUpdate(currency, price, memoId) {
-        try {
-            const sourceAccount = await this.server.loadAccount(this.keypair.publicKey());
-            const fee = await this.getRecommendedFee();
-            const transaction = new TransactionBuilder(sourceAccount, {
-                fee,
+        const baseFee = parseInt(await this.getRecommendedFee(), 10);
+        const result = await this.submitTransactionWithRetries((sourceAccount, currentFee) => {
+            return new TransactionBuilder(sourceAccount, {
+                fee: currentFee.toString(),
                 networkPassphrase: this.network === "PUBLIC" ? Networks.PUBLIC : Networks.TESTNET,
             })
                 .addOperation(Operation.manageData({
@@ -47,17 +50,148 @@ export class StellarService {
                 value: price.toString(),
             }))
                 .addMemo(Memo.text(memoId))
-                .setTimeout(180) // 3 minutes
+                .setTimeout(60)
                 .build();
-            transaction.sign(this.keypair);
-            const result = await this.server.submitTransaction(transaction);
-            console.info(`✅ Price update for ${currency} submitted to Stellar. Hash: ${result.hash}, Memo: ${memoId}`);
-            return result.hash;
+        }, this.MAX_RETRIES, baseFee);
+        console.info(`✅ Price update for ${currency} confirmed. Hash: ${result.hash}`);
+        return result.hash;
+    }
+    /**
+     * Submit a multi-signed price update to the Stellar network.
+     * Accepts signatures from multiple oracle servers.
+     * @param currency - The currency code (e.g., "NGN", "KES")
+     * @param price - The current price/rate
+     * @param memoId - Unique ID for auditing
+     * @param signatures - Array of signatures from different signers
+     */
+    async submitMultiSignedPriceUpdate(currency, price, memoId, signatures) {
+        const baseFee = parseInt(await this.getRecommendedFee(), 10);
+        const result = await this.submitMultiSignedTransaction((sourceAccount, currentFee) => {
+            return new TransactionBuilder(sourceAccount, {
+                fee: currentFee.toString(),
+                networkPassphrase: this.network === "PUBLIC" ? Networks.PUBLIC : Networks.TESTNET,
+            })
+                .addOperation(Operation.manageData({
+                name: `${currency}_PRICE`,
+                value: price.toString(),
+            }))
+                .addMemo(Memo.text(memoId))
+                .setTimeout(60)
+                .build();
+        }, signatures, this.MAX_RETRIES, baseFee);
+        console.info(`✅ Multi-signed price update for ${currency} confirmed. Hash: ${result.hash}`);
+        return result.hash;
+    }
+    /**
+     * Generic method to submit a transaction with retries and automatic fee bumping.
+     * Optimizes interaction with the network (including Soroban contracts) by handling congestion.
+     * @param builderFn - Function that builds a new transaction for each attempt
+     * @param maxRetries - Max number of retries
+     * @param baseFee - The starting fee in stroops
+     */
+    async submitTransactionWithRetries(builderFn, maxRetries = this.MAX_RETRIES, baseFee) {
+        let attempt = 0;
+        while (attempt <= maxRetries) {
+            try {
+                const sourceAccount = await this.server.loadAccount(this.keypair.publicKey());
+                const currentFee = Math.floor(baseFee * (1 + (this.FEE_INCREMENT_PERCENTAGE * attempt)));
+                const transaction = builderFn(sourceAccount, currentFee);
+                transaction.sign(this.keypair);
+                return await this.server.submitTransaction(transaction);
+            }
+            catch (error) {
+                attempt++;
+                const isStuck = this.isStuckError(error);
+                if (isStuck && attempt <= maxRetries) {
+                    console.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
+                    continue;
+                }
+                throw error;
+            }
         }
-        catch (error) {
-            console.error(`❌ Failed to submit price update for ${currency}:`, error);
-            throw error;
+        throw new Error(`Failed to submit transaction after ${maxRetries + 1} attempts`);
+    }
+    /**
+     * Submit a multi-signed transaction to the Stellar network.
+     * Adds multiple signatures to the transaction before submission.
+     * @param builderFn - Function that builds the transaction
+     * @param signatures - Array of signatures with signer public keys
+     * @param maxRetries - Max number of retries
+     * @param baseFee - The starting fee in stroops
+     */
+    async submitMultiSignedTransaction(builderFn, signatures, maxRetries = this.MAX_RETRIES, baseFee) {
+        let attempt = 0;
+        while (attempt <= maxRetries) {
+            try {
+                const sourceAccount = await this.server.loadAccount(this.keypair.publicKey());
+                const currentFee = Math.floor(baseFee * (1 + (this.FEE_INCREMENT_PERCENTAGE * attempt)));
+                const transaction = builderFn(sourceAccount, currentFee);
+                // Sign with the local keypair first
+                transaction.sign(this.keypair);
+                // Add signatures from other signers
+                for (const sig of signatures) {
+                    // Skip if this is the local signer's public key (already signed)
+                    if (sig.signerPublicKey === this.keypair.publicKey()) {
+                        continue;
+                    }
+                    // Add the remote signature to the transaction
+                    try {
+                        // Convert hex signature to buffer
+                        const signatureBuffer = Buffer.from(sig.signature, "hex");
+                        // Create a keypair from the signer's public key to get the hint
+                        const signerKeypair = Keypair.fromPublicKey(sig.signerPublicKey);
+                        // Get the signature hint
+                        const hint = signerKeypair.signatureHint();
+                        // Get the current envelope
+                        const envelope = transaction.toEnvelope();
+                        // Add the signature to the envelope
+                        envelope.signature().push(signatureBuffer);
+                        // Add the hint to the hints (Stellar tracks which keys signed)
+                        // Note: This is a simplified approach; in production,
+                        // you might want to use a library that properly handles multi-sig
+                    }
+                    catch (error) {
+                        console.error(`[StellarService] Failed to add signature for ${sig.signerPublicKey}:`, error);
+                        // Continue without this signature (may cause failure on Stellar side)
+                    }
+                }
+                return await this.server.submitTransaction(transaction);
+            }
+            catch (error) {
+                attempt++;
+                const isStuck = this.isStuckError(error);
+                if (isStuck && attempt <= maxRetries) {
+                    console.warn(`⚠️ Multi-sig transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
+                    continue;
+                }
+                throw error;
+            }
         }
+        throw new Error(`Failed to submit multi-signed transaction after ${maxRetries + 1} attempts`);
+    }
+    /**
+     * Get the network passphrase for the current network.
+     * Ensures proper network identification for multi-sig operations.
+     */
+    getNetworkPassphrase() {
+        return this.network === "PUBLIC" ? Networks.PUBLIC : Networks.TESTNET;
+    }
+    /**
+     * Determines if a transaction error indicates it is "stuck" or needs a fee bump.
+     */
+    isStuckError(error) {
+        const resultCode = error.response?.data?.extras?.result_codes?.transaction;
+        // tx_too_late: Transaction timebounds expired before inclusion
+        // tx_insufficient_fee: Mandatory fee not met
+        // tx_bad_seq: Sequence number mismatch (often due to race conditions/congestion)
+        // timeout: Network/SDK timeout during submission
+        return (resultCode === 'tx_too_late' ||
+            resultCode === 'tx_insufficient_fee' ||
+            resultCode === 'tx_bad_seq' ||
+            error.message?.includes('timeout') ||
+            error.code === 'ECONNABORTED');
     }
     /**
      * Generate a unique ID for the transaction memo

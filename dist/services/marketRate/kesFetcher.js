@@ -1,5 +1,5 @@
 import axios from "axios";
-import { calculateMedian, } from "./types";
+import { calculateMedian, filterOutliers, } from "./types";
 /**
  * Circuit Breaker States
  */
@@ -251,6 +251,7 @@ export class KESRateFetcher {
                     rate: directRate.rate,
                     timestamp: directRate.timestamp,
                     source: "Binance Spot (XLMKES)",
+                    trustLevel: "standard",
                 });
             }
         }
@@ -265,6 +266,7 @@ export class KESRateFetcher {
                     rate: p2pRate.rate,
                     timestamp: p2pRate.timestamp,
                     source: p2pRate.source,
+                    trustLevel: "new",
                 });
             }
         }
@@ -279,6 +281,7 @@ export class KESRateFetcher {
                     rate: xlmUsdRate.rate * APPROXIMATE_KES_USD_RATE,
                     timestamp: xlmUsdRate.timestamp,
                     source: "Binance Spot (XLMUSDT × KES/USD)",
+                    trustLevel: "new",
                 });
             }
         }
@@ -289,17 +292,18 @@ export class KESRateFetcher {
         if (prices.length === 0) {
             return null;
         }
-        // Calculate median rate from all sources
-        const rateValues = prices.map((p) => p.rate);
+        // Calculate median rate from all sources (with outlier filtering)
+        let rateValues = prices.map((p) => p.rate).filter(p => p > 0);
+        rateValues = filterOutliers(rateValues);
         const medianRate = calculateMedian(rateValues);
         // Return the median with the most recent timestamp
         const firstTimestamp = prices[0]?.timestamp ?? new Date();
         const mostRecentTimestamp = prices.reduce((latest, p) => (p.timestamp > latest ? p.timestamp : latest), firstTimestamp);
         return {
             currency: "KES",
-            rate: medianRate,
+            rate: weightedRate,
             timestamp: mostRecentTimestamp,
-            source: `Binance (Median of ${prices.length} sources)`,
+            source: `Binance (Median of ${prices.length} sources, outliers filtered)`,
         };
     }
     /**

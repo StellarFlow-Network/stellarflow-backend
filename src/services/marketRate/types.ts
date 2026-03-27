@@ -14,6 +14,9 @@ export interface MarketRate {
   comparisonRate?: number;
   comparisonTimestamp?: Date;
   contractSubmissionSkipped?: boolean;
+  // Multi-sig fields
+  pendingMultiSig?: boolean;
+  multiSigPriceId?: number;
 }
 
 /**

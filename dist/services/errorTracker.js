@@ -20,4 +20,5 @@ export class ErrorTracker {
     }
 }
 export const errorTracker = new ErrorTracker();
+export const errorTracker = new ErrorTracker();
 //# sourceMappingURL=errorTracker.js.map

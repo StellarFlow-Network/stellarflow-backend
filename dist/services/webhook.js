@@ -155,4 +155,5 @@ export class WebhookService {
     }
 }
 export const webhookService = new WebhookService();
+export const webhookService = new WebhookService();
 //# sourceMappingURL=webhook.js.map

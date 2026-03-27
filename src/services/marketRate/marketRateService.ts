@@ -8,17 +8,45 @@ import { KESRateFetcher } from "./kesFetcher";
 import { GHSRateFetcher } from "./ghsFetcher";
 import { NGNRateFetcher } from "./ngnFetcher";
 import { StellarService } from "../stellarService";
+import { multiSigService } from "../multiSigService";
 import { getIO } from "../../lib/socket";
 import prisma from "../../lib/prisma";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+// Global import for priceReviewService
+import { priceReviewService } from "../priceReviewService";
 
 export class MarketRateService {
   private fetchers: Map<string, MarketRateFetcher> = new Map();
   private cache: Map<string, { rate: MarketRate; expiry: Date }> = new Map();
   private stellarService: StellarService;
   private readonly CACHE_DURATION_MS = 30000; // 30 seconds
+  private multiSigEnabled: boolean;
+  private remoteOracleServers: string[] = [];
 
   constructor() {
     this.stellarService = new StellarService();
+    
+    // Check if multi-sig is enabled
+    this.multiSigEnabled = process.env.MULTI_SIG_ENABLED === "true";
+    
+    // Parse remote oracle server URLs
+    const remoteServersEnv = process.env.REMOTE_ORACLE_SERVERS || "";
+    if (remoteServersEnv) {
+      this.remoteOracleServers = remoteServersEnv
+        .split(",")
+        .map((url) => url.trim())
+        .filter((url) => url.length > 0);
+    }
+
+    if (this.multiSigEnabled) {
+      console.info(
+        `[MarketRateService] Multi-Sig mode ENABLED with ${this.remoteOracleServers.length} remote servers`
+      );
+    }
+
     this.initializeFetchers();
   }
 
@@ -75,25 +103,76 @@ export class MarketRateService {
       if (!reviewAssessment.manualReviewRequired) {
         try {
           const memoId = this.stellarService.generateMemoId(normalizedCurrency);
-          const txHash = await this.stellarService.submitPriceUpdate(
-            normalizedCurrency,
-            rate.rate,
-            memoId,
-          );
-          await priceReviewService.markContractSubmitted(
-            reviewAssessment.reviewRecordId,
-            memoId,
-            txHash,
-          );
+
+          if (this.multiSigEnabled) {
+            // Multi-sig workflow: create request and collect signatures
+            console.info(
+              `[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`
+            );
+
+            const signatureRequest = await multiSigService.createMultiSigRequest(
+              reviewAssessment.reviewRecordId,
+              normalizedCurrency,
+              rate.rate,
+              rate.source,
+              memoId
+            );
+
+            // Sign locally first
+            try {
+              await multiSigService.signMultiSigPrice(signatureRequest.multiSigPriceId);
+              console.info(
+                `[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`
+              );
+            } catch (error) {
+              console.error(
+                `[MarketRateService] Failed to sign locally:`,
+                error
+              );
+            }
+
+            // Request signatures from remote servers asynchronously
+            // (non-blocking - don't wait for completion)
+            this.requestRemoteSignaturesAsync(
+              signatureRequest.multiSigPriceId,
+              memoId
+            ).catch((err) => {
+              console.error(
+                `[MarketRateService] Error requesting remote signatures:`,
+                err
+              );
+            });
+
+            // Mark as multi-sig pending (don't submit to Stellar yet)
+            // The submission will happen via a background job once all signatures are collected
+            enrichedRate.contractSubmissionSkipped = false;
+            enrichedRate.pendingMultiSig = true;
+            enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
+          } else {
+            // Single-sig workflow: submit directly to Stellar
+            const txHash = await this.stellarService.submitPriceUpdate(
+              normalizedCurrency,
+              rate.rate,
+              memoId
+            );
+            await priceReviewService.markContractSubmitted(
+              reviewAssessment.reviewRecordId,
+              memoId,
+              txHash
+            );
+            console.info(
+              `[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`
+            );
+          }
         } catch (stellarError) {
           console.error(
             "Failed to submit price update to Stellar network:",
-            stellarError,
+            stellarError
           );
         }
       } else {
         console.warn(
-          `Manual review required for ${normalizedCurrency} rate ${rate.rate}. Skipping contract submission.`,
+          `Manual review required for ${normalizedCurrency} rate ${rate.rate}. Skipping contract submission.`
         );
       }
 
@@ -206,7 +285,7 @@ export class MarketRateService {
     this.cache.clear();
   }
 
-  async getPendingReviews(): Promise<PendingPriceReview[]> {
+  async getPendingReviews() {
     return priceReviewService.getPendingReviews();
   }
 
@@ -214,7 +293,7 @@ export class MarketRateService {
     reviewId: number,
     reviewedBy?: string,
     reviewNotes?: string,
-  ): Promise<PendingPriceReview> {
+  ) {
     const pendingReview = await priceReviewService.getPendingReviewById(reviewId);
     if (!pendingReview) {
       throw new Error(`Pending review ${reviewId} was not found`);
@@ -253,7 +332,7 @@ export class MarketRateService {
     reviewId: number,
     reviewedBy?: string,
     reviewNotes?: string,
-  ): Promise<PendingPriceReview> {
+  ) {
     const rejectedReview = await priceReviewService.rejectReview({
       reviewId,
       ...(reviewedBy !== undefined && { reviewedBy }),
@@ -293,4 +372,46 @@ export class MarketRateService {
 
     return status;
   }
+
+  /**
+   * Asynchronously request signatures from remote oracle servers.
+   * This is non-blocking and doesn't wait for completion.
+   * Errors are logged but don't fail the price fetch operation.
+   */
+  private async requestRemoteSignaturesAsync(
+    multiSigPriceId: number,
+    memoId: string
+  ): Promise<void> {
+    console.info(
+      `[MarketRateService] Requesting signatures from ${this.remoteOracleServers.length} remote servers for multi-sig ${multiSigPriceId}`
+    );
+
+    // Request signatures from all remote servers in parallel
+    const signatureRequests = this.remoteOracleServers.map((serverUrl) =>
+      multiSigService.requestRemoteSignature(multiSigPriceId, serverUrl)
+    );
+
+    const results = await Promise.allSettled(signatureRequests);
+
+    // Log results for monitoring
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        if (result.value.success) {
+          console.info(
+            `[MarketRateService] ✅ Signature request sent to ${this.remoteOracleServers[index]}`
+          );
+        } else {
+          console.warn(
+            `[MarketRateService] ⚠️ Signature request failed for ${this.remoteOracleServers[index]}: ${result.value.error}`
+          );
+        }
+      } else {
+        console.error(
+          `[MarketRateService] ❌ Error requesting signature from ${this.remoteOracleServers[index]}:`,
+          result.reason
+        );
+      }
+    });
+  }
 }
+

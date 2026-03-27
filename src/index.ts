@@ -6,10 +6,12 @@ import { Horizon } from "@stellar/stellar-sdk";
 import swaggerUi from "swagger-ui-express";
 import marketRatesRouter from "./routes/marketRates";
 import historyRouter from "./routes/history";
+import priceUpdatesRouter from "./routes/priceUpdates";
 import prisma from "./lib/prisma";
 import { initSocket } from "./lib/socket";
 import { SorobanEventListener } from "./services/sorobanEventListener";
 import { specs } from "./lib/swagger";
+import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
 
 // Load environment variables
 dotenv.config();
@@ -67,6 +69,7 @@ app.get(
 // Routes
 app.use("/api/market-rates", marketRatesRouter);
 app.use("/api/history", historyRouter);
+app.use("/api/price-updates", priceUpdatesRouter);
 
 // Health check endpoint
 /**
@@ -237,6 +240,21 @@ httpServer.listen(PORT, () => {
       "Event listener not started:",
       err instanceof Error ? err.message : err,
     );
+  }
+
+  // Start multi-sig submission service if enabled
+  if (process.env.MULTI_SIG_ENABLED === "true") {
+    try {
+      multiSigSubmissionService.start().catch((err: Error) => {
+        console.error("Failed to start multi-sig submission service:", err);
+      });
+      console.log(`🔐 Multi-Sig submission service started`);
+    } catch (err) {
+      console.warn(
+        "Multi-sig submission service not started:",
+        err instanceof Error ? err.message : err
+      );
+    }
   }
 });
 

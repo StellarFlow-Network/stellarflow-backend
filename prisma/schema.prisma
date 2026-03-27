@@ -79,3 +79,55 @@ model ProviderReputation {
   @@index([reliabilityScore])
   @@unique([providerName, endpoint])
 }
+
+// Multi-Sig Price Approval Model
+// Tracks price updates that require signatures from multiple oracle servers
+model MultiSigPrice {
+  id                Int       @id @default(autoincrement())
+  priceReviewId     Int       // Reference to the price_review_records with contract_status tracking
+  currency          String    @db.VarChar(10)   // e.g., "NGN", "KES", "GHS"
+  rate              Decimal   @db.Decimal(20, 10) // The price to be updated
+  source            String    @db.VarChar(100)  // Price source (e.g., "CoinGecko")
+  
+  // Multi-sig status
+  status            String    @db.VarChar(20)   // "PENDING", "APPROVED", "REJECTED", "EXPIRED"
+  requiredSignatures Int      @default(2)       // Number of signatures needed (typically 2)
+  collectedSignatures Int     @default(0)       // Number of signatures collected so far
+  
+  // Stellar transaction details (set when fully signed)
+  memoId            String?   @db.VarChar(28)   // Memo ID from transaction
+  stellarTxHash     String?   @db.VarChar(64)   // Submitted transaction hash
+  submittedAt       DateTime?                    // When transaction was submitted to Stellar
+  
+  // Timestamps
+  requestedAt       DateTime  @default(now())   // When the multi-sig request was created
+  expiresAt         DateTime                     // Expiration time for the signature request
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@index([currency, status, requestedAt])
+  @@index([status, expiresAt])
+  @@index([priceReviewId])
+}
+
+// Multi-Sig Signature Model
+// Records individual signatures from oracle servers
+model MultiSigSignature {
+  id                Int       @id @default(autoincrement())
+  multiSigPriceId   Int       // Reference to MultiSigPrice
+  multiSigPrice     MultiSigPrice @relation(fields: [multiSigPriceId], references: [id], onDelete: Cascade)
+  
+  // Server/Signer information
+  signerPublicKey   String    @db.VarChar(56)   // Stellar public key of the signer
+  signerName        String    @db.VarChar(100)  // Human-readable name (e.g., "oracle-server-1")
+  
+  // Signature details
+  signature         String    @db.Text          // The actual XDR signature (can be long)
+  signedAt          DateTime  @default(now())   // When the signature was created
+  
+  createdAt         DateTime  @default(now())
+  
+  @@unique([multiSigPriceId, signerPublicKey])  // Prevent duplicate signatures from same signer
+  @@index([multiSigPriceId])
+  @@index([signerPublicKey])
+}

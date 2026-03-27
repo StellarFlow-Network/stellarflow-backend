@@ -6,4 +6,5 @@ export declare class ErrorTracker {
     reset(serviceKey: string): void;
 }
 export declare const errorTracker: ErrorTracker;
+export declare const errorTracker: ErrorTracker;
 //# sourceMappingURL=errorTracker.d.ts.map

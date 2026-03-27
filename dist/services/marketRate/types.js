@@ -41,4 +41,35 @@ export function calculateAverage(prices) {
     const sum = prices.reduce((acc, price) => acc + price, 0);
     return sum / prices.length;
 }
+const SOURCE_TRUST_WEIGHTS = {
+    trusted: 3,
+    standard: 2,
+    new: 1,
+};
+/**
+ * Calculate weighted average from source values.
+ * Use explicit `weight` when provided, otherwise derive by trust level.
+ */
+export function calculateWeightedAverage(values) {
+    if (values.length === 0)
+        return 0;
+    let weightedSum = 0;
+    let totalWeight = 0;
+    for (const value of values) {
+        const trustWeight = SOURCE_TRUST_WEIGHTS[value.trustLevel ?? "standard"];
+        const weight = typeof value.weight === "number" && Number.isFinite(value.weight) && value.weight > 0
+            ? value.weight
+            : trustWeight;
+        weightedSum += value.value * weight;
+        totalWeight += weight;
+    }
+    if (totalWeight === 0)
+        return 0;
+    return weightedSum / totalWeight;
+}
+/**
+ * Rate Fetch Statistics
+ * Performance and reliability metrics
+ */
+export { filterOutliers, isOutlier, percentDeviation } from '../../logic/outlierFilter';
 //# sourceMappingURL=types.js.map
