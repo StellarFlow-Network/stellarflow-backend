@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma";
 import type { MarketRate } from "./marketRate/types";
+import { normalizeDateToUTC } from "../utils/timeUtils";
 import {
   evaluatePriceMovement,
   PRICE_REVIEW_WINDOW_MS,
@@ -144,10 +145,18 @@ export class PriceReviewService {
   async assessRate(rate: MarketRate): Promise<PriceAssessment> {
     await this.ensureSchema();
 
-    const currency = rate.currency.toUpperCase();
+    const normalizedRate: MarketRate = {
+      ...rate,
+      timestamp: normalizeDateToUTC(rate.timestamp),
+      comparisonTimestamp: rate.comparisonTimestamp
+        ? normalizeDateToUTC(rate.comparisonTimestamp)
+        : undefined,
+    };
+
+    const currency = normalizedRate.currency.toUpperCase();
     const reviewable = REVIEWABLE_CURRENCIES.has(currency);
     const baseline = reviewable
-      ? await this.getLatestSubmittedBaseline(currency, rate.timestamp)
+      ? await this.getLatestSubmittedBaseline(currency, normalizedRate.timestamp)
       : null;
 
     let reviewStatus: ReviewStatus = "AUTO_APPROVED";
@@ -159,7 +168,7 @@ export class PriceReviewService {
 
     if (reviewable && baseline) {
       const evaluation = evaluatePriceMovement({
-        currentRate: rate.rate,
+        currentRate: normalizedRate.rate,
         baselineRate: baseline.rate,
         currency,
       });
@@ -180,9 +189,9 @@ export class PriceReviewService {
         rate,
         source,
         fetched_at,
-        review_status,
-        contract_status,
-        review_reason,
+        renormalizedRate.rate},
+        ${normalizedRate.source},
+        ${normalizedRiew_reason,
         baseline_rate,
         baseline_timestamp,
         change_percent
@@ -207,11 +216,11 @@ export class PriceReviewService {
       throw new Error(`Failed to create price review record for ${currency}`);
     }
 
-    if (
-      reviewStatus === "PENDING" &&
-      reason &&
-      changePercent !== undefined &&
-      comparisonRate !== undefined
+    if (normalizedRate.rate,
+        previousRate: comparisonRate,
+        changePercent,
+        source: normalizedRate.source,
+        timestamp: normalizedR !== undefined
     ) {
       await webhookService.sendManualReviewNotification({
         reviewId: inserted.id,

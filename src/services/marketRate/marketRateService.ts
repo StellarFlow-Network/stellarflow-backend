@@ -12,6 +12,7 @@ import { multiSigService } from "../multiSigService";
 import { getIO } from "../../lib/socket";
 import prisma from "../../lib/prisma";
 import dotenv from "dotenv";
+import { normalizeDateToUTC } from "../../utils/timeUtils";
 
 dotenv.config();
 
@@ -118,9 +119,16 @@ export class MarketRateService {
               : "Unknown fetcher error",
         };
       }
-      const reviewAssessment = await priceReviewService.assessRate(rate);
-      const enrichedRate: MarketRate = {
+      const normalizedRate: MarketRate = {
         ...rate,
+        timestamp: normalizeDateToUTC(rate.timestamp),
+        comparisonTimestamp: rate.comparisonTimestamp
+          ? normalizeDateToUTC(rate.comparisonTimestamp)
+          : undefined,
+      };
+      const reviewAssessment = await priceReviewService.assessRate(normalizedRate);
+      const enrichedRate: MarketRate = {
+        ...normalizedRate,
         manualReviewRequired: reviewAssessment.manualReviewRequired,
         reviewId: reviewAssessment.reviewRecordId,
         contractSubmissionSkipped: reviewAssessment.manualReviewRequired,
@@ -221,20 +229,21 @@ export class MarketRateService {
 
       // Persist to price history for sparkline charts
       try {
+        const normalizedTimestamp = normalizeDateToUTC(enrichedRate.timestamp);
         await prisma.priceHistory.upsert({
           where: {
             currency_source_timestamp: {
               currency: currency.toUpperCase(),
-              source: rate.source,
-              timestamp: rate.timestamp,
+              source: enrichedRate.source,
+              timestamp: normalizedTimestamp,
             },
           },
           update: {},
           create: {
             currency: currency.toUpperCase(),
-            rate: rate.rate,
-            source: rate.source,
-            timestamp: rate.timestamp,
+            rate: enrichedRate.rate,
+            source: enrichedRate.source,
+            timestamp: normalizedTimestamp,
           },
         });
       } catch (dbError) {

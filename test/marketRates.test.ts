@@ -1,6 +1,18 @@
 import { MarketRateService } from '../src/services/marketRate';
+import { normalizeDateToUTC } from '../src/utils/timeUtils';
+
+function testUtcNormalization() {
+  const input = '2026-01-01T00:00:00-05:00';
+  const normalized = normalizeDateToUTC(new Date(input));
+  const expected = '2026-01-01T05:00:00.000Z';
+  if (normalized.toISOString() !== expected) {
+    throw new Error(`UTC normalization failed (got ${normalized.toISOString()}, expected ${expected})`);
+  }
+  console.log('✅ UTC normalization helper passed.');
+}
 
 async function testMarketRates() {
+  testUtcNormalization();
   console.log('🧪 Testing Market Rate Fetchers...\n');
   
   const service = new MarketRateService();
