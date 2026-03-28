@@ -5,7 +5,7 @@ const router = Router();
 
 /**
  * @swagger
- * /api/status:
+ * /api/v1/status:
  *   get:
  *     tags:
  *       - Status

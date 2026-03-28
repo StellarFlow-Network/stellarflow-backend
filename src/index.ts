@@ -91,9 +91,9 @@ app.use(
 app.use(express.json());
 
 // Swagger documentation
-app.use("/api/docs", swaggerUi.serve);
+app.use("/api/v1/docs", swaggerUi.serve);
 app.get(
-  "/api/docs",
+  "/api/v1/docs",
   swaggerUi.setup(specs, {
     swaggerOptions: {
       persistAuthorization: true,
@@ -105,17 +105,17 @@ app.get(
     customSiteTitle: "StellarFlow API Documentation",
   }),
 );
-// Apply API Key Middleware to all /api routes
-app.use("/api", apiKeyMiddleware);
+// Apply API Key Middleware to all /api/v1 routes
+app.use("/api/v1", apiKeyMiddleware);
 
 // Routes
-app.use("/api/market-rates", marketRatesRouter);
-app.use("/api/history", historyRouter);
-app.use("/api/stats", statsRouter);
-app.use("/api/intelligence", intelligenceRouter);
-app.use("/api/price-updates", priceUpdatesRouter);
-app.use("/api/assets", assetsRouter);
-app.use("/api/status", statusRouter);
+app.use("/api/v1/market-rates", marketRatesRouter);
+app.use("/api/v1/history", historyRouter);
+app.use("/api/v1/stats", statsRouter);
+app.use("/api/v1/intelligence", intelligenceRouter);
+app.use("/api/v1/price-updates", priceUpdatesRouter);
+app.use("/api/v1/assets", assetsRouter);
+app.use("/api/v1/status", statusRouter);
 
 // Health check endpoint
 /**
@@ -224,18 +224,18 @@ app.get("/", (req, res) => {
     endpoints: {
       health: "/health",
       marketRates: {
-        allRates: "/api/market-rates/rates",
-        singleRate: "/api/market-rates/rate/:currency",
-        health: "/api/market-rates/health",
-        currencies: "/api/market-rates/currencies",
-        cache: "/api/market-rates/cache",
-        clearCache: "POST /api/market-rates/cache/clear",
+        allRates: "/api/v1/market-rates/rates",
+        singleRate: "/api/v1/market-rates/rate/:currency",
+        health: "/api/v1/market-rates/health",
+        currencies: "/api/v1/market-rates/currencies",
+        cache: "/api/v1/market-rates/cache",
+        clearCache: "POST /api/v1/market-rates/cache/clear",
       },
       stats: {
-        volume: "/api/stats/volume?date=YYYY-MM-DD",
+        volume: "/api/v1/stats/volume?date=YYYY-MM-DD",
       },
       history: {
-        assetHistory: "/api/history/:asset?range=1d|7d|30d|90d",
+        assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
       },
     },
   });
