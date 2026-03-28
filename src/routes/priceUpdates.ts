@@ -4,7 +4,7 @@ import { multiSigService, SignaturePayload } from "../services/multiSigService";
 const router = express.Router();
 
 /**
- * POST /api/price-updates/multi-sig/request
+ * POST /api/v1/price-updates/multi-sig/request
  * Creates a multi-sig price update request.
  * Called by the initializing server to start the approval process.
  */
@@ -41,7 +41,7 @@ router.post("/multi-sig/request", async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/price-updates/sign
+ * POST /api/v1/price-updates/sign
  * Endpoint for remote servers to request a signature.
  * This is called by peer servers in the multi-sig setup.
  * 
@@ -102,7 +102,7 @@ router.post("/sign", async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/price-updates/multi-sig/:multiSigPriceId/request-signature
+ * POST /api/v1/price-updates/multi-sig/:multiSigPriceId/request-signature
  * Request a signature from a remote server.
  * The body should contain the remote server URL.
  */
@@ -141,7 +141,7 @@ router.post("/multi-sig/:multiSigPriceId/request-signature", async (req: Request
 });
 
 /**
- * GET /api/price-updates/multi-sig/:multiSigPriceId/status
+ * GET /api/v1/price-updates/multi-sig/:multiSigPriceId/status
  * Get the status of a multi-sig price update.
  */
 router.get("/multi-sig/:multiSigPriceId/status", async (req: Request, res: Response) => {
@@ -193,7 +193,7 @@ router.get("/multi-sig/:multiSigPriceId/status", async (req: Request, res: Respo
 });
 
 /**
- * GET /api/price-updates/multi-sig/pending
+ * GET /api/v1/price-updates/multi-sig/pending
  * Get all pending multi-sig price updates.
  * Useful for monitoring and coordination between servers.
  */
@@ -224,7 +224,7 @@ router.get("/multi-sig/pending", async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/price-updates/multi-sig/:multiSigPriceId/signatures
+ * GET /api/v1/price-updates/multi-sig/:multiSigPriceId/signatures
  * Get all signatures for a multi-sig price update.
  * Only returns once all signatures are collected and approved.
  */
@@ -284,7 +284,7 @@ router.get("/multi-sig/:multiSigPriceId/signatures", async (req: Request, res: R
 });
 
 /**
- * POST /api/price-updates/multi-sig/:multiSigPriceId/record-submission
+ * POST /api/v1/price-updates/multi-sig/:multiSigPriceId/record-submission
  * Record that a multi-sig price has been submitted to Stellar.
  */
 router.post("/multi-sig/:multiSigPriceId/record-submission", async (req: Request, res: Response) => {
@@ -316,7 +316,7 @@ router.post("/multi-sig/:multiSigPriceId/record-submission", async (req: Request
 });
 
 /**
- * GET /api/price-updates/multi-sig/signer-info
+ * GET /api/v1/price-updates/multi-sig/signer-info
  * Get this server's signer information.
  * Useful for remote servers to identify who is signing.
  */

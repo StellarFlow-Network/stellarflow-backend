@@ -14,7 +14,7 @@ vi.mock('../src/lib/prisma', () => ({
   default: mockPrisma,
 }));
 
-describe('GET /api/history/:asset', () => {
+describe('GET /api/v1/history/:asset', () => {
   let mockRequest: Partial<Request>;
   let mockResponse: Partial<Response>;
 
