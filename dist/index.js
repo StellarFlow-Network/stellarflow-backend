@@ -19,8 +19,10 @@ import { SorobanEventListener } from "./services/sorobanEventListener";
 import { specs } from "./lib/swagger";
 import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
+import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
 import { validateEnv } from "./utils/envValidator";
 import { hourlyAverageService } from "./services/hourlyAverageService";
+import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
 // Load environment variables
 dotenv.config();
 // [OPS] Implement "Environment Variable" Check on Start
@@ -39,7 +41,9 @@ if (missingEnvVars.length > 0) {
     console.error("\nPlease set these variables in your .env file and restart the server.");
     process.exit(1);
 }
-const dashboardUrl = process.env.DASHBOARD_URL || process.env.FRONTEND_URL || "http://localhost:3000";
+const dashboardUrl = process.env.DASHBOARD_URL ||
+    process.env.FRONTEND_URL ||
+    "http://localhost:3000";
 if (!dashboardUrl) {
     console.error("❌ Missing required environment variable: DASHBOARD_URL");
     process.exit(1);
@@ -109,6 +113,13 @@ app.get("/api/v1/docs", swaggerUi.setup(specs, {
   `,
     customSiteTitle: "StellarFlow API Documentation",
 }));
+// Expose metrics endpoint early so it's not rate limited, but still want timing
+app.use(metricsMiddleware);
+app.get("/metrics", metricsEndpoint);
+// Apply Rate Limiting to all /api routes
+app.use("/api", rateLimitMiddleware);
+// Apply API Key Middleware to all /api routes
+app.use("/api", apiKeyMiddleware);
 // Apply API Key Middleware to all /api/v1 routes
 app.use("/api/v1", apiKeyMiddleware);
 // Routes
@@ -230,6 +241,9 @@ app.get("/", (req, res) => {
                 cache: "/api/v1/market-rates/cache",
                 clearCache: "POST /api/v1/market-rates/cache/clear",
             },
+            system: {
+                metrics: "/metrics",
+            },
             stats: {
                 volume: "/api/v1/stats/volume?date=YYYY-MM-DD",
             },
@@ -248,7 +262,7 @@ app.use((err, req, res, next) => {
     });
 });
 // 404 handler
-app.use("*", (req, res) => {
+app.use((req, res) => {
     res.status(404).json({
         success: false,
         error: "Endpoint not found",
