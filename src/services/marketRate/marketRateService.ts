@@ -31,6 +31,13 @@ export class MarketRateService {
   private readonly LATEST_PRICES_CACHE_DURATION_MS = 10000; // 10 seconds
   private multiSigEnabled: boolean;
   private remoteOracleServers: string[] = [];
+  private pendingSubmissions: Array<{
+    currency: string;
+    rate: number;
+    reviewId: number;
+  }> = [];
+  private batchTimeout: any = null;
+  private readonly BATCH_WINDOW_MS = 5000; // 5 seconds bundle window
 
   constructor() {
     this.stellarService = new StellarService();
@@ -49,7 +56,7 @@ export class MarketRateService {
 
     if (this.multiSigEnabled) {
       console.info(
-        `[MarketRateService] Multi-Sig mode ENABLED with ${this.remoteOracleServers.length} remote servers`
+        `[MarketRateService] Multi-Sig mode ENABLED with ${this.remoteOracleServers.length} remote servers`,
       );
     }
 
@@ -97,17 +104,22 @@ export class MarketRateService {
               : normalizedCurrency;
           try {
             const clientAny = prisma as any;
-            if (clientAny?.errorLog && typeof clientAny.errorLog.create === "function") {
-              clientAny.errorLog.create({
-                data: {
-                  providerName,
-                  errorMessage:
-                    fetchError instanceof Error
-                      ? fetchError.message
-                      : JSON.stringify(fetchError),
-                  occurredAt: new Date(),
-                },
-              }).catch(() => {});
+            if (
+              clientAny?.errorLog &&
+              typeof clientAny.errorLog.create === "function"
+            ) {
+              clientAny.errorLog
+                .create({
+                  data: {
+                    providerName,
+                    errorMessage:
+                      fetchError instanceof Error
+                        ? fetchError.message
+                        : JSON.stringify(fetchError),
+                    occurredAt: new Date(),
+                  },
+                })
+                .catch(() => {});
             }
           } catch {
             // swallow
@@ -131,7 +143,8 @@ export class MarketRateService {
           ? normalizeDateToUTC(rate.comparisonTimestamp)
           : undefined,
       };
-      const reviewAssessment = await priceReviewService.assessRate(normalizedRate);
+      const reviewAssessment =
+        await priceReviewService.assessRate(normalizedRate);
       const enrichedRate: MarketRate = {
         ...normalizedRate,
         manualReviewRequired: reviewAssessment.manualReviewRequired,
@@ -153,32 +166,35 @@ export class MarketRateService {
 
       if (!reviewAssessment.manualReviewRequired) {
         try {
-          const memoId = this.stellarService.generateMemoId(normalizedCurrency);
-
           if (this.multiSigEnabled) {
+            const memoId =
+              this.stellarService.generateMemoId(normalizedCurrency);
             // Multi-sig workflow: create request and collect signatures
             console.info(
-              `[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`
+              `[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`,
             );
 
-            const signatureRequest = await multiSigService.createMultiSigRequest(
-              reviewAssessment.reviewRecordId,
-              normalizedCurrency,
-              rate.rate,
-              rate.source,
-              memoId
-            );
+            const signatureRequest =
+              await multiSigService.createMultiSigRequest(
+                reviewAssessment.reviewRecordId,
+                normalizedCurrency,
+                rate.rate,
+                rate.source,
+                memoId,
+              );
 
             // Sign locally first
             try {
-              await multiSigService.signMultiSigPrice(signatureRequest.multiSigPriceId);
+              await multiSigService.signMultiSigPrice(
+                signatureRequest.multiSigPriceId,
+              );
               console.info(
-                `[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`
+                `[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`,
               );
             } catch (error) {
               console.error(
                 `[MarketRateService] Failed to sign locally:`,
-                error
+                error,
               );
             }
 
@@ -186,11 +202,10 @@ export class MarketRateService {
             // (non-blocking - don't wait for completion)
             this.requestRemoteSignaturesAsync(
               signatureRequest.multiSigPriceId,
-              memoId
             ).catch((err) => {
               console.error(
                 `[MarketRateService] Error requesting remote signatures:`,
-                err
+                err,
               );
             });
 
@@ -200,30 +215,34 @@ export class MarketRateService {
             enrichedRate.pendingMultiSig = true;
             enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
           } else {
-            // Single-sig workflow: submit directly to Stellar
-            const txHash = await this.stellarService.submitPriceUpdate(
-              normalizedCurrency,
-              rate.rate,
-              memoId
-            );
-            await priceReviewService.markContractSubmitted(
-              reviewAssessment.reviewRecordId,
-              memoId,
-              txHash
-            );
+            // Single-sig workflow: Add to batch instead of submitting immediately
             console.info(
-              `[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`
+              `[MarketRateService] Adding ${normalizedCurrency} rate ${rate.rate} to batch bundle`,
             );
+
+            this.pendingSubmissions.push({
+              currency: normalizedCurrency,
+              rate: rate.rate,
+              reviewId: reviewAssessment.reviewRecordId,
+            });
+
+            // Start batch timeout if not already running
+            if (!this.batchTimeout) {
+              this.batchTimeout = setTimeout(
+                () => this.flushBatchSubmissions(),
+                this.BATCH_WINDOW_MS,
+              );
+            }
           }
         } catch (stellarError) {
           console.error(
             "Failed to submit price update to Stellar network:",
-            stellarError
+            stellarError,
           );
         }
       } else {
         console.warn(
-          `Manual review required for ${normalizedCurrency} rate ${rate.rate}. Skipping contract submission.`
+          `Manual review required for ${normalizedCurrency} rate ${rate.rate}. Skipping contract submission.`,
         );
       }
 
@@ -361,7 +380,8 @@ export class MarketRateService {
     reviewedBy?: string,
     reviewNotes?: string,
   ) {
-    const pendingReview = await priceReviewService.getPendingReviewById(reviewId);
+    const pendingReview =
+      await priceReviewService.getPendingReviewById(reviewId);
     if (!pendingReview) {
       throw new Error(`Pending review ${reviewId} was not found`);
     }
@@ -447,15 +467,14 @@ export class MarketRateService {
    */
   private async requestRemoteSignaturesAsync(
     multiSigPriceId: number,
-    memoId: string
   ): Promise<void> {
     console.info(
-      `[MarketRateService] Requesting signatures from ${this.remoteOracleServers.length} remote servers for multi-sig ${multiSigPriceId}`
+      `[MarketRateService] Requesting signatures from ${this.remoteOracleServers.length} remote servers for multi-sig ${multiSigPriceId}`,
     );
 
     // Request signatures from all remote servers in parallel
     const signatureRequests = this.remoteOracleServers.map((serverUrl) =>
-      multiSigService.requestRemoteSignature(multiSigPriceId, serverUrl)
+      multiSigService.requestRemoteSignature(multiSigPriceId, serverUrl),
     );
 
     const results = await Promise.allSettled(signatureRequests);
@@ -465,20 +484,81 @@ export class MarketRateService {
       if (result.status === "fulfilled") {
         if (result.value.success) {
           console.info(
-            `[MarketRateService] ✅ Signature request sent to ${this.remoteOracleServers[index]}`
+            `[MarketRateService] ✅ Signature request sent to ${this.remoteOracleServers[index]}`,
           );
         } else {
           console.warn(
-            `[MarketRateService] ⚠️ Signature request failed for ${this.remoteOracleServers[index]}: ${result.value.error}`
+            `[MarketRateService] ⚠️ Signature request failed for ${this.remoteOracleServers[index]}: ${result.value.error}`,
           );
         }
       } else {
         console.error(
           `[MarketRateService] ❌ Error requesting signature from ${this.remoteOracleServers[index]}:`,
-          result.reason
+          result.reason,
         );
       }
     });
   }
-}
 
+  /**
+   * Flush all pending submissions in a single bundled Stellar transaction.
+   */
+  private async flushBatchSubmissions(): Promise<void> {
+    if (this.pendingSubmissions.length === 0) {
+      this.batchTimeout = null;
+      return;
+    }
+
+    const batch = [...this.pendingSubmissions];
+    this.pendingSubmissions = [];
+    this.batchTimeout = null;
+
+    try {
+      // Use BNDL prefix for batched transactions as requested
+      const memoId = this.stellarService.generateMemoId("BNDL");
+
+      console.info(
+        `[MarketRateService] Submitting batch bundle for [${batch
+          .map((i) => i.currency)
+          .join(", ")}]...`,
+      );
+
+      const txHash = await this.stellarService.submitBatchedPriceUpdates(
+        batch.map((item) => ({
+          currency: item.currency,
+          price: item.rate,
+        })),
+        memoId,
+      );
+
+      // Record submission for each item in the batch
+      for (const item of batch) {
+        try {
+          await priceReviewService.markContractSubmitted(
+            item.reviewId,
+            memoId,
+            txHash,
+          );
+        } catch (dbError) {
+          console.error(
+            `[MarketRateService] Failed to mark ${item.currency} as submitted:`,
+            dbError,
+          );
+        }
+      }
+
+      console.info(
+        `[MarketRateService] Batch bundle confirmed for [${batch
+          .map((i) => i.currency)
+          .join(", ")}]. Hash: ${txHash}`,
+      );
+    } catch (error) {
+      console.error(
+        "[MarketRateService] Failed to submit batch bundle:",
+        error,
+      );
+      // Note: In a production environment, you might want to retry individual updates
+      // or put them back in the queue if the failure was transient.
+    }
+  }
+}
