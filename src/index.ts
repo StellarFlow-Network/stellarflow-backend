@@ -1,4 +1,5 @@
 import express from "express";
+// Standardized logging system initialization.
 import { createServer } from "http";
 import cors from "cors";
 import dotenv from "dotenv";
