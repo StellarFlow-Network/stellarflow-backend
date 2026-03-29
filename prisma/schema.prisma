@@ -34,6 +34,7 @@ model Currency {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  priceHistory PriceHistory[]
 }
 
 // On-Chain Confirmed Price Model
