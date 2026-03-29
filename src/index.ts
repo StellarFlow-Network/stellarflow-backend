@@ -23,10 +23,14 @@ import { multiSigSubmissionService } from "./services/multiSigSubmissionService"
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
 import { validateEnv } from "./utils/envValidator";
+import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
 
 // Load environment variables
 dotenv.config();
+
+// Enable log masking to prevent sensitive data leaks
+enableGlobalLogMasking();
 
 // [OPS] Implement "Environment Variable" Check on Start
 validateEnv();
