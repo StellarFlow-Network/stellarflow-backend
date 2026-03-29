@@ -3,6 +3,7 @@ import { StellarService } from "./stellarService";
 import { priceReviewService } from "./priceReviewService";
 import prisma from "../lib/prisma";
 import dotenv from "dotenv";
+import { logger } from "../lib/logger";
 
 dotenv.config();
 
@@ -28,14 +29,12 @@ export class MultiSigSubmissionService {
    */
   async start(): Promise<void> {
     if (this.isRunning) {
-      console.warn(
-        "[MultiSigSubmissionService] Service is already running"
-      );
+      logger.warn("[MultiSigSubmissionService] Service is already running");
       return;
     }
 
     this.isRunning = true;
-    console.info(
+    logger.info(
       `[MultiSigSubmissionService] Started with ${this.pollIntervalMs}ms poll interval`
     );
 
@@ -45,7 +44,7 @@ export class MultiSigSubmissionService {
     // Start periodic polling
     this.pollTimer = setInterval(() => {
       this.checkAndSubmitApprovedPrices().catch((err) => {
-        console.error(
+        logger.error(
           "[MultiSigSubmissionService] Polling error:",
           err
         );
@@ -62,7 +61,7 @@ export class MultiSigSubmissionService {
       this.pollTimer = null;
     }
     this.isRunning = false;
-    console.info("[MultiSigSubmissionService] Stopped");
+    logger.info("[MultiSigSubmissionService] Stopped");
   }
 
   /**
@@ -91,7 +90,7 @@ export class MultiSigSubmissionService {
         return; // Nothing to do
       }
 
-      console.info(
+      logger.info(
         `[MultiSigSubmissionService] Found ${approvedPrices.length} approved prices to submit`
       );
 
@@ -100,7 +99,7 @@ export class MultiSigSubmissionService {
         try {
           await this.submitApprovedPrice(multiSigPrice);
         } catch (error) {
-          console.error(
+          logger.error(
             `[MultiSigSubmissionService] Failed to submit multi-sig price ${multiSigPrice.id}:`,
             error
           );
@@ -108,7 +107,7 @@ export class MultiSigSubmissionService {
         }
       }
     } catch (error) {
-      console.error(
+      logger.error(
         "[MultiSigSubmissionService] Error checking approved prices:",
         error
       );
@@ -127,13 +126,13 @@ export class MultiSigSubmissionService {
       }));
 
       if (signatures.length === 0) {
-        console.warn(
+        logger.warn(
           `[MultiSigSubmissionService] No signatures found for multi-sig price ${multiSigPrice.id}`
         );
         return;
       }
 
-      console.info(
+      logger.info(
         `[MultiSigSubmissionService] Submitting multi-sig price ${multiSigPrice.id} (${multiSigPrice.currency} @ ${multiSigPrice.rate}) with ${signatures.length} signatures`
       );
 
@@ -160,11 +159,11 @@ export class MultiSigSubmissionService {
         txHash
       );
 
-      console.info(
+      logger.info(
         `[MultiSigSubmissionService] ✅ Successfully submitted multi-sig price ${multiSigPrice.id} - TxHash: ${txHash}`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `[MultiSigSubmissionService] Error submitting multi-sig price ${multiSigPrice.id}:`,
         error
       );
@@ -180,13 +179,13 @@ export class MultiSigSubmissionService {
     try {
       const count = await multiSigService.cleanupExpiredRequests();
       if (count > 0) {
-        console.info(
+        logger.info(
           `[MultiSigSubmissionService] Cleaned up ${count} expired multi-sig requests`
         );
       }
       return count;
     } catch (error) {
-      console.error(
+      logger.error(
         "[MultiSigSubmissionService] Error during cleanup:",
         error
       );

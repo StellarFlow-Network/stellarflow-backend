@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logger } from "../../lib/logger";
 import { MarketRateFetcher, MarketRate, calculateMedian, filterOutliers, SourceTrustLevel, calculateWeightedAverage } from "./types";
 import { errorTracker } from "../errorTracker";
 import { webhookService } from "../webhook";
@@ -70,7 +71,7 @@ export class GHSRateFetcher implements MarketRateFetcher {
         errorTracker.trackSuccess("GHS-price-fetch");
       }
     } catch (error) {
-      console.debug("CoinGecko direct GHS price failed");
+      logger.debug("CoinGecko direct GHS price failed");
     }
 
     // Strategy 2: CoinGecko XLM/USD + ExchangeRate API
@@ -127,7 +128,7 @@ export class GHSRateFetcher implements MarketRateFetcher {
         }
       }
     } catch (error) {
-      console.debug("CoinGecko + ExchangeRate API failed");
+      logger.debug("CoinGecko + ExchangeRate API failed");
     }
 
     // Strategy 3: Try alternative XLM pricing source
@@ -173,7 +174,7 @@ export class GHSRateFetcher implements MarketRateFetcher {
         }
       }
     } catch (error) {
-      console.debug("Alternative XLM pricing source failed");
+      logger.debug("Alternative XLM pricing source failed");
     }
 
     // If we have prices, calculate median

@@ -2,6 +2,7 @@
 
 import dotenv from "dotenv";
 import { Horizon, Keypair } from "@stellar/stellar-sdk";
+import { logger } from "../src/lib/logger";
 
 dotenv.config();
 
@@ -61,19 +62,19 @@ async function checkGasAccountBalance(): Promise<void> {
   const now = new Date().toISOString();
 
   if (xlmBalance < threshold) {
-    console.error(
+    logger.error(
       `ALERT ${now}: Gas Account balance is low (${xlmBalance.toFixed(7)} XLM). Threshold: ${threshold.toFixed(2)} XLM. Account: ${publicKey}`,
     );
     process.exitCode = 2;
     return;
   }
 
-  console.log(
+  logger.info(
     `OK ${now}: Gas Account balance is healthy (${xlmBalance.toFixed(7)} XLM). Threshold: ${threshold.toFixed(2)} XLM.`,
   );
 }
 
 checkGasAccountBalance().catch((error) => {
-  console.error("Failed to check Gas Account balance:", error);
+  logger.error("Failed to check Gas Account balance:", error);
   process.exit(1);
 });

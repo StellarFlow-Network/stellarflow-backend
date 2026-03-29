@@ -9,6 +9,7 @@ import dotenv from "dotenv";
 dotenv.config();
 // Global import for priceReviewService
 import { priceReviewService } from "../priceReviewService";
+import { logger } from "../../lib/logger";
 export class MarketRateService {
     fetchers = new Map();
     cache = new Map();
@@ -29,7 +30,7 @@ export class MarketRateService {
                 .filter((url) => url.length > 0);
         }
         if (this.multiSigEnabled) {
-            console.info(`[MarketRateService] Multi-Sig mode ENABLED with ${this.remoteOracleServers.length} remote servers`);
+            logger.info(`[MarketRateService] Multi-Sig mode ENABLED with ${this.remoteOracleServers.length} remote servers`);
         }
         this.initializeFetchers();
     }
@@ -58,7 +59,44 @@ export class MarketRateService {
                     data: cached.rate,
                 };
             }
-            const rate = await fetcher.fetchRate();
+            let rate;
+            try {
+                rate = await fetcher.fetchRate();
+            }
+            catch (fetchError) {
+                // Log provider/fetcher failure to ErrorLog (non-blocking)
+                try {
+                    const providerName = fetcher && typeof fetcher.constructor === "function"
+                        ? fetcher.constructor.name
+                        : normalizedCurrency;
+                    try {
+                        const clientAny = prisma;
+                        if (clientAny?.errorLog && typeof clientAny.errorLog.create === "function") {
+                            clientAny.errorLog.create({
+                                data: {
+                                    providerName,
+                                    errorMessage: fetchError instanceof Error
+                                        ? fetchError.message
+                                        : JSON.stringify(fetchError),
+                                    occurredAt: new Date(),
+                                },
+                            }).catch(() => { });
+                        }
+                    }
+                    catch {
+                        // swallow
+                    }
+                }
+                catch {
+                    // swallow any unexpected errors when attempting to log
+                }
+                return {
+                    success: false,
+                    error: fetchError instanceof Error
+                        ? fetchError.message
+                        : "Unknown fetcher error",
+                };
+            }
             const reviewAssessment = await priceReviewService.assessRate(rate);
             const enrichedRate = {
                 ...rate,
@@ -83,20 +121,20 @@ export class MarketRateService {
                     const memoId = this.stellarService.generateMemoId(normalizedCurrency);
                     if (this.multiSigEnabled) {
                         // Multi-sig workflow: create request and collect signatures
-                        console.info(`[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`);
+                        logger.info(`[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`);
                         const signatureRequest = await multiSigService.createMultiSigRequest(reviewAssessment.reviewRecordId, normalizedCurrency, rate.rate, rate.source, memoId);
                         // Sign locally first
                         try {
                             await multiSigService.signMultiSigPrice(signatureRequest.multiSigPriceId);
-                            console.info(`[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`);
+                            logger.info(`[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`);
                         }
                         catch (error) {
-                            console.error(`[MarketRateService] Failed to sign locally:`, error);
+                            logger.error(`[MarketRateService] Failed to sign locally:`, error);
                         }
                         // Request signatures from remote servers asynchronously
                         // (non-blocking - don't wait for completion)
                         this.requestRemoteSignaturesAsync(signatureRequest.multiSigPriceId, memoId).catch((err) => {
-                            console.error(`[MarketRateService] Error requesting remote signatures:`, err);
+                            logger.error(`[MarketRateService] Error requesting remote signatures:`, err);
                         });
                         // Mark as multi-sig pending (don't submit to Stellar yet)
                         // The submission will happen via a background job once all signatures are collected
@@ -108,15 +146,15 @@ export class MarketRateService {
                         // Single-sig workflow: submit directly to Stellar
                         const txHash = await this.stellarService.submitPriceUpdate(normalizedCurrency, rate.rate, memoId);
                         await priceReviewService.markContractSubmitted(reviewAssessment.reviewRecordId, memoId, txHash);
-                        console.info(`[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`);
+                        logger.info(`[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`);
                     }
                 }
                 catch (stellarError) {
-                    console.error("Failed to submit price update to Stellar network:", stellarError);
+                    logger.error("Failed to submit price update to Stellar network:", stellarError);
                 }
             }
             else {
-                console.warn(`Manual review required for ${normalizedCurrency} rate ${rate.rate}. Skipping contract submission.`);
+                logger.warn(`Manual review required for ${normalizedCurrency} rate ${rate.rate}. Skipping contract submission.`);
             }
             this.cache.set(normalizedCurrency, {
                 rate: enrichedRate,
@@ -142,7 +180,7 @@ export class MarketRateService {
                 });
             }
             catch (dbError) {
-                console.error("Failed to persist price history:", dbError);
+                logger.error("Failed to persist price history:", dbError);
             }
             // Broadcast fresh price to all connected dashboard clients
             try {
@@ -283,7 +321,7 @@ export class MarketRateService {
      * Errors are logged but don't fail the price fetch operation.
      */
     async requestRemoteSignaturesAsync(multiSigPriceId, memoId) {
-        console.info(`[MarketRateService] Requesting signatures from ${this.remoteOracleServers.length} remote servers for multi-sig ${multiSigPriceId}`);
+        logger.info(`[MarketRateService] Requesting signatures from ${this.remoteOracleServers.length} remote servers for multi-sig ${multiSigPriceId}`);
         // Request signatures from all remote servers in parallel
         const signatureRequests = this.remoteOracleServers.map((serverUrl) => multiSigService.requestRemoteSignature(multiSigPriceId, serverUrl));
         const results = await Promise.allSettled(signatureRequests);
@@ -291,14 +329,14 @@ export class MarketRateService {
         results.forEach((result, index) => {
             if (result.status === "fulfilled") {
                 if (result.value.success) {
-                    console.info(`[MarketRateService] ✅ Signature request sent to ${this.remoteOracleServers[index]}`);
+                    logger.info(`[MarketRateService] ✅ Signature request sent to ${this.remoteOracleServers[index]}`);
                 }
                 else {
-                    console.warn(`[MarketRateService] ⚠️ Signature request failed for ${this.remoteOracleServers[index]}: ${result.value.error}`);
+                    logger.warn(`[MarketRateService] ⚠️ Signature request failed for ${this.remoteOracleServers[index]}: ${result.value.error}`);
                 }
             }
             else {
-                console.error(`[MarketRateService] ❌ Error requesting signature from ${this.remoteOracleServers[index]}:`, result.reason);
+                logger.error(`[MarketRateService] ❌ Error requesting signature from ${this.remoteOracleServers[index]}:`, result.reason);
             }
         });
     }

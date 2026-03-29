@@ -1,12 +1,13 @@
 import { Server } from "socket.io";
+import { logger } from "./logger";
 let io = null;
 export function initSocket(server) {
     io = new Server(server, {
         cors: { origin: "*" },
     });
     io.on("connection", (socket) => {
-        console.log(`🔌 Client connected: ${socket.id}`);
-        socket.on("disconnect", () => console.log(`🔌 Client disconnected: ${socket.id}`));
+        logger.info(`🔌 Client connected: ${socket.id}`);
+        socket.on("disconnect", () => logger.info(`🔌 Client disconnected: ${socket.id}`));
     });
     return io;
 }

@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
 import { multiSigService, SignaturePayload } from "../services/multiSigService";
+import { logger } from "../lib/logger";
 
 const router = express.Router();
 
@@ -32,7 +33,7 @@ router.post("/multi-sig/request", async (req: Request, res: Response) => {
       data: signatureRequest,
     });
   } catch (error) {
-    console.error("[API] Multi-sig request creation failed:", error);
+    logger.error("[API] Multi-sig request creation failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),
@@ -46,7 +47,7 @@ router.post("/multi-sig/request", async (req: Request, res: Response) => {
  * This is called by peer servers in the multi-sig setup.
  * 
  * Requires:
- * - Authorization header with token (if MULTI_SIG_AUTH_TOKEN is set)
+ * - Authorization header with token ( if MULTI_SIG_AUTH_TOKEN is set)
  * - Signature payload in body
  */
 router.post("/sign", async (req: Request, res: Response) => {
@@ -93,7 +94,7 @@ router.post("/sign", async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error("[API] Signature creation failed:", error);
+    logger.error("[API] Signature creation failed:", error);
     res.status(400).json({
       success: false,
       error: String(error),
@@ -132,7 +133,7 @@ router.post("/multi-sig/:multiSigPriceId/request-signature", async (req: Request
 
     res.json({ success: true });
   } catch (error) {
-    console.error("[API] Remote signature request failed:", error);
+    logger.error("[API] Remote signature request failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),
@@ -184,7 +185,7 @@ router.get("/multi-sig/:multiSigPriceId/status", async (req: Request, res: Respo
       },
     });
   } catch (error) {
-    console.error("[API] Multi-sig status fetch failed:", error);
+    logger.error("[API] Multi-sig status fetch failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),
@@ -215,7 +216,7 @@ router.get("/multi-sig/pending", async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    console.error("[API] Pending multi-sig fetch failed:", error);
+    logger.error("[API] Pending multi-sig fetch failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),
@@ -275,7 +276,7 @@ router.get("/multi-sig/:multiSigPriceId/signatures", async (req: Request, res: R
       },
     });
   } catch (error) {
-    console.error("[API] Signature fetch failed:", error);
+    logger.error("[API] Signature fetch failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),
@@ -307,7 +308,7 @@ router.post("/multi-sig/:multiSigPriceId/record-submission", async (req: Request
 
     res.json({ success: true });
   } catch (error) {
-    console.error("[API] Submission recording failed:", error);
+    logger.error("[API] Submission recording failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),
@@ -328,7 +329,7 @@ router.get("/multi-sig/signer-info", async (req: Request, res: Response) => {
       data: signerInfo,
     });
   } catch (error) {
-    console.error("[API] Signer info fetch failed:", error);
+    logger.error("[API] Signer info fetch failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),

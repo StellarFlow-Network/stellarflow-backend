@@ -1,4 +1,5 @@
 import { Server } from "socket.io";
+import { logger } from "./logger";
 
 let io: Server | null = null;
 
@@ -8,9 +9,9 @@ export function initSocket(server: import("http").Server): Server {
   });
 
   io.on("connection", (socket) => {
-    console.log(`🔌 Client connected: ${socket.id}`);
+    logger.info(`🔌 Client connected: ${socket.id}`);
     socket.on("disconnect", () =>
-      console.log(`🔌 Client disconnected: ${socket.id}`)
+      logger.info(`🔌 Client disconnected: ${socket.id}`)
     );
   });
 

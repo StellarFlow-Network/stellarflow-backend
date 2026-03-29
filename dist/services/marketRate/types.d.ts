@@ -125,7 +125,7 @@ export declare function calculateWeightedAverage(values: WeightedPriceInput[]): 
  * Rate Fetch Statistics
  * Performance and reliability metrics
  */
-export { filterOutliers, isOutlier, percentDeviation } from '../../logic/outlierFilter';
+export { filterOutliers, isOutlier, percentDeviation, } from "../../logic/outlierFilter";
 export interface RateFetchStats {
     totalRequests: number;
     successfulRequests: number;

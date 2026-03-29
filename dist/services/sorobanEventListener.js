@@ -2,6 +2,7 @@ import { Horizon, Keypair } from "@stellar/stellar-sdk";
 import prisma from "../lib/prisma";
 import { getIO } from "../lib/socket";
 import dotenv from "dotenv";
+import { logger } from "../lib/logger";
 dotenv.config();
 export class SorobanEventListener {
     server;
@@ -25,25 +26,25 @@ export class SorobanEventListener {
     }
     async start() {
         if (this.isRunning) {
-            console.warn("SorobanEventListener is already running");
+            logger.warn("SorobanEventListener is already running");
             return;
         }
         this.isRunning = true;
-        console.log(`[EventListener] Starting listener for account ${this.oraclePublicKey}`);
+        logger.info(`[EventListener] Starting listener for account ${this.oraclePublicKey}`);
         // Initialize last processed ledger from the most recent on-chain record
         const lastRecord = await prisma.onChainPrice.findFirst({
             orderBy: { ledgerSeq: "desc" },
         });
         if (lastRecord) {
             this.lastProcessedLedger = lastRecord.ledgerSeq;
-            console.log(`[EventListener] Resuming from ledger ${this.lastProcessedLedger}`);
+            logger.info(`[EventListener] Resuming from ledger ${this.lastProcessedLedger}`);
         }
         // Initial poll
         await this.pollTransactions();
         // Start periodic polling
         this.pollTimer = setInterval(() => {
             this.pollTransactions().catch((err) => {
-                console.error("[EventListener] Poll error:", err);
+                logger.error("[EventListener] Poll error:", err);
             });
         }, this.pollIntervalMs);
     }
@@ -53,7 +54,7 @@ export class SorobanEventListener {
             this.pollTimer = null;
         }
         this.isRunning = false;
-        console.log("[EventListener] Stopped");
+        logger.info("[EventListener] Stopped");
     }
     async pollTransactions() {
         try {
@@ -93,7 +94,7 @@ export class SorobanEventListener {
             // Account not found is expected for new accounts with no transactions
             if (error instanceof Error &&
                 error.message.includes("status code 404")) {
-                console.log("[EventListener] No transactions found for oracle account");
+                logger.info("[EventListener] No transactions found for oracle account");
                 return;
             }
             throw error;
@@ -128,7 +129,7 @@ export class SorobanEventListener {
                 const valueStr = atob(String(valueBase64));
                 const rate = parseFloat(valueStr);
                 if (isNaN(rate)) {
-                    console.warn(`[EventListener] Invalid rate value for ${currency}: ${valueStr}`);
+                    logger.warn(`[EventListener] Invalid rate value for ${currency}: ${valueStr}`);
                     continue;
                 }
                 confirmedPrices.push({
@@ -142,7 +143,7 @@ export class SorobanEventListener {
             }
         }
         catch (error) {
-            console.error(`[EventListener] Error parsing operations for tx ${tx.hash}:`, error);
+            logger.error(`[EventListener] Error parsing operations for tx ${tx.hash}:`, error);
         }
         return confirmedPrices;
     }
@@ -166,10 +167,10 @@ export class SorobanEventListener {
                         confirmedAt: price.confirmedAt,
                     },
                 });
-                console.log(`[EventListener] Saved confirmed price: ${price.currency} = ${price.rate} (tx: ${price.txHash.substring(0, 8)}...)`);
+                logger.info(`[EventListener] Saved confirmed price: ${price.currency} = ${price.rate} (tx: ${price.txHash.substring(0, 8)}...)`);
             }
             catch (error) {
-                console.error(`[EventListener] Error saving price for ${price.currency}:`, error);
+                logger.error(`[EventListener] Error saving price for ${price.currency}:`, error);
             }
         }
     }

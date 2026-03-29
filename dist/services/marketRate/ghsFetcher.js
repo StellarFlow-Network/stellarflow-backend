@@ -1,5 +1,5 @@
 import axios from "axios";
-import { calculateMedian, filterOutliers } from "./types";
+import { calculateMedian, filterOutliers, calculateWeightedAverage } from "./types";
 import { errorTracker } from "../errorTracker";
 import { webhookService } from "../webhook";
 export class GHSRateFetcher {
@@ -123,11 +123,15 @@ export class GHSRateFetcher {
             rateValues = filterOutliers(rateValues);
             const medianRate = calculateMedian(rateValues);
             const mostRecentTimestamp = prices.reduce((latest, p) => (p.timestamp > latest ? p.timestamp : latest), prices[0]?.timestamp ?? new Date());
+            const weightedRate = calculateWeightedAverage(prices.map((p) => ({
+                value: p.rate,
+                trustLevel: p.trustLevel,
+            })));
             return {
                 currency: "GHS",
                 rate: weightedRate,
                 timestamp: mostRecentTimestamp,
-                source: `Median of ${prices.length} sources (outliers filtered)`,
+                source: `Weighted average of ${prices.length} sources (outliers filtered)`,
             };
         }
         // All strategies failed - track failure and send notification if 3 consecutive failures

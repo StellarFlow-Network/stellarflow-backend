@@ -1,4 +1,3 @@
-import { MarketRateFetcher, MarketRate } from "./types";
 /**
  * Circuit Breaker States
  */

@@ -1,5 +1,6 @@
-import { Keypair, TransactionBuilder, Operation, Networks, Memo, Horizon, } from "@stellar/stellar-sdk";
+import { Keypair, TransactionBuilder, Operation, Networks, Memo, Horizon, xdr, } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import { logger } from "../lib/logger";
 dotenv.config();
 export class StellarService {
     server;
@@ -53,7 +54,7 @@ export class StellarService {
                 .setTimeout(60)
                 .build();
         }, this.MAX_RETRIES, baseFee);
-        console.info(`✅ Price update for ${currency} confirmed. Hash: ${result.hash}`);
+        logger.info(`✅ Price update for ${currency} confirmed. Hash: ${result.hash}`);
         return result.hash;
     }
     /**
@@ -79,7 +80,7 @@ export class StellarService {
                 .setTimeout(60)
                 .build();
         }, signatures, this.MAX_RETRIES, baseFee);
-        console.info(`✅ Multi-signed price update for ${currency} confirmed. Hash: ${result.hash}`);
+        logger.info(`✅ Multi-signed price update for ${currency} confirmed. Hash: ${result.hash}`);
         return result.hash;
     }
     /**
@@ -103,7 +104,7 @@ export class StellarService {
                 attempt++;
                 const isStuck = this.isStuckError(error);
                 if (isStuck && attempt <= maxRetries) {
-                    console.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
+                    logger.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
                     await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
                     continue;
                 }
@@ -143,16 +144,15 @@ export class StellarService {
                         const signerKeypair = Keypair.fromPublicKey(sig.signerPublicKey);
                         // Get the signature hint
                         const hint = signerKeypair.signatureHint();
-                        // Get the current envelope
-                        const envelope = transaction.toEnvelope();
-                        // Add the signature to the envelope
-                        envelope.signature().push(signatureBuffer);
-                        // Add the hint to the hints (Stellar tracks which keys signed)
-                        // Note: This is a simplified approach; in production,
-                        // you might want to use a library that properly handles multi-sig
+                        // Add the signature to the transaction
+                        const decoratedSignature = new xdr.DecoratedSignature({
+                            hint: signerKeypair.signatureHint(),
+                            signature: signatureBuffer,
+                        });
+                        transaction.signatures.push(decoratedSignature);
                     }
                     catch (error) {
-                        console.error(`[StellarService] Failed to add signature for ${sig.signerPublicKey}:`, error);
+                        logger.error(`[StellarService] Failed to add signature for ${sig.signerPublicKey}:`, error);
                         // Continue without this signature (may cause failure on Stellar side)
                     }
                 }
@@ -162,7 +162,7 @@ export class StellarService {
                 attempt++;
                 const isStuck = this.isStuckError(error);
                 if (isStuck && attempt <= maxRetries) {
-                    console.warn(`⚠️ Multi-sig transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
+                    logger.warn(`⚠️ Multi-sig transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
                     await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
                     continue;
                 }

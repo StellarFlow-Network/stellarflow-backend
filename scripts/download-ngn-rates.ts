@@ -3,6 +3,7 @@
 import { writeFileSync } from "fs";
 import { Prisma, PriceHistory } from "@prisma/client";
 import { prisma } from "../src/lib/prisma.js";
+import { logger } from "../src/lib/logger.js";
 
 async function downloadNGNRates() {
   try {
@@ -10,7 +11,7 @@ async function downloadNGNRates() {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    console.log(`Fetching NGN rates from ${thirtyDaysAgo.toISOString()} to now...`);
+    logger.info(`Fetching NGN rates from ${thirtyDaysAgo.toISOString()} to now...`);
 
     // Query PriceHistory for NGN rates in the last 30 days
     const rates: PriceHistory[] = await prisma.priceHistory.findMany({
@@ -26,11 +27,11 @@ async function downloadNGNRates() {
     });
 
     if (rates.length === 0) {
-      console.log("No NGN rates found in the last 30 days.");
+      logger.info("No NGN rates found in the last 30 days.");
       return;
     }
 
-    console.log(`Found ${rates.length} NGN rate records.`);
+    logger.info(`Found ${rates.length} NGN rate records.`);
 
     // Convert to CSV format
     const csvHeader = "timestamp,rate,source\n";
@@ -43,8 +44,8 @@ async function downloadNGNRates() {
     const filename = `ngn-rates-last-30-days-${new Date().toISOString().split('T')[0]}.csv`;
     writeFileSync(filename, csvContent);
 
-    console.log(`NGN rates exported to ${filename}`);
-    console.log(`Total records: ${rates.length}`);
+    logger.info(`NGN rates exported to ${filename}`);
+    logger.info(`Total records: ${rates.length}`);
 
     // Show some stats
     const ratesValues = rates.map((r: PriceHistory) => parseFloat(r.rate.toString()));
@@ -52,11 +53,11 @@ async function downloadNGNRates() {
     const maxRate = Math.max(...ratesValues);
     const avgRate = ratesValues.reduce((sum: number, rate: number) => sum + rate, 0) / ratesValues.length;
 
-    console.log(`Rate range: ${minRate.toFixed(2)} - ${maxRate.toFixed(2)} NGN/XLM`);
-    console.log(`Average rate: ${avgRate.toFixed(2)} NGN/XLM`);
+    logger.info(`Rate range: ${minRate.toFixed(2)} - ${maxRate.toFixed(2)} NGN/XLM`);
+    logger.info(`Average rate: ${avgRate.toFixed(2)} NGN/XLM`);
 
   } catch (error) {
-    console.error("Error downloading NGN rates:", error);
+    logger.error("Error downloading NGN rates:", error);
     process.exit(1);
   } finally {
     await prisma.$disconnect();

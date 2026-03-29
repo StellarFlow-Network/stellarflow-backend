@@ -17,6 +17,7 @@ import { SorobanEventListener } from "./services/sorobanEventListener";
 import { specs } from "./lib/swagger";
 import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
+import { logger, morganStream } from "./lib/logger";
 
 // Load environment variables
 dotenv.config();
@@ -32,9 +33,9 @@ for (const envVar of requiredEnvVars) {
 }
 
 if (missingEnvVars.length > 0) {
-  console.error("❌ Missing required environment variables:");
-  missingEnvVars.forEach((varName) => console.error(`   - ${varName}`));
-  console.error(
+  logger.error("❌ Missing required environment variables:");
+  missingEnvVars.forEach((varName) => logger.error(`   - ${varName}`));
+  logger.error(
     "\nPlease set these variables in your .env file and restart the server.",
   );
   process.exit(1);
@@ -44,7 +45,7 @@ const dashboardUrl =
   process.env.DASHBOARD_URL || process.env.FRONTEND_URL || "http://localhost:3000";
 
 if (!dashboardUrl) {
-  console.error("❌ Missing required environment variable: DASHBOARD_URL");
+  logger.error("❌ Missing required environment variable: DASHBOARD_URL");
   process.exit(1);
 }
 
@@ -60,7 +61,12 @@ const horizonUrl =
 const horizonServer = new Horizon.Server(horizonUrl);
 
 // Middleware
-app.use(morgan("dev"));
+app.use(
+  morgan(process.env.NODE_ENV === "production" ? "combined" : "dev", {
+    stream: morganStream,
+    skip: (req) => req.url === "/health" || req.url === "/",
+  }),
+);
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -242,7 +248,7 @@ app.use(
     res: express.Response,
     next: express.NextFunction,
   ) => {
-    console.error("Unhandled error:", err);
+    logger.error("Unhandled error:", err);
     res.status(500).json({
       success: false,
       error: "Internal server error",
@@ -263,25 +269,25 @@ const httpServer = createServer(app);
 initSocket(httpServer);
 
 httpServer.listen(PORT, () => {
-  console.log(`🌊 StellarFlow Backend running on port ${PORT}`);
-  console.log(
+  logger.info(`🌊 StellarFlow Backend running on port ${PORT}`);
+  logger.info(
     `📊 Market Rates API available at http://localhost:${PORT}/api/market-rates`,
   );
-  console.log(
+  logger.info(
     `📚 API Documentation available at http://localhost:${PORT}/api/docs`,
   );
-  console.log(`🏥 Health check at http://localhost:${PORT}/health`);
-  console.log(`🔌 Socket.io ready for dashboard connections`);
+  logger.info(`🏥 Health check at http://localhost:${PORT}/health`);
+  logger.info(`🔌 Socket.io ready for dashboard connections`);
 
   // Start Soroban event listener to track confirmed on-chain prices
   try {
     const eventListener = new SorobanEventListener();
     eventListener.start().catch((err) => {
-      console.error("Failed to start event listener:", err);
+      logger.error("Failed to start event listener:", err);
     });
-    console.log(`👂 Soroban event listener started`);
+    logger.info(`👂 Soroban event listener started`);
   } catch (err) {
-    console.warn(
+    logger.warn(
       "Event listener not started:",
       err instanceof Error ? err.message : err,
     );
@@ -291,11 +297,11 @@ httpServer.listen(PORT, () => {
   if (process.env.MULTI_SIG_ENABLED === "true") {
     try {
       multiSigSubmissionService.start().catch((err: Error) => {
-        console.error("Failed to start multi-sig submission service:", err);
+        logger.error("Failed to start multi-sig submission service:", err);
       });
-      console.log(`🔐 Multi-Sig submission service started`);
+      logger.info(`🔐 Multi-Sig submission service started`);
     } catch (err) {
-      console.warn(
+      logger.warn(
         "Multi-sig submission service not started:",
         err instanceof Error ? err.message : err
       );

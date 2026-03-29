@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logger } from "../../lib/logger";
 import { MarketRateFetcher, MarketRate, calculateMedian, filterOutliers, SourceTrustLevel, calculateWeightedAverage } from "./types";
 
 type CoinGeckoPriceResponse = {
@@ -158,7 +159,7 @@ export class NGNRateFetcher implements MarketRateFetcher {
         }
       }
     } catch {
-      console.debug("VTpass + CoinGecko XLM/USD failed");
+      logger.debug("VTpass + CoinGecko XLM/USD failed");
     }
 
     // Strategy 2: CoinGecko direct XLM/NGN
@@ -191,7 +192,7 @@ export class NGNRateFetcher implements MarketRateFetcher {
         });
       }
     } catch {
-      console.debug("CoinGecko direct NGN failed");
+      logger.debug("CoinGecko direct NGN failed");
     }
 
     // Strategy 3: CoinGecko XLM/USD × USD/NGN (open.er-api)
@@ -245,7 +246,7 @@ export class NGNRateFetcher implements MarketRateFetcher {
         }
       }
     } catch {
-      console.debug("CoinGecko + ExchangeRate API (NGN) failed");
+      logger.debug("CoinGecko + ExchangeRate API (NGN) failed");
     }
 
     if (prices.length > 0) {

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logger } from "../lib/logger";
 export class WebhookService {
     webhookUrl;
     platform;
@@ -27,7 +28,7 @@ export class WebhookService {
             });
         }
         catch (error) {
-            console.error("Failed to send webhook notification:", error);
+            logger.error("Failed to send webhook notification:", error);
         }
     }
     formatErrorMessage(errorDetails) {
@@ -154,6 +155,5 @@ export class WebhookService {
         };
     }
 }
-export const webhookService = new WebhookService();
 export const webhookService = new WebhookService();
 //# sourceMappingURL=webhook.js.map

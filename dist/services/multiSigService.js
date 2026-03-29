@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma";
 import { Keypair } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import { logger } from "../lib/logger";
 dotenv.config();
 export class MultiSigService {
     localSignerPublicKey;
@@ -42,7 +43,7 @@ export class MultiSigService {
                 expiresAt,
             },
         });
-        console.info(`[MultiSig] Created signature request ${created.id} for ${currency} rate ${rate}`);
+        logger.info(`[MultiSig] Created signature request ${created.id} for ${currency} rate ${rate}`);
         return {
             multiSigPriceId: created.id,
             currency,
@@ -101,7 +102,7 @@ export class MultiSigService {
                 },
             },
         });
-        console.info(`[MultiSig] Added signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`);
+        logger.info(`[MultiSig] Added signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`);
         // If we have all required signatures, mark as approved
         if (updated.collectedSignatures >= updated.requiredSignatures) {
             await this.approveMultiSigPrice(multiSigPriceId);
@@ -168,7 +169,7 @@ export class MultiSigService {
                         },
                     },
                 });
-                console.info(`[MultiSig] Added remote signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`);
+                logger.info(`[MultiSig] Added remote signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`);
                 // Check if all signatures are collected
                 if (updated.collectedSignatures >= updated.requiredSignatures) {
                     await this.approveMultiSigPrice(multiSigPriceId);
@@ -177,7 +178,7 @@ export class MultiSigService {
             return { success: true };
         }
         catch (error) {
-            console.error(`[MultiSig] Failed to request signature from ${remoteServerUrl}:`, error);
+            logger.error(`[MultiSig] Failed to request signature from ${remoteServerUrl}:`, error);
             return { success: false, error: String(error) };
         }
     }
@@ -236,7 +237,7 @@ export class MultiSigService {
             },
         });
         if (result.count > 0) {
-            console.warn(`[MultiSig] Expired ${result.count} multi-sig price requests`);
+            logger.warn(`[MultiSig] Expired ${result.count} multi-sig price requests`);
         }
         return result.count;
     }
@@ -251,7 +252,7 @@ export class MultiSigService {
                 status: "APPROVED",
             },
         });
-        console.info(`[MultiSig] MultiSigPrice ${multiSigPriceId} is now APPROVED (all signatures collected)`);
+        logger.info(`[MultiSig] MultiSigPrice ${multiSigPriceId} is now APPROVED (all signatures collected)`);
     }
     /**
      * Get all signatures for a multi-sig price.
@@ -276,7 +277,7 @@ export class MultiSigService {
                 submittedAt: new Date(),
             },
         });
-        console.info(`[MultiSig] MultiSigPrice ${multiSigPriceId} submitted to Stellar - TxHash: ${stellarTxHash}`);
+        logger.info(`[MultiSig] MultiSigPrice ${multiSigPriceId} submitted to Stellar - TxHash: ${stellarTxHash}`);
     }
     /**
      * Create a deterministic message for signing.

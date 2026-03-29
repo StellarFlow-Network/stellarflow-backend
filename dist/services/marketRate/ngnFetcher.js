@@ -1,5 +1,5 @@
 import axios from "axios";
-import { calculateMedian, filterOutliers } from "./types";
+import { filterOutliers, calculateWeightedAverage } from "./types";
 function parseAmount(value) {
     if (value == null)
         return null;
@@ -167,13 +167,17 @@ export class NGNRateFetcher {
         if (prices.length > 0) {
             let rateValues = prices.map((p) => p.rate).filter(p => p > 0);
             rateValues = filterOutliers(rateValues);
-            const medianRate = calculateMedian(rateValues);
             const mostRecentTimestamp = prices.reduce((latest, p) => (p.timestamp > latest ? p.timestamp : latest), prices[0]?.timestamp ?? new Date());
+            const weightedInput = prices.map((p) => ({
+                value: p.rate,
+                trustLevel: p.trustLevel,
+            }));
+            const weightedRate = calculateWeightedAverage(weightedInput);
             return {
                 currency: "NGN",
                 rate: weightedRate,
                 timestamp: mostRecentTimestamp,
-                source: `Median of ${prices.length} sources (outliers filtered)`,
+                source: `Weighted average of ${prices.length} sources (outliers filtered)`,
             };
         }
         throw new Error("All NGN rate sources failed");

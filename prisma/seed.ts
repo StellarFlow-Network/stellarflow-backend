@@ -4,6 +4,7 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { logger } from "../src/lib/logger";
 
 const prisma = new PrismaClient();
 
@@ -53,7 +54,7 @@ const currencies = [
 ];
 
 async function main() {
-  console.log("Seeding database...");
+  logger.info("Seeding database...");
 
   for (const currency of currencies) {
     const existing = await prisma.currency.findUnique({
@@ -64,18 +65,18 @@ async function main() {
       await prisma.currency.create({
         data: currency,
       });
-      console.log(`Created currency: ${currency.code}`);
+      logger.info(`Created currency: ${currency.code}`);
     } else {
-      console.log(`Currency already exists: ${currency.code}`);
+      logger.info(`Currency already exists: ${currency.code}`);
     }
   }
 
-  console.log("Seeding completed!");
+  logger.info("Seeding completed!");
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    logger.error(e);
     process.exit(1);
   })
   .finally(async () => {

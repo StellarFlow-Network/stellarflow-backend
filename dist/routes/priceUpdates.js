@@ -1,5 +1,6 @@
 import express from "express";
 import { multiSigService } from "../services/multiSigService";
+import { logger } from "../lib/logger";
 const router = express.Router();
 /**
  * POST /api/price-updates/multi-sig/request
@@ -22,7 +23,7 @@ router.post("/multi-sig/request", async (req, res) => {
         });
     }
     catch (error) {
-        console.error("[API] Multi-sig request creation failed:", error);
+        logger.error("[API] Multi-sig request creation failed:", error);
         res.status(500).json({
             success: false,
             error: String(error),
@@ -75,7 +76,7 @@ router.post("/sign", async (req, res) => {
         });
     }
     catch (error) {
-        console.error("[API] Signature creation failed:", error);
+        logger.error("[API] Signature creation failed:", error);
         res.status(400).json({
             success: false,
             error: String(error),
@@ -107,7 +108,7 @@ router.post("/multi-sig/:multiSigPriceId/request-signature", async (req, res) =>
         res.json({ success: true });
     }
     catch (error) {
-        console.error("[API] Remote signature request failed:", error);
+        logger.error("[API] Remote signature request failed:", error);
         res.status(500).json({
             success: false,
             error: String(error),
@@ -153,7 +154,7 @@ router.get("/multi-sig/:multiSigPriceId/status", async (req, res) => {
         });
     }
     catch (error) {
-        console.error("[API] Multi-sig status fetch failed:", error);
+        logger.error("[API] Multi-sig status fetch failed:", error);
         res.status(500).json({
             success: false,
             error: String(error),
@@ -183,7 +184,7 @@ router.get("/multi-sig/pending", async (req, res) => {
         });
     }
     catch (error) {
-        console.error("[API] Pending multi-sig fetch failed:", error);
+        logger.error("[API] Pending multi-sig fetch failed:", error);
         res.status(500).json({
             success: false,
             error: String(error),
@@ -233,7 +234,7 @@ router.get("/multi-sig/:multiSigPriceId/signatures", async (req, res) => {
         });
     }
     catch (error) {
-        console.error("[API] Signature fetch failed:", error);
+        logger.error("[API] Signature fetch failed:", error);
         res.status(500).json({
             success: false,
             error: String(error),
@@ -258,7 +259,7 @@ router.post("/multi-sig/:multiSigPriceId/record-submission", async (req, res) =>
         res.json({ success: true });
     }
     catch (error) {
-        console.error("[API] Submission recording failed:", error);
+        logger.error("[API] Submission recording failed:", error);
         res.status(500).json({
             success: false,
             error: String(error),
@@ -279,7 +280,7 @@ router.get("/multi-sig/signer-info", async (req, res) => {
         });
     }
     catch (error) {
-        console.error("[API] Signer info fetch failed:", error);
+        logger.error("[API] Signer info fetch failed:", error);
         res.status(500).json({
             success: false,
             error: String(error),
