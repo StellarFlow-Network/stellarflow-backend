@@ -62,6 +62,7 @@ export class StellarService {
     price: number,
     memoId: string,
   ): Promise<string> {
+    lockdownService.assertNotLocked();
     const baseFee = parseInt(await this.getRecommendedFee(), 10);
 
     const result = await this.submitTransactionWithRetries(
@@ -101,6 +102,8 @@ export class StellarService {
     updates: Array<{ currency: string; price: number }>,
     memoId: string,
   ): Promise<string> {
+    lockdownService.assertNotLocked();
+    
     if (updates.length === 0) {
       throw new Error("Cannot submit empty batch of price updates");
     }
