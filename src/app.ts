@@ -15,6 +15,7 @@ import derivedAssetsRouter from "./routes/derivedAssets";
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
 import { specs } from "./lib/swagger";
+import adminRouter from "./routes/admin";
 
 dotenv.config();
 
@@ -86,6 +87,7 @@ app.get(
   }),
 );
 
+app.use("/api/admin", adminRouter);
 app.use("/api", rateLimitMiddleware);
 app.use("/api", apiKeyMiddleware);
 app.use("/api/v1", apiKeyMiddleware);
