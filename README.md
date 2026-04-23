@@ -53,6 +53,8 @@ npm install
 cp .env.example .env
 ```
 
+For local development without real VTPass/Binance credentials, set `USE_MOCKS=true` in `.env`.
+
 ### Run the Server
 
 Framework: Next.js 15 (App Router)

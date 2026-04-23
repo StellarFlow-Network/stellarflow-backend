@@ -60,8 +60,7 @@
     "socket.io": "^4.8.3",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "ts-node": "^10.9.2"
   },
   "devDependencies": {
     "@prisma/client": "^7.6.0",
@@ -83,6 +82,7 @@
     "prisma": "^7.6.0",
     "ts-jest": "^29.4.4",
     "tsx": "^4.21.0",
-    "typedoc": "^0.28.18"
+    "typedoc": "^0.28.18",
+    "typescript": "^5.9.3"
   }
 }

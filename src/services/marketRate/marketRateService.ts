@@ -7,6 +7,7 @@ import {
 import { KESRateFetcher } from "./kesFetcher";
 import { GHSRateFetcher } from "./ghsFetcher";
 import { NGNRateFetcher } from "./ngnFetcher";
+import { MockRateFetcher } from "./mockFetcher";
 import { StellarService } from "../stellarService";
 import { multiSigService } from "../multiSigService";
 import { getIO } from "../../lib/socket";
@@ -65,6 +66,17 @@ export class MarketRateService {
   }
 
   private initializeFetchers(): void {
+    const useMocks = process.env.USE_MOCKS === "true";
+    if (useMocks) {
+      console.info(
+        "[MarketRateService] USE_MOCKS=true detected. Using mock rate fetchers for local development.",
+      );
+      this.fetchers.set("KES", new MockRateFetcher("KES"));
+      this.fetchers.set("GHS", new MockRateFetcher("GHS"));
+      this.fetchers.set("NGN", new MockRateFetcher("NGN"));
+      return;
+    }
+
     const kesFetcher = new KESRateFetcher();
     const ghsFetcher = new GHSRateFetcher();
     const ngnFetcher = new NGNRateFetcher();
