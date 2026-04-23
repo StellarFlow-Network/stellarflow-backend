@@ -151,6 +151,16 @@ model ErrorLog {
   @@index([occurredAt])
 }
 
+model Relayer {
+  id            Int      @id @default(autoincrement())
+  name          String   @db.VarChar(100)
+  apiKey        String   @unique @db.VarChar(255)
+  isActive      Boolean  @default(true)
+  allowedAssets String[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 // Hourly Statistics for smoothing out price spikes
 model HourlyStats {
   id           Int      @id @default(autoincrement())

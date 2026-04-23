@@ -14,6 +14,10 @@ import marketRatesRouter from "./routes/marketRates";
 import priceUpdatesRouter from "./routes/priceUpdates";
 import statsRouter from "./routes/stats";
 import statusRouter from "./routes/status";
+import derivedAssetsRouter from "./routes/derivedAssets";
+import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
+import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
+import { specs } from "./lib/swagger";
 
 dotenv.config();
 
@@ -96,6 +100,7 @@ app.use("/api/v1/intelligence", intelligenceRouter);
 app.use("/api/v1/price-updates", priceUpdatesRouter);
 app.use("/api/v1/assets", assetsRouter);
 app.use("/api/v1/status", statusRouter);
+app.use("/api/v1/derived-assets", derivedAssetsRouter);
 
 app.get("/", (req, res) => {
   res.json({
@@ -117,6 +122,10 @@ app.get("/", (req, res) => {
       },
       history: {
         assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
+      },
+      derivedAssets: {
+        crossRate: "/api/v1/derived-assets/rate/:base/:quote",
+        ngnGhs: "/api/v1/derived-assets/ngn-ghs",
       },
     },
   });

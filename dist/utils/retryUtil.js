@@ -1,4 +1,5 @@
 import axios from "axios";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "./httpTimeout.js";
 /**
  * Default retryable HTTP status codes
  */
@@ -120,7 +121,10 @@ export async function withRetry(requestFn, config = {}) {
  * ```
  */
 export function createRetryableAxiosInstance(axiosConfig = {}, retryConfig = {}) {
-    const instance = axios.create(axiosConfig);
+    const instance = axios.create({
+        timeout: OUTGOING_HTTP_TIMEOUT_MS,
+        ...axiosConfig,
+    });
     // Add response interceptor for retry logic
     instance.interceptors.response.use((response) => response, async (error) => {
         const config = error.config;

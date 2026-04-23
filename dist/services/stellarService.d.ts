@@ -22,6 +22,16 @@ export declare class StellarService {
      */
     submitPriceUpdate(currency: string, price: number, memoId: string): Promise<string>;
     /**
+     * Submit multiple price updates to the Stellar network in a single bundle transaction.
+     * Leverages submitTransactionWithRetries for automatic fee bumping if stuck.
+     * @param updates - Array of price updates { currency, price }
+     * @param memoId - Unique ID for auditing
+     */
+    submitBatchedPriceUpdates(updates: Array<{
+        currency: string;
+        price: number;
+    }>, memoId: string): Promise<string>;
+    /**
      * Submit a multi-signed price update to the Stellar network.
      * Accepts signatures from multiple oracle servers.
      * @param currency - The currency code (e.g., "NGN", "KES")

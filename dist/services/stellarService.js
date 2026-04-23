@@ -57,6 +57,34 @@ export class StellarService {
         return result.hash;
     }
     /**
+     * Submit multiple price updates to the Stellar network in a single bundle transaction.
+     * Leverages submitTransactionWithRetries for automatic fee bumping if stuck.
+     * @param updates - Array of price updates { currency, price }
+     * @param memoId - Unique ID for auditing
+     */
+    async submitBatchedPriceUpdates(updates, memoId) {
+        if (updates.length === 0) {
+            throw new Error("Cannot submit empty batch of price updates");
+        }
+        const baseFee = parseInt(await this.getRecommendedFee(), 10);
+        const result = await this.submitTransactionWithRetries((sourceAccount, currentFee) => {
+            const builder = new TransactionBuilder(sourceAccount, {
+                fee: currentFee.toString(),
+                networkPassphrase: this.network === "PUBLIC" ? Networks.PUBLIC : Networks.TESTNET,
+            });
+            for (const update of updates) {
+                builder.addOperation(Operation.manageData({
+                    name: `${update.currency}_PRICE`,
+                    value: update.price.toString(),
+                }));
+            }
+            return builder.addMemo(Memo.text(memoId)).setTimeout(60).build();
+        }, this.MAX_RETRIES, baseFee);
+        const currencies = updates.map((u) => u.currency).join(", ");
+        console.info(`✅ Batched price update for [${currencies}] confirmed. Hash: ${result.hash}`);
+        return result.hash;
+    }
+    /**
      * Submit a multi-signed price update to the Stellar network.
      * Accepts signatures from multiple oracle servers.
      * @param currency - The currency code (e.g., "NGN", "KES")
@@ -94,7 +122,7 @@ export class StellarService {
         while (attempt <= maxRetries) {
             try {
                 const sourceAccount = await this.server.loadAccount(this.keypair.publicKey());
-                const currentFee = Math.floor(baseFee * (1 + (this.FEE_INCREMENT_PERCENTAGE * attempt)));
+                const currentFee = Math.floor(baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt));
                 const transaction = builderFn(sourceAccount, currentFee);
                 transaction.sign(this.keypair);
                 return await this.server.submitTransaction(transaction);
@@ -104,7 +132,7 @@ export class StellarService {
                 const isStuck = this.isStuckError(error);
                 if (isStuck && attempt <= maxRetries) {
                     console.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
+                    await new Promise((resolve) => setTimeout(resolve, this.RETRY_DELAY_MS));
                     continue;
                 }
                 throw error;
@@ -125,7 +153,7 @@ export class StellarService {
         while (attempt <= maxRetries) {
             try {
                 const sourceAccount = await this.server.loadAccount(this.keypair.publicKey());
-                const currentFee = Math.floor(baseFee * (1 + (this.FEE_INCREMENT_PERCENTAGE * attempt)));
+                const currentFee = Math.floor(baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt));
                 const transaction = builderFn(sourceAccount, currentFee);
                 // Sign with the local keypair first
                 transaction.sign(this.keypair);
@@ -141,8 +169,6 @@ export class StellarService {
                         const signatureBuffer = Buffer.from(sig.signature, "hex");
                         // Create a keypair from the signer's public key to get the hint
                         const signerKeypair = Keypair.fromPublicKey(sig.signerPublicKey);
-                        // Get the signature hint
-                        const hint = signerKeypair.signatureHint();
                         // Add the signature to the transaction
                         const decoratedSignature = new xdr.DecoratedSignature({
                             hint: signerKeypair.signatureHint(),
@@ -162,7 +188,7 @@ export class StellarService {
                 const isStuck = this.isStuckError(error);
                 if (isStuck && attempt <= maxRetries) {
                     console.warn(`⚠️ Multi-sig transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
+                    await new Promise((resolve) => setTimeout(resolve, this.RETRY_DELAY_MS));
                     continue;
                 }
                 throw error;
@@ -186,11 +212,11 @@ export class StellarService {
         // tx_insufficient_fee: Mandatory fee not met
         // tx_bad_seq: Sequence number mismatch (often due to race conditions/congestion)
         // timeout: Network/SDK timeout during submission
-        return (resultCode === 'tx_too_late' ||
-            resultCode === 'tx_insufficient_fee' ||
-            resultCode === 'tx_bad_seq' ||
-            error.message?.includes('timeout') ||
-            error.code === 'ECONNABORTED');
+        return (resultCode === "tx_too_late" ||
+            resultCode === "tx_insufficient_fee" ||
+            resultCode === "tx_bad_seq" ||
+            error.message?.includes("timeout") ||
+            error.code === "ECONNABORTED");
     }
     /**
      * Generate a unique ID for the transaction memo
@@ -198,7 +224,9 @@ export class StellarService {
      */
     generateMemoId(currency) {
         const timestamp = Math.floor(Date.now() / 1000);
-        const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+        const random = Math.floor(Math.random() * 1000)
+            .toString()
+            .padStart(3, "0");
         // Stellar MemoText limit is 28 bytes
         const id = `SF-${currency}-${timestamp}-${random}`;
         return id.substring(0, 28);

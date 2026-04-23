@@ -2,6 +2,8 @@ import { createServer } from "http";
 import compression from "compression";
 import cors from "cors";
 import dotenv from "dotenv";
+import express from "express";
+import { Horizon } from "@stellar/stellar-sdk";
 import app from "./app";
 import prisma from "./lib/prisma";
 import { disconnectRedis } from "./lib/redis";
@@ -60,100 +62,6 @@ const horizonUrl =
     ? "https://horizon.stellar.org"
     : "https://horizon-testnet.stellar.org";
 const horizonServer = new Horizon.Server(horizonUrl);
-
-// Middleware
-app.use(morgan("dev"));
-app.use(compression());
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow non-browser requests (e.g. curl, server-to-server)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      if (origin === dashboardUrl) {
-        return callback(null, true);
-      }
-
-      return callback(
-        new Error(
-          `CORS policy: Access denied from origin ${origin}. Allowed origin: ${dashboardUrl}`,
-        ),
-      );
-    },
-    credentials: true,
-  }),
-);
-// Security headers with Helmet - placed early before routes
-// Configured for API backend with minimal CSP to avoid breaking Swagger UI or frontend integration
-app.use(
-  helmet({
-    // Content Security Policy - minimal config for API backend
-    // Allows Swagger UI to function while providing basic XSS protection
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"], // 'unsafe-inline' needed for Swagger UI
-        styleSrc: ["'self'", "'unsafe-inline'"], // 'unsafe-inline' needed for Swagger UI inline styles
-        imgSrc: ["'self'", "data:", "https:"], // Allow data: for Swagger UI icons, https: for external images
-        fontSrc: ["'self'", "https:"], // Allow fonts from https (Swagger UI uses cdnjs)
-        connectSrc: ["'self'", "https:"], // Allow API calls to any https endpoint
-        frameAncestors: ["'none'"], // Prevent clickjacking
-      },
-    },
-    // X-Content-Type-Options: nosniff - prevents MIME type sniffing
-    noSniff: true,
-    // X-Frame-Options: DENY - prevents clickjacking (also covered by CSP frameAncestors)
-    frameguard: { action: "deny" },
-    // Referrer-Policy: strict-origin-when-cross-origin - sends referrer only to same-origin
-    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-    // X-XSS-Protection is deprecated and not recommended (modern browsers use CSP instead)
-    xssFilter: false,
-    // Hide X-Powered-By header to reduce fingerprinting
-    hidePoweredBy: true,
-    // Strict-Transport-Security for HTTPS enforcement (only if behind HTTPS proxy)
-    hsts: { maxAge: 31536000, includeSubDomains: false, preload: false },
-  }),
-);
-app.use(express.json());
-
-// Swagger documentation
-app.use("/api/v1/docs", swaggerUi.serve);
-app.get(
-  "/api/v1/docs",
-  swaggerUi.setup(specs, {
-    swaggerOptions: {
-      persistAuthorization: true,
-    },
-    customCss: `
-    .topbar { display: none; }
-    .swagger-ui .api-info { margin-bottom: 20px; }
-  `,
-    customSiteTitle: "StellarFlow API Documentation",
-  }),
-);
-
-// Expose metrics endpoint early so it's not rate limited, but still want timing
-app.use(metricsMiddleware);
-app.get("/metrics", metricsEndpoint);
-
-// Apply Rate Limiting to all /api routes
-app.use("/api", rateLimitMiddleware);
-
-// Apply API Key Middleware to all /api routes
-app.use("/api", apiKeyMiddleware);
-// Apply API Key Middleware to all /api/v1 routes
-app.use("/api/v1", apiKeyMiddleware);
-
-// Routes
-app.use("/api/v1/market-rates", marketRatesRouter);
-app.use("/api/v1/history", historyRouter);
-app.use("/api/v1/stats", statsRouter);
-app.use("/api/v1/intelligence", intelligenceRouter);
-app.use("/api/v1/price-updates", priceUpdatesRouter);
-app.use("/api/v1/assets", assetsRouter);
-app.use("/api/v1/status", statusRouter);
 
 // Health check endpoint
 /**
@@ -279,30 +187,6 @@ app.get("/", (req, res) => {
         assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
       },
     },
-  });
-});
-
-// Error handling middleware
-app.use(
-  (
-    err: Error,
-    req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction,
-  ) => {
-    console.error("Unhandled error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Internal server error",
-    });
-  },
-);
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Endpoint not found",
   });
 });
 

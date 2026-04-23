@@ -9,7 +9,11 @@ const router = express.Router();
 router.post("/multi-sig/request", async (req, res) => {
     try {
         const { priceReviewId, currency, rate, source, memoId } = req.body;
-        if (!priceReviewId || !currency || rate === undefined || !source || !memoId) {
+        if (!priceReviewId ||
+            !currency ||
+            rate === undefined ||
+            !source ||
+            !memoId) {
             return res.status(400).json({
                 success: false,
                 error: "Missing required fields: priceReviewId, currency, rate, source, memoId",
@@ -91,7 +95,9 @@ router.post("/multi-sig/:multiSigPriceId/request-signature", async (req, res) =>
     try {
         const multiSigPriceId = req.params.multiSigPriceId;
         const { remoteServerUrl } = req.body;
-        if (!multiSigPriceId || typeof multiSigPriceId !== "string" || !remoteServerUrl) {
+        if (!multiSigPriceId ||
+            typeof multiSigPriceId !== "string" ||
+            !remoteServerUrl) {
             return res.status(400).json({
                 success: false,
                 error: "Missing multiSigPriceId (in URL) or remoteServerUrl (in body)",
@@ -248,7 +254,10 @@ router.post("/multi-sig/:multiSigPriceId/record-submission", async (req, res) =>
     try {
         const multiSigPriceId = req.params.multiSigPriceId;
         const { memoId, stellarTxHash } = req.body;
-        if (!multiSigPriceId || typeof multiSigPriceId !== "string" || !memoId || !stellarTxHash) {
+        if (!multiSigPriceId ||
+            typeof multiSigPriceId !== "string" ||
+            !memoId ||
+            !stellarTxHash) {
             return res.status(400).json({
                 success: false,
                 error: "Missing required fields: multiSigPriceId (in URL), memoId, stellarTxHash (in body)",

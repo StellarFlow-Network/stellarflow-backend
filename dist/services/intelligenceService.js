@@ -33,10 +33,11 @@ export class IntelligenceService {
             });
             // If no record exists before 24h ago, try to find the earliest record available
             // but only if it's at least some reasonable time ago (e.g. 1h)
-            const baseRecord = historicalRecord || await prisma.priceHistory.findFirst({
-                where: { currency: asset },
-                orderBy: { timestamp: "asc" },
-            });
+            const baseRecord = historicalRecord ||
+                (await prisma.priceHistory.findFirst({
+                    where: { currency: asset },
+                    orderBy: { timestamp: "asc" },
+                }));
             if (!baseRecord || baseRecord.id === latestRecord.id) {
                 return "0.0%";
             }

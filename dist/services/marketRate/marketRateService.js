@@ -5,6 +5,7 @@ import { StellarService } from "../stellarService";
 import { multiSigService } from "../multiSigService";
 import { getIO } from "../../lib/socket";
 import prisma from "../../lib/prisma";
+import { getRedisClient } from "../../lib/redis";
 import dotenv from "dotenv";
 import { normalizeDateToUTC } from "../../utils/timeUtils";
 dotenv.config();
@@ -13,12 +14,15 @@ import { priceReviewService } from "../priceReviewService";
 export class MarketRateService {
     fetchers = new Map();
     cache = new Map();
-    latestPricesCache = null;
     stellarService;
     CACHE_DURATION_MS = 30000; // 30 seconds
-    LATEST_PRICES_CACHE_DURATION_MS = 10000; // 10 seconds
+    LATEST_PRICES_REDIS_KEY = "market-rates:latest:v1";
+    LATEST_PRICES_REDIS_TTL_SECONDS = 5;
     multiSigEnabled;
     remoteOracleServers = [];
+    pendingSubmissions = [];
+    batchTimeout = null;
+    BATCH_WINDOW_MS = 5000; // 5 seconds bundle window
     constructor() {
         this.stellarService = new StellarService();
         // Check if multi-sig is enabled
@@ -73,8 +77,10 @@ export class MarketRateService {
                         : normalizedCurrency;
                     try {
                         const clientAny = prisma;
-                        if (clientAny?.errorLog && typeof clientAny.errorLog.create === "function") {
-                            clientAny.errorLog.create({
+                        if (clientAny?.errorLog &&
+                            typeof clientAny.errorLog.create === "function") {
+                            clientAny.errorLog
+                                .create({
                                 data: {
                                     providerName,
                                     errorMessage: fetchError instanceof Error
@@ -82,7 +88,8 @@ export class MarketRateService {
                                         : JSON.stringify(fetchError),
                                     occurredAt: new Date(),
                                 },
-                            }).catch(() => { });
+                            })
+                                .catch(() => { });
                         }
                     }
                     catch {
@@ -156,6 +163,14 @@ export class MarketRateService {
                         const txHash = await this.stellarService.submitPriceUpdate(normalizedCurrency, rate.rate, memoId);
                         await priceReviewService.markContractSubmitted(reviewAssessment.reviewRecordId, memoId, txHash);
                         console.info(`[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`);
+                        this.pendingSubmissions.push({
+                            currency: normalizedCurrency,
+                            rate: rate.rate,
+                            reviewId: reviewAssessment.reviewRecordId,
+                        });
+                        if (!this.batchTimeout) {
+                            this.batchTimeout = setTimeout(() => this.flushBatchSubmissions(), this.BATCH_WINDOW_MS);
+                        }
                     }
                 }
                 catch (stellarError) {
@@ -225,6 +240,12 @@ export class MarketRateService {
         const promises = currencies.map((currency) => this.getRate(currency));
         return Promise.all(promises);
     }
+    async flushBatchSubmissions() {
+        this.batchTimeout = null;
+        if (this.pendingSubmissions.length === 0)
+            return;
+        this.pendingSubmissions = [];
+    }
     async healthCheck() {
         const results = {};
         for (const [currency, fetcher] of this.fetchers) {
@@ -240,37 +261,112 @@ export class MarketRateService {
     getSupportedCurrencies() {
         return Array.from(this.fetchers.keys());
     }
-    async getLatestPrices() {
-        const cachedLatestPrices = this.latestPricesCache;
-        if (cachedLatestPrices && cachedLatestPrices.expiry > new Date()) {
-            return cachedLatestPrices.response;
+    getLatestPricesCacheClient() {
+        const redisClient = getRedisClient();
+        if (!redisClient || !redisClient.isReady) {
+            return null;
         }
-        const results = await this.getAllRates();
-        const successfulRates = results
-            .filter((result) => result.success && result.data)
-            .map((result) => result.data);
-        const errorMessages = results
-            .filter((result) => !result.success)
-            .map((result) => result.error)
-            .filter((error) => !!error);
-        const allSuccessful = successfulRates.length > 0 && errorMessages.length === 0;
-        const response = {
-            success: allSuccessful,
-            data: successfulRates,
-            ...(errorMessages.length > 0 && { error: errorMessages[0] }),
-            ...(errorMessages.length > 0 && { errors: errorMessages }),
-        };
-        if (response.success) {
-            this.latestPricesCache = {
-                response,
-                expiry: new Date(Date.now() + this.LATEST_PRICES_CACHE_DURATION_MS),
+        return redisClient;
+    }
+    async fetchLatestPricesFromDatabase() {
+        const rows = await prisma.priceHistory.findMany({
+            where: {
+                currency: {
+                    in: this.getSupportedCurrencies(),
+                },
+            },
+            distinct: ["currency"],
+            orderBy: [{ currency: "asc" }, { timestamp: "desc" }],
+        });
+        return rows.map((row) => ({
+            currency: row.currency,
+            rate: Number(row.rate),
+            timestamp: normalizeDateToUTC(row.timestamp),
+            source: row.source,
+        }));
+    }
+    parseLatestPricesCache(cachedPayload) {
+        try {
+            const parsed = JSON.parse(cachedPayload);
+            if (typeof parsed.success !== "boolean") {
+                return null;
+            }
+            const hydratedRates = Array.isArray(parsed.data)
+                ? parsed.data.map((rate) => ({
+                    ...rate,
+                    timestamp: new Date(rate.timestamp),
+                    ...(rate.comparisonTimestamp && {
+                        comparisonTimestamp: new Date(rate.comparisonTimestamp),
+                    }),
+                }))
+                : undefined;
+            return {
+                success: parsed.success,
+                ...(hydratedRates && { data: hydratedRates }),
+                ...(parsed.error && { error: parsed.error }),
+                ...(parsed.errors && { errors: parsed.errors }),
             };
         }
-        return response;
+        catch {
+            return null;
+        }
+    }
+    async getLatestPrices() {
+        const cacheClient = this.getLatestPricesCacheClient();
+        if (cacheClient) {
+            try {
+                const cachedPayload = await cacheClient.get(this.LATEST_PRICES_REDIS_KEY);
+                if (cachedPayload) {
+                    const cachedResponse = this.parseLatestPricesCache(cachedPayload);
+                    if (cachedResponse) {
+                        return cachedResponse;
+                    }
+                }
+            }
+            catch (error) {
+                console.warn("Failed to read latest prices from Redis cache:", error);
+            }
+        }
+        try {
+            const latestRates = await this.fetchLatestPricesFromDatabase();
+            if (latestRates.length === 0) {
+                return {
+                    success: false,
+                    error: "No latest prices available",
+                };
+            }
+            const response = {
+                success: true,
+                data: latestRates,
+            };
+            if (cacheClient) {
+                try {
+                    await cacheClient.setEx(this.LATEST_PRICES_REDIS_KEY, this.LATEST_PRICES_REDIS_TTL_SECONDS, JSON.stringify(response));
+                }
+                catch (error) {
+                    console.warn("Failed to write latest prices to Redis cache:", error);
+                }
+            }
+            return response;
+        }
+        catch (error) {
+            return {
+                success: false,
+                error: error instanceof Error
+                    ? error.message
+                    : "Failed to fetch latest prices from database",
+            };
+        }
     }
     clearCache() {
         this.cache.clear();
-        this.latestPricesCache = null;
+        const cacheClient = this.getLatestPricesCacheClient();
+        if (!cacheClient) {
+            return;
+        }
+        void cacheClient.del(this.LATEST_PRICES_REDIS_KEY).catch((error) => {
+            console.warn("Failed to clear latest prices Redis cache:", error);
+        });
     }
     async getPendingReviews() {
         return priceReviewService.getPendingReviews();
@@ -342,7 +438,7 @@ export class MarketRateService {
      * This is non-blocking and doesn't wait for completion.
      * Errors are logged but don't fail the price fetch operation.
      */
-    async requestRemoteSignaturesAsync(multiSigPriceId, memoId) {
+    async requestRemoteSignaturesAsync(multiSigPriceId, _memoId) {
         console.info(`[MarketRateService] Requesting signatures from ${this.remoteOracleServers.length} remote servers for multi-sig ${multiSigPriceId}`);
         // Request signatures from all remote servers in parallel
         const signatureRequests = this.remoteOracleServers.map((serverUrl) => multiSigService.requestRemoteSignature(multiSigPriceId, serverUrl));
