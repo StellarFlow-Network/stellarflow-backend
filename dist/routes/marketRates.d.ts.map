@@ -1,1 +1,1 @@
-{"version":3,"file":"marketRates.d.ts","sourceRoot":"","sources":["../../src/routes/marketRates.ts"],"names":[],"mappings":"AAMA;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;GAgCG;AACH,QAAA,MAAM,MAAM,4CAAW,CAAC;AAgYxB,eAAe,MAAM,CAAC"}
+{"version":3,"file":"marketRates.d.ts","sourceRoot":"","sources":["../../src/routes/marketRates.ts"],"names":[],"mappings":"AAUA,QAAA,MAAM,MAAM,KAAW,CAAC;AAqPxB,eAAe,MAAM,CAAC"}

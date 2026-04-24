@@ -10,12 +10,16 @@ import { multiSigSubmissionService } from "./services/multiSigSubmissionService"
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
+import { watchConfig } from "./config/configWatcher";
+import { validateDatabaseSchema } from "./utils/dbValidator";
 // Load environment variables
 dotenv.config();
 // Enable log masking to prevent sensitive data leaks
 enableGlobalLogMasking();
 // [OPS] Implement "Environment Variable" Check on Start
 validateEnv();
+// [OPS] Validate database schema on startup
+await validateDatabaseSchema();
 // Validate required environment variables
 const requiredEnvVars = ["STELLAR_SECRET", "DATABASE_URL"];
 const missingEnvVars = [];
@@ -164,6 +168,11 @@ app.get("/", (req, res) => {
             history: {
                 assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
             },
+            intelligence: {
+                hourlyVolatility: "/api/v1/intelligence/hourly-volatility",
+                priceChange: "/api/v1/intelligence/price-change/:currency",
+                staleCurrencies: "/api/v1/intelligence/stale",
+            },
         },
     });
 });
@@ -172,6 +181,15 @@ const httpServer = createServer(app);
 initSocket(httpServer);
 let sorobanEventListener = null;
 let isShuttingDown = false;
+let stopEnvFileWatcher;
+const stopConfigWatcher = watchConfig((cfg) => {
+    sorobanEventListener?.restart(cfg.sorobanPollIntervalMs);
+    multiSigSubmissionService.restart(cfg.multiSigPollIntervalMs);
+    hourlyAverageService.restart(cfg.hourlyAverageCheckIntervalMs);
+});
+if (process.env.ENABLE_ENV_FILE_WATCHER === "true") {
+    stopEnvFileWatcher = startEnvFileWatcher();
+}
 const closeHttpServer = () => new Promise((resolve, reject) => {
     if (!httpServer.listening) {
         resolve();
@@ -196,6 +214,8 @@ const shutdown = async (signal) => {
         sorobanEventListener?.stop();
         multiSigSubmissionService.stop();
         hourlyAverageService.stop();
+        stopConfigWatcher();
+        stopEnvFileWatcher?.();
         await closeHttpServer();
         console.log("HTTP server closed.");
         await prisma.$disconnect();

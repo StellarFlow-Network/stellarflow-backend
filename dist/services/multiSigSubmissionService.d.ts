@@ -18,6 +18,7 @@ export declare class MultiSigSubmissionService {
      * Stop the background submission service.
      */
     stop(): void;
+    restart(newIntervalMs: number): void;
     /**
      * Check for approved multi-sig prices and submit them to Stellar.
      * This is the main polling function.

@@ -6,6 +6,7 @@ import morgan from "morgan";
 import swaggerUi from "swagger-ui-express";
 import cacheMetricsRouter from "./cache/CacheMetrics";
 import { specs } from "./lib/swagger";
+import { adminMiddleware } from "./middleware/adminMiddleware";
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 import { maintenanceMiddleware } from "./middleware/maintenanceMiddleware";
 import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
@@ -126,6 +127,11 @@ app.get("/", (req, res) => {
       },
       history: {
         assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
+      },
+      intelligence: {
+        hourlyVolatility: "/api/v1/intelligence/hourly-volatility",
+        priceChange: "/api/v1/intelligence/price-change/:currency",
+        staleCurrencies: "/api/v1/intelligence/stale",
       },
       derivedAssets: {
         crossRate: "/api/v1/derived-assets/rate/:base/:quote",

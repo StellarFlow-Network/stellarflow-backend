@@ -1,13 +1,15 @@
 import prisma from "../lib/prisma";
 import { Keypair } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import { assertSigningAllowed } from "../state/appState";
+/* global fetch */
 dotenv.config();
 export class MultiSigService {
     localSignerPublicKey;
     localSignerSecret;
     signerName;
-    SIGNATURE_EXPIRY_MS = 3600000; // 1 hour
-    REQUIRED_SIGNATURES = 2; // Default: 2 signatures needed
+    SIGNATURE_EXPIRY_MS = 60 * 60 * 1000;
+    REQUIRED_SIGNATURES;
     constructor() {
         const secret = process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
         if (!secret) {
@@ -16,13 +18,11 @@ export class MultiSigService {
         this.localSignerSecret = secret;
         this.localSignerPublicKey = Keypair.fromSecret(secret).publicKey();
         this.signerName = process.env.ORACLE_SIGNER_NAME || "oracle-server";
-        const requiredSigs = process.env.MULTI_SIG_REQUIRED_COUNT;
-        if (requiredSigs) {
-            const parsed = parseInt(requiredSigs, 10);
-            if (!isNaN(parsed) && parsed > 0) {
-                this.REQUIRED_SIGNATURES = parsed;
-            }
-        }
+        const requiredSignatures = Number.parseInt(process.env.MULTI_SIG_REQUIRED_COUNT || "2", 10);
+        this.REQUIRED_SIGNATURES =
+            Number.isFinite(requiredSignatures) && requiredSignatures > 0
+                ? requiredSignatures
+                : 2;
     }
     /**
      * Create a multi-sig price update request.
@@ -36,6 +36,7 @@ export class MultiSigService {
                 currency,
                 rate,
                 source,
+                memoId,
                 status: "PENDING",
                 requiredSignatures: this.REQUIRED_SIGNATURES,
                 collectedSignatures: 0,
@@ -57,7 +58,6 @@ export class MultiSigService {
      * This creates a signature from the current server instance and records it.
      */
     async signMultiSigPrice(multiSigPriceId) {
-        // Fetch the multi-sig price record
         const multiSigPrice = await prisma.multiSigPrice.findUnique({
             where: { id: multiSigPriceId },
         });
@@ -68,43 +68,47 @@ export class MultiSigService {
             throw new Error(`Cannot sign MultiSigPrice ${multiSigPriceId} - status is ${multiSigPrice.status}`);
         }
         if (new Date() > multiSigPrice.expiresAt) {
-            // Mark as expired
             await prisma.multiSigPrice.update({
                 where: { id: multiSigPriceId },
                 data: { status: "EXPIRED" },
             });
             throw new Error(`MultiSigPrice ${multiSigPriceId} has expired`);
         }
-        // Create a deterministic signature message based on the price data
+        await assertSigningAllowed();
         const signatureMessage = this.createSignatureMessage(multiSigPrice.currency, multiSigPrice.rate.toString(), multiSigPrice.source);
-        // Sign the message
-        const keypair = Keypair.fromSecret(this.localSignerSecret);
-        // Convert message to buffer and sign
-        const messageBuffer = Buffer.from(signatureMessage, "utf-8");
-        const signatureBuffer = keypair.sign(messageBuffer);
-        const signature = signatureBuffer.toString("hex");
-        // Record the signature
-        await prisma.multiSigSignature.create({
-            data: {
-                multiSigPriceId,
-                signerPublicKey: this.localSignerPublicKey,
-                signerName: this.signerName,
-                signature,
-            },
-        });
-        // Increment the collected signatures count
-        const updated = await prisma.multiSigPrice.update({
-            where: { id: multiSigPriceId },
-            data: {
-                collectedSignatures: {
-                    increment: 1,
+        const signature = Keypair.fromSecret(this.localSignerSecret)
+            .sign(Buffer.from(signatureMessage, "utf-8"))
+            .toString("hex");
+        let createdSignature = true;
+        try {
+            await prisma.multiSigSignature.create({
+                data: {
+                    multiSigPriceId,
+                    signerPublicKey: this.localSignerPublicKey,
+                    signerName: this.signerName,
+                    signature,
                 },
-            },
-        });
-        console.info(`[MultiSig] Added signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`);
-        // If we have all required signatures, mark as approved
-        if (updated.collectedSignatures >= updated.requiredSignatures) {
-            await this.approveMultiSigPrice(multiSigPriceId);
+            });
+        }
+        catch (error) {
+            if (error?.code !== "P2002") {
+                throw error;
+            }
+            createdSignature = false;
+        }
+        if (createdSignature) {
+            const updated = await prisma.multiSigPrice.update({
+                where: { id: multiSigPriceId },
+                data: {
+                    collectedSignatures: {
+                        increment: 1,
+                    },
+                },
+            });
+            console.info(`[MultiSig] Added signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`);
+            if (updated.collectedSignatures >= updated.requiredSignatures) {
+                await this.approveMultiSigPrice(multiSigPriceId);
+            }
         }
         return { signature, signerPublicKey: this.localSignerPublicKey };
     }
@@ -114,6 +118,7 @@ export class MultiSigService {
      */
     async requestRemoteSignature(multiSigPriceId, remoteServerUrl) {
         try {
+            await assertSigningAllowed();
             const multiSigPrice = await prisma.multiSigPrice.findUnique({
                 where: { id: multiSigPriceId },
             });
@@ -131,8 +136,7 @@ export class MultiSigService {
                 memoId: multiSigPrice.memoId || "",
                 signerPublicKey: this.localSignerPublicKey,
             };
-            // Make HTTP request to remote server
-            const response = await fetch(`${remoteServerUrl}/api/price-updates/sign`, {
+            const response = await fetch(`${remoteServerUrl}/api/v1/price-updates/sign`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -144,22 +148,38 @@ export class MultiSigService {
                 const error = await response.text().catch(() => response.statusText);
                 return { success: false, error: `Remote server error: ${error}` };
             }
-            const result = await response.json();
-            if (result.signature && result.signerPublicKey) {
-                // Record the remote signature
+            const result = (await response.json());
+            if (result.success === false) {
+                return {
+                    success: false,
+                    error: result.error || "Remote server rejected the signing request",
+                };
+            }
+            const signatureData = result.data ?? result;
+            if (!signatureData.signature || !signatureData.signerPublicKey) {
+                return {
+                    success: false,
+                    error: "Remote server did not return signature data",
+                };
+            }
+            let createdSignature = true;
+            try {
                 await prisma.multiSigSignature.create({
                     data: {
                         multiSigPriceId,
-                        signerPublicKey: result.signerPublicKey,
-                        signerName: result.signerName || "remote-signer",
-                        signature: result.signature,
+                        signerPublicKey: signatureData.signerPublicKey,
+                        signerName: signatureData.signerName || "remote-signer",
+                        signature: signatureData.signature,
                     },
-                }).catch((err) => {
-                    // Ignore duplicate signers
-                    if (err.code !== "P2002")
-                        throw err;
                 });
-                // Increment collected signatures
+            }
+            catch (error) {
+                if (error?.code !== "P2002") {
+                    throw error;
+                }
+                createdSignature = false;
+            }
+            if (createdSignature) {
                 const updated = await prisma.multiSigPrice.update({
                     where: { id: multiSigPriceId },
                     data: {
@@ -169,7 +189,6 @@ export class MultiSigService {
                     },
                 });
                 console.info(`[MultiSig] Added remote signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`);
-                // Check if all signatures are collected
                 if (updated.collectedSignatures >= updated.requiredSignatures) {
                     await this.approveMultiSigPrice(multiSigPriceId);
                 }
@@ -186,7 +205,7 @@ export class MultiSigService {
      * Returns the price details and current signature status.
      */
     async getMultiSigPrice(multiSigPriceId) {
-        const multiSigPrice = await prisma.multiSigPrice.findUnique({
+        return prisma.multiSigPrice.findUnique({
             where: { id: multiSigPriceId },
             include: {
                 multiSigSignatures: {
@@ -199,14 +218,13 @@ export class MultiSigService {
                 },
             },
         });
-        return multiSigPrice;
     }
     /**
      * Get all pending multi-sig prices.
      * Useful for monitoring and checking expiration.
      */
     async getPendingMultiSigPrices() {
-        return await prisma.multiSigPrice.findMany({
+        return prisma.multiSigPrice.findMany({
             where: { status: "PENDING" },
             include: {
                 multiSigSignatures: {
@@ -225,11 +243,10 @@ export class MultiSigService {
      * Should be called periodically by a background job.
      */
     async cleanupExpiredRequests() {
-        const now = new Date();
         const result = await prisma.multiSigPrice.updateMany({
             where: {
                 status: "PENDING",
-                expiresAt: { lt: now },
+                expiresAt: { lt: new Date() },
             },
             data: {
                 status: "EXPIRED",
@@ -241,27 +258,13 @@ export class MultiSigService {
         return result.count;
     }
     /**
-     * Mark a multi-sig price as approved (all signatures collected).
-     * This happens automatically when all required signatures are collected.
-     */
-    async approveMultiSigPrice(multiSigPriceId) {
-        await prisma.multiSigPrice.update({
-            where: { id: multiSigPriceId },
-            data: {
-                status: "APPROVED",
-            },
-        });
-        console.info(`[MultiSig] MultiSigPrice ${multiSigPriceId} is now APPROVED (all signatures collected)`);
-    }
-    /**
      * Get all signatures for a multi-sig price.
      * Returns the signatures needed for submitting to Stellar.
      */
     async getSignatures(multiSigPriceId) {
-        const signatures = await prisma.multiSigSignature.findMany({
+        return prisma.multiSigSignature.findMany({
             where: { multiSigPriceId },
         });
-        return signatures;
     }
     /**
      * Mark a multi-sig price as submitted to Stellar.
@@ -279,15 +282,6 @@ export class MultiSigService {
         console.info(`[MultiSig] MultiSigPrice ${multiSigPriceId} submitted to Stellar - TxHash: ${stellarTxHash}`);
     }
     /**
-     * Create a deterministic message for signing.
-     * Must be consistent across all servers to ensure valid multi-sig.
-     */
-    createSignatureMessage(currency, rate, source) {
-        // Create a deterministic message format
-        // Format: "SF-PRICE-<CURRENCY>-<RATE>-<SOURCE>"
-        return `SF-PRICE-${currency}-${rate}-${source}`;
-    }
-    /**
      * Get this server's signer identity.
      */
     getLocalSignerInfo() {
@@ -295,6 +289,26 @@ export class MultiSigService {
             publicKey: this.localSignerPublicKey,
             name: this.signerName,
         };
+    }
+    /**
+     * Mark a multi-sig price as approved (all signatures collected).
+     * This happens automatically when all required signatures are collected.
+     */
+    async approveMultiSigPrice(multiSigPriceId) {
+        await prisma.multiSigPrice.update({
+            where: { id: multiSigPriceId },
+            data: {
+                status: "APPROVED",
+            },
+        });
+        console.info(`[MultiSig] MultiSigPrice ${multiSigPriceId} is now APPROVED (all signatures collected)`);
+    }
+    /**
+     * Create a deterministic message for signing.
+     * Must be consistent across all servers to ensure valid multi-sig.
+     */
+    createSignatureMessage(currency, rate, source) {
+        return `SF-PRICE-${currency}-${rate}-${source}`;
     }
 }
 // Export singleton instance

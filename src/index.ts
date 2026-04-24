@@ -191,6 +191,11 @@ app.get("/", (req, res) => {
       history: {
         assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
       },
+      intelligence: {
+        hourlyVolatility: "/api/v1/intelligence/hourly-volatility",
+        priceChange: "/api/v1/intelligence/price-change/:currency",
+        staleCurrencies: "/api/v1/intelligence/stale",
+      },
     },
   });
 });

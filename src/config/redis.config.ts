@@ -36,6 +36,7 @@ export const CACHE_KEYS = {
   },
   intelligence: {
     all: () => "intelligence:all",
+    hourlyVolatility: () => "intelligence:hourly-volatility",
   },
   assets: {
     all: () => "assets:all",
