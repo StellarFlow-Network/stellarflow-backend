@@ -1,36 +1,9 @@
-# Outlier Detection Filter Implementation
+# TODO: Add Indexes for Historical Data Query Performance
 
-## Approved Plan Steps
+## Plan
+- [x] Analyze schema.prisma and query patterns in history.ts / intelligenceService.ts
+- [x] Edit prisma/schema.prisma: Add `@@index([updatedAt])` to PriceHistory model
+- [x] Edit prisma/schema.prisma: Add `@@index([symbol])` to Currency model
+- [x] Run Prisma generate and db push to apply indexes (Node/npm not available in current terminal; user must run locally)
+- [ ] Verify changes and test endpoints
 
-### 1. [x] Create src/logic/outlierFilter.ts
-
-- Implement filterOutliers() with IQR method
-- Add isOutlier() helper
-
-### 2. [x] Update src/services/marketRate/types.ts
-
-- Re-export filterOutliers
-
-### 3. [x] Update ghsFetcher.ts
-
-- Import filterOutliers
-- Filter rateValues before calculateMedian
-
-### 4. [x] Update kesFetcher.ts
-
-- Import filterOutliers
-- Filter in fetchFromBinance() and other price collection points
-
-### 5. [x] Update ngnFetcher.ts
-
-- Import filterOutliers
-- Filter rateValues before calculateMedian
-
-### 6. [x] Test changes
-
-- Run npm test
-- Manual test: import MarketRateService and call getRate('GHS')
-
-### 7. [x] Complete
-
-- attempt_completion

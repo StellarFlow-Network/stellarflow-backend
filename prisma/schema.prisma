@@ -21,6 +21,7 @@ model PriceHistory {
 
   @@index([currency, timestamp])
   @@index([timestamp])
+  @@index([updatedAt])
   @@unique([currency, source, timestamp])
 }
 
@@ -35,6 +36,8 @@ model Currency {
   updatedAt   DateTime  @updatedAt
 
   priceHistory PriceHistory[]
+
+  @@index([symbol])
 }
 
 // On-Chain Confirmed Price Model
