@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma";
 import { Keypair } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import logger from "../utils/logger";
 
 dotenv.config();
 
@@ -76,7 +77,7 @@ export class MultiSigService {
       },
     });
 
-    console.info(
+    logger.info(
       `[MultiSig] Created signature request ${created.id} for ${currency} rate ${rate}`
     );
 
@@ -156,7 +157,7 @@ export class MultiSigService {
       },
     });
 
-    console.info(
+    logger.info(
       `[MultiSig] Added signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`
     );
 
@@ -238,7 +239,7 @@ export class MultiSigService {
           },
         });
 
-        console.info(
+        logger.info(
           `[MultiSig] Added remote signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`
         );
 
@@ -250,7 +251,7 @@ export class MultiSigService {
 
       return { success: true };
     } catch (error) {
-      console.error(
+      logger.error(
         `[MultiSig] Failed to request signature from ${remoteServerUrl}:`,
         error
       );
@@ -317,7 +318,7 @@ export class MultiSigService {
     });
 
     if (result.count > 0) {
-      console.warn(
+      logger.warn(
         `[MultiSig] Expired ${result.count} multi-sig price requests`
       );
     }
@@ -337,7 +338,7 @@ export class MultiSigService {
       },
     });
 
-    console.info(
+    logger.info(
       `[MultiSig] MultiSigPrice ${multiSigPriceId} is now APPROVED (all signatures collected)`
     );
   }
@@ -372,7 +373,7 @@ export class MultiSigService {
       },
     });
 
-    console.info(
+    logger.info(
       `[MultiSig] MultiSigPrice ${multiSigPriceId} submitted to Stellar - TxHash: ${stellarTxHash}`
     );
   }

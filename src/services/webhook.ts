@@ -1,4 +1,5 @@
 import axios from "axios";
+import logger from "../utils/logger";
 
 export class WebhookService {
   private webhookUrl: string | undefined;
@@ -47,7 +48,7 @@ export class WebhookService {
         timeout: 5000,
       });
     } catch (error) {
-      console.error("Failed to send webhook notification:", error);
+      logger.error("Failed to send webhook notification:", error);
     }
   }
 

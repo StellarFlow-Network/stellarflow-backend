@@ -12,6 +12,7 @@ import { multiSigService } from "../multiSigService";
 import { getIO } from "../../lib/socket";
 import prisma from "../../lib/prisma";
 import dotenv from "dotenv";
+import logger from "../../utils/logger";
 
 dotenv.config();
 
@@ -42,7 +43,7 @@ export class MarketRateService {
     }
 
     if (this.multiSigEnabled) {
-      console.info(
+      logger.info(
         `[MarketRateService] Multi-Sig mode ENABLED with ${this.remoteOracleServers.length} remote servers`
       );
     }
@@ -144,7 +145,7 @@ export class MarketRateService {
 
           if (this.multiSigEnabled) {
             // Multi-sig workflow: create request and collect signatures
-            console.info(
+            logger.info(
               `[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`
             );
 
@@ -159,11 +160,11 @@ export class MarketRateService {
             // Sign locally first
             try {
               await multiSigService.signMultiSigPrice(signatureRequest.multiSigPriceId);
-              console.info(
+              logger.info(
                 `[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`
               );
             } catch (error) {
-              console.error(
+              logger.error(
                 `[MarketRateService] Failed to sign locally:`,
                 error
               );
@@ -175,7 +176,7 @@ export class MarketRateService {
               signatureRequest.multiSigPriceId,
               memoId
             ).catch((err) => {
-              console.error(
+              logger.error(
                 `[MarketRateService] Error requesting remote signatures:`,
                 err
               );
@@ -198,18 +199,18 @@ export class MarketRateService {
               memoId,
               txHash
             );
-            console.info(
+            logger.info(
               `[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`
             );
           }
         } catch (stellarError) {
-          console.error(
+          logger.error(
             "Failed to submit price update to Stellar network:",
             stellarError
           );
         }
       } else {
-        console.warn(
+        logger.warn(
           `Manual review required for ${normalizedCurrency} rate ${rate.rate}. Skipping contract submission.`
         );
       }
@@ -238,7 +239,7 @@ export class MarketRateService {
           },
         });
       } catch (dbError) {
-        console.error("Failed to persist price history:", dbError);
+        logger.error("Failed to persist price history:", dbError);
       }
 
       // Broadcast fresh price to all connected dashboard clients
@@ -420,7 +421,7 @@ export class MarketRateService {
     multiSigPriceId: number,
     memoId: string
   ): Promise<void> {
-    console.info(
+    logger.info(
       `[MarketRateService] Requesting signatures from ${this.remoteOracleServers.length} remote servers for multi-sig ${multiSigPriceId}`
     );
 
@@ -435,16 +436,16 @@ export class MarketRateService {
     results.forEach((result, index) => {
       if (result.status === "fulfilled") {
         if (result.value.success) {
-          console.info(
+          logger.info(
             `[MarketRateService] ✅ Signature request sent to ${this.remoteOracleServers[index]}`
           );
         } else {
-          console.warn(
+          logger.warn(
             `[MarketRateService] ⚠️ Signature request failed for ${this.remoteOracleServers[index]}: ${result.value.error}`
           );
         }
       } else {
-        console.error(
+        logger.error(
           `[MarketRateService] ❌ Error requesting signature from ${this.remoteOracleServers[index]}:`,
           result.reason
         );

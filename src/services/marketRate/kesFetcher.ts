@@ -9,6 +9,7 @@ import {
   SourceTrustLevel,
   calculateWeightedAverage,
 } from "./types";
+import logger from "../../utils/logger";
 
 /**
  * Binance Ticker Response Interface
@@ -177,7 +178,7 @@ async function withRetry<T>(
           config.maxDelayMs,
         );
 
-        console.debug(
+        logger.debug(
           `Retry attempt ${attempt}/${config.maxAttempts} for ${operationName} ` +
             `after ${delay}ms delay. Error: ${lastError.message}`,
         );
@@ -286,13 +287,13 @@ export class KESRateFetcher implements MarketRateFetcher {
       );
 
       if (binanceRate) {
-        console.info(`✅ KES rate fetched from Binance: ${binanceRate.rate}`);
+        logger.info(`✅ KES rate fetched from Binance: ${binanceRate.rate}`);
         return binanceRate;
       }
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : "Unknown Binance error";
-      console.warn(`⚠️ Binance API failed: ${errorMsg}`);
+      logger.warn(`⚠️ Binance API failed: ${errorMsg}`);
       errors.push({
         source: "Binance API",
         message: errorMsg,
@@ -304,13 +305,13 @@ export class KESRateFetcher implements MarketRateFetcher {
     try {
       const cbkRate = await this.fetchFromCBK();
       if (cbkRate) {
-        console.info(`✅ KES rate fetched from CBK: ${cbkRate.rate}`);
+        logger.info(`✅ KES rate fetched from CBK: ${cbkRate.rate}`);
         return cbkRate;
       }
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : "Unknown CBK error";
-      console.warn(`⚠️ Central Bank of Kenya API failed: ${errorMsg}`);
+      logger.warn(`⚠️ Central Bank of Kenya API failed: ${errorMsg}`);
       errors.push({
         source: "Central Bank of Kenya",
         message: errorMsg,
@@ -327,7 +328,7 @@ export class KESRateFetcher implements MarketRateFetcher {
           source.name,
         );
         if (rate) {
-          console.info(`✅ KES rate fetched from ${source.name}: ${rate.rate}`);
+          logger.info(`✅ KES rate fetched from ${source.name}: ${rate.rate}`);
           return rate;
         }
       } catch (error) {
@@ -335,7 +336,7 @@ export class KESRateFetcher implements MarketRateFetcher {
           error instanceof Error
             ? error.message
             : `Unknown ${source.name} error`;
-        console.warn(`⚠️ ${source.name} failed: ${errorMsg}`);
+        logger.warn(`⚠️ ${source.name} failed: ${errorMsg}`);
         errors.push({
           source: source.name,
           message: errorMsg,
@@ -346,7 +347,7 @@ export class KESRateFetcher implements MarketRateFetcher {
 
     // All sources failed - throw comprehensive error
     const errorMessage = this.buildErrorMessage(errors);
-    console.error(`❌ All KES rate sources failed: ${errorMessage}`);
+    logger.error(`❌ All KES rate sources failed: ${errorMessage}`);
     throw new Error(errorMessage);
   }
 
@@ -378,7 +379,7 @@ export class KESRateFetcher implements MarketRateFetcher {
         });
       }
     } catch (error) {
-      console.debug("Direct XLMKES pair not available");
+      logger.debug("Direct XLMKES pair not available");
     }
 
     // Strategy 2: Try Binance P2P API
@@ -393,7 +394,7 @@ export class KESRateFetcher implements MarketRateFetcher {
         });
       }
     } catch (error) {
-      console.debug("Binance P2P API not available");
+      logger.debug("Binance P2P API not available");
     }
 
     // Strategy 3: XLMUSDT × KES/USD calculation
@@ -408,7 +409,7 @@ export class KESRateFetcher implements MarketRateFetcher {
         });
       }
     } catch (error) {
-      console.debug("XLMUSDT pair not available");
+      logger.debug("XLMUSDT pair not available");
     }
 
     // If no prices were collected, return null
@@ -536,7 +537,7 @@ export class KESRateFetcher implements MarketRateFetcher {
   private async fetchFromCBK(): Promise<MarketRate | null> {
     const cbkSource = RATE_SOURCES[2];
     if (!cbkSource) {
-      console.warn("Central Bank of Kenya source not configured");
+      logger.warn("Central Bank of Kenya source not configured");
       return null;
     }
 
@@ -606,7 +607,7 @@ export class KESRateFetcher implements MarketRateFetcher {
 
       if (axiosError.response) {
         // Server responded with error status
-        console.warn(
+        logger.warn(
           `${source} returned status ${axiosError.response.status}: ` +
             `${axiosError.response.statusText}`,
         );
@@ -615,20 +616,20 @@ export class KESRateFetcher implements MarketRateFetcher {
         axiosError.code === "ETIMEDOUT"
       ) {
         // Request timeout
-        console.warn(`${source} request timed out`);
+        logger.warn(`${source} request timed out`);
       } else if (axiosError.code === "ERR_NETWORK") {
         // Network error
-        console.warn(`${source} network error - service may be down`);
+        logger.warn(`${source} network error - service may be down`);
       } else if (axiosError.message.includes("Network Error")) {
         // CORS or network issue
-        console.warn(
+        logger.warn(
           `${source} network error - check connectivity or CORS settings`,
         );
       } else {
-        console.warn(`${source} error: ${axiosError.message}`);
+        logger.warn(`${source} error: ${axiosError.message}`);
       }
     } else {
-      console.warn(`${source} unexpected error:`, error);
+      logger.warn(`${source} unexpected error:`, error);
     }
   }
 
@@ -657,12 +658,12 @@ export class KESRateFetcher implements MarketRateFetcher {
       );
 
       const healthy = testRate !== null && testRate.rate > 0;
-      console.debug(
+      logger.debug(
         `Health check result: ${healthy ? "HEALTHY" : "UNHEALTHY"}`,
       );
       return healthy;
     } catch (error) {
-      console.warn(
+      logger.warn(
         "Health check failed:",
         error instanceof Error ? error.message : "Unknown error",
       );
@@ -685,6 +686,6 @@ export class KESRateFetcher implements MarketRateFetcher {
    */
   resetCircuitBreaker(): void {
     this.circuitBreaker.reset();
-    console.info("Circuit breaker reset");
+    logger.info("Circuit breaker reset");
   }
 }

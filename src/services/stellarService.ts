@@ -9,6 +9,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import logger from "../utils/logger";
 
 dotenv.config();
 
@@ -78,7 +79,8 @@ export class StellarService {
       baseFee
     );
     
-    console.info(`✅ Price update for ${currency} confirmed. Hash: ${result.hash}`);
+    
+    logger.info(`✅ Price update for ${currency} confirmed. Hash: ${result.hash}`);
     return result.hash;
   }
 
@@ -119,7 +121,8 @@ export class StellarService {
       baseFee
     );
     
-    console.info(`✅ Multi-signed price update for ${currency} confirmed. Hash: ${result.hash}`);
+    
+    logger.info(`✅ Multi-signed price update for ${currency} confirmed. Hash: ${result.hash}`);
     return result.hash;
   }
 
@@ -152,7 +155,7 @@ export class StellarService {
         const isStuck = this.isStuckError(error);
         
         if (isStuck && attempt <= maxRetries) {
-          console.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
+          logger.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
           await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
           continue;
         }
@@ -217,7 +220,7 @@ export class StellarService {
             transaction.signatures.push(decoratedSignature);
             
           } catch (error) {
-            console.error(
+            logger.error(
               `[StellarService] Failed to add signature for ${sig.signerPublicKey}:`,
               error
             );
@@ -232,7 +235,7 @@ export class StellarService {
         const isStuck = this.isStuckError(error);
         
         if (isStuck && attempt <= maxRetries) {
-          console.warn(`⚠️ Multi-sig transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
+          logger.warn(`⚠️ Multi-sig transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
           await new Promise(resolve => setTimeout(resolve, this.RETRY_DELAY_MS));
           continue;
         }

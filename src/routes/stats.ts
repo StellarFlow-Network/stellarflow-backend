@@ -1,5 +1,6 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import logger from "../utils/logger";
 
 const router = Router();
 
@@ -128,7 +129,7 @@ router.get("/volume", async (req, res) => {
       data: volumeStats,
     });
   } catch (error) {
-    console.error("Error fetching volume stats:", error);
+    logger.error("Error fetching volume stats:", error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : "Internal server error",

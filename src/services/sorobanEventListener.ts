@@ -4,6 +4,7 @@ import type { OnChainPrice } from "@prisma/client";
 import prisma from "../lib/prisma";
 import { getIO } from "../lib/socket";
 import dotenv from "dotenv";
+import logger from "../utils/logger";
 
 dotenv.config();
 
@@ -47,12 +48,12 @@ export class SorobanEventListener {
 
   async start(): Promise<void> {
     if (this.isRunning) {
-      console.warn("SorobanEventListener is already running");
+      logger.warn("SorobanEventListener is already running");
       return;
     }
 
     this.isRunning = true;
-    console.log(
+    logger.info(
       `[EventListener] Starting listener for account ${this.oraclePublicKey}`
     );
 
@@ -62,7 +63,7 @@ export class SorobanEventListener {
     });
     if (lastRecord) {
       this.lastProcessedLedger = lastRecord.ledgerSeq;
-      console.log(
+      logger.info(
         `[EventListener] Resuming from ledger ${this.lastProcessedLedger}`
       );
     }
@@ -73,7 +74,7 @@ export class SorobanEventListener {
     // Start periodic polling
     this.pollTimer = setInterval(() => {
       this.pollTransactions().catch((err) => {
-        console.error("[EventListener] Poll error:", err);
+        logger.error("[EventListener] Poll error:", err);
       });
     }, this.pollIntervalMs);
   }
@@ -84,7 +85,7 @@ export class SorobanEventListener {
       this.pollTimer = null;
     }
     this.isRunning = false;
-    console.log("[EventListener] Stopped");
+    logger.info("[EventListener] Stopped");
   }
 
   private async pollTransactions(): Promise<void> {
@@ -133,7 +134,7 @@ export class SorobanEventListener {
         error instanceof Error &&
         error.message.includes("status code 404")
       ) {
-        console.log("[EventListener] No transactions found for oracle account");
+        logger.info("[EventListener] No transactions found for oracle account");
         return;
       }
       throw error;
@@ -183,7 +184,7 @@ export class SorobanEventListener {
         const rate = parseFloat(valueStr);
 
         if (isNaN(rate)) {
-          console.warn(
+          logger.warn(
             `[EventListener] Invalid rate value for ${currency}: ${valueStr}`
           );
           continue;
@@ -199,7 +200,7 @@ export class SorobanEventListener {
         });
       }
     } catch (error) {
-      console.error(
+      logger.error(
         `[EventListener] Error parsing operations for tx ${tx.hash}:`,
         error
       );
@@ -228,11 +229,11 @@ export class SorobanEventListener {
             confirmedAt: price.confirmedAt,
           },
         });
-        console.log(
+        logger.info(
           `[EventListener] Saved confirmed price: ${price.currency} = ${price.rate} (tx: ${price.txHash.substring(0, 8)}...)`
         );
       } catch (error) {
-        console.error(
+        logger.error(
           `[EventListener] Error saving price for ${price.currency}:`,
           error
         );

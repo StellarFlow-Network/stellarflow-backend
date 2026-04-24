@@ -2,6 +2,7 @@
 import { Router } from "express";
 import { getRate, getAllRates } from "../controllers/marketRatesController";
 import { MarketRateService } from "../services/marketRate";
+import logger from "../utils/logger";
 
 const marketRateService = new MarketRateService();
 
@@ -109,7 +110,7 @@ router.get("/latest", async (req, res) => {
       });
     }
   } catch (error) {
-    console.error("Error fetching latest prices:", error);
+    logger.error("Error fetching latest prices:", error);
 
     res.status(500).json({
       success: false,
