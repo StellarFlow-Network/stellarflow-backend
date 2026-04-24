@@ -1,40 +1,39 @@
-# Build stage
+# Builder stage: install all deps, generate Prisma client, build TypeScript, then prune dev deps
 FROM node:20-alpine AS builder
 
 WORKDIR /usr/src/app
 
-# Install dependencies
+# Install all dependencies (including devDependencies needed for build)
 COPY package*.json ./
-RUN npm install
+COPY package-lock.json ./
+RUN npm ci
 
-# Copy source and prisma schema
+# Copy source and schema
 COPY tsconfig.json ./
 COPY prisma ./prisma
 COPY src ./src
 
-# Generate Prisma client and build TypeScript
+# Generate Prisma client and build
 RUN npx prisma generate
 RUN npm run build
 
-# Production stage
-FROM node:20-alpine
+# Remove devDependencies so node_modules contains only production packages
+RUN npm prune --production
+
+# Runner stage: only copy production node_modules and built dist
+FROM node:20-alpine AS runner
 
 WORKDIR /usr/src/app
 
-# Copy production dependencies and built source
-COPY package*.json ./
-RUN npm install --omit=dev
+ENV NODE_ENV=production
+ENV PORT=3000
 
+# Copy only the production node modules and the compiled output
+COPY --from=builder /usr/src/app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/dist ./dist
-COPY --from=builder /usr/src/app/node_modules/.prisma ./node_modules/.prisma
-COPY prisma ./prisma
 
 # Expose the API port
 EXPOSE 3000
 
-# Set environment variables (can be overridden by docker-compose)
-ENV PORT=3000
-ENV NODE_ENV=production
-
-# Start the application with prisma sync
-CMD ["sh", "-c", "npx prisma db push && npm start"]
+# Start the app directly - avoids needing package.json in final image
+CMD ["node", "dist/index.js"]

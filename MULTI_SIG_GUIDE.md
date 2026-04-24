@@ -41,7 +41,6 @@ Three new models added to `prisma/schema.prisma`:
 - **MultiSigPrice**: Tracks multi-sig price approval requests
   - Stores currency, rate, required/collected signatures
   - Tracks expiration and submission status
-  
 - **MultiSigSignature**: Individual signatures from signers
   - Records signer identity and timestamp
   - Stores signature in hex format
@@ -81,6 +80,7 @@ ORACLE_SIGNER_NAME=oracle-server-1
 ### Example Multi-Server Setup
 
 **Server 1 (Primary):**
+
 ```bash
 ORACLE_SECRET_KEY=SBXXX...
 MULTI_SIG_ENABLED=true
@@ -91,6 +91,7 @@ ORACLE_SIGNER_NAME=oracle-primary
 ```
 
 **Server 2 (Secondary):**
+
 ```bash
 ORACLE_SECRET_KEY=SBYYY...
 MULTI_SIG_ENABLED=true
@@ -132,22 +133,26 @@ ORACLE_SIGNER_NAME=oracle-secondary
 ### Detailed Steps
 
 #### Step 1: Price Assessment
+
 - MarketRateService fetches rate
 - PriceReviewService evaluates for anomalies
 - If manual review needed → PENDING
 - If approved → proceed to multi-sig
 
 #### Step 2: Multi-Sig Request Creation
+
 - MultiSigService creates MultiSigPrice record
 - Sets required signature count (default: 2)
 - Sets expiration time (1 hour)
 
 #### Step 3: Local Signing
+
 - Local server immediately signs the price update
 - Signature stored in MultiSigSignature table
 - Collected signatures incremented
 
 #### Step 4: Remote Signature Requests (Async)
+
 ```javascript
 // Non-blocking request to remote servers
 // Each remote server independently signs
@@ -163,6 +168,7 @@ POST /api/price-updates/sign
 ```
 
 #### Step 5: Signature Aggregation
+
 - Remote servers receive request on their `/api/price-updates/sign` endpoint
 - They verify authorization token
 - They sign the price data (deterministic message format)
@@ -170,12 +176,14 @@ POST /api/price-updates/sign
 - Requesting server records remote signature
 
 #### Step 6: Approval & Submission
+
 - Once all signatures collected → MultiSigPrice.status = "APPROVED"
 - MultiSigSubmissionService polls for APPROVED prices
 - All signatures added to Stellar transaction
 - Transaction submitted with multiple signatures
 
 #### Step 7: Confirmation
+
 - After confirmation on Stellar:
   - MultiSigPrice.submittedAt set
   - Linked PriceReviewService record marked as SUBMITTED
@@ -184,6 +192,7 @@ POST /api/price-updates/sign
 ## API Endpoints
 
 ### Create Multi-Sig Request
+
 ```http
 POST /api/price-updates/multi-sig/request
 Content-Type: application/json
@@ -209,6 +218,7 @@ Response:
 ```
 
 ### Submit Signature (Remote Server)
+
 ```http
 POST /api/price-updates/sign
 Authorization: Bearer your-secure-auth-token
@@ -236,6 +246,7 @@ Response:
 ```
 
 ### Get Multi-Sig Status
+
 ```http
 GET /api/price-updates/multi-sig/456/status
 
@@ -267,6 +278,7 @@ Response:
 ```
 
 ### Get Signed Transaction (After Approval)
+
 ```http
 GET /api/price-updates/multi-sig/456/signatures
 
@@ -294,6 +306,7 @@ Response:
 ```
 
 ### Get Signer Info
+
 ```http
 GET /api/price-updates/multi-sig/signer-info
 
@@ -308,6 +321,7 @@ Response:
 ```
 
 ### List Pending Multi-Sig Prices
+
 ```http
 GET /api/price-updates/multi-sig/pending
 
@@ -330,6 +344,7 @@ Response:
 ```
 
 ### Record Submission
+
 ```http
 POST /api/price-updates/multi-sig/456/record-submission
 Content-Type: application/json
@@ -348,33 +363,40 @@ Response:
 ## Security Considerations
 
 ### 1. Authentication
+
 - All inter-server communication requires `MULTI_SIG_AUTH_TOKEN`
 - Implement HTTPS in production for all server-to-server calls
 - Use unique token per deployment environment
 
 ### 2. Signature Verification
+
 - Deterministic message format ensures all servers sign same data
 - Format: `SF-PRICE-<CURRENCY>-<RATE>-<SOURCE>`
 - Public keys verified on Stellar network
 
 ### 3. Expiration
+
 - Multi-sig requests expire after 1 hour by default
 - Prevents old signatures from being used
 - Background cleanup job removes expired records
 
 ### 4. Rate Limiting
+
 - Consider implementing rate limiting on `POST /api/price-updates/sign`
 - Prevents signature endpoint from being abused
 
 ## Fallback Modes
 
 ### Disabling Multi-Sig
+
 Set `MULTI_SIG_ENABLED=false` to revert to single-signature mode:
+
 - Prices submitted immediately after approval
 - No remote signature requests
 - Direct submission to Stellar
 
 ### Legacy Compatibility
+
 - Code maintains backward compatibility
 - Existing single-sig endpoints still function
 - Can use multi-sig URLs even if disabled (returns appropriate errors)
@@ -382,7 +404,9 @@ Set `MULTI_SIG_ENABLED=false` to revert to single-signature mode:
 ## Monitoring & Debugging
 
 ### Check Multi-Sig Service Status
+
 Monitor logs for:
+
 ```
 [MultiSig] Created signature request 123 for NGN rate 1234.56
 [MultiSig] Added signature 2/2 for MultiSigPrice 123
@@ -393,35 +417,41 @@ Monitor logs for:
 ### Database Queries
 
 Find pending multi-sig prices:
+
 ```sql
 SELECT * FROM "MultiSigPrice" WHERE status = 'PENDING';
 ```
 
 Check signatures for a price:
+
 ```sql
 SELECT * FROM "MultiSigSignature" WHERE "multiSigPriceId" = 123;
 ```
 
 Find expired requests:
+
 ```sql
-SELECT * FROM "MultiSigPrice" 
+SELECT * FROM "MultiSigPrice"
 WHERE status = 'PENDING' AND "expiresAt" < NOW();
 ```
 
 ### Common Issues
 
 **Issue: Remote signature requests failing**
+
 - Verify `REMOTE_ORACLE_SERVERS` URLs are correct
 - Check `MULTI_SIG_AUTH_TOKEN` matches on all servers
 - Ensure network connectivity between servers
 - Check firewall rules allow inter-server communication
 
 **Issue: Signatures not being collected**
+
 - Verify remote server's `/api/price-updates/sign` endpoint is working
 - Check logs for "Failed to request signature from..."
 - Ensure `MULTI_SIG_ENABLED=true` on remote server
 
 **Issue: Prices stuck in PENDING status**
+
 - Check if required signature count is too high
 - Verify all remote servers are running and healthy
 - Check expiration times
@@ -429,6 +459,7 @@ WHERE status = 'PENDING' AND "expiresAt" < NOW();
 ## Performance Tuning
 
 ### Polling Interval
+
 ```bash
 # Check for approved prices every 10 seconds (faster)
 MULTI_SIG_POLL_INTERVAL_MS=10000
@@ -438,11 +469,14 @@ MULTI_SIG_POLL_INTERVAL_MS=60000
 ```
 
 ### Signature Expiration
+
 Current: 1 hour (3600000 ms)
 Adjust in `MultiSigService` constructor if needed
 
 ### Database Indexes
+
 All multi-sig tables have appropriate indexes:
+
 - `multiSigPrice(status, expiresAt)`
 - `multiSigSignature(multiSigPriceId)`
 

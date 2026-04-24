@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   app:
@@ -6,17 +6,35 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/stellarflow?schema=public
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/stellarflow?schema=public&sslmode=require
+      - REDIS_URL=redis://redis:6379
       - NODE_ENV=development
       - PORT=3000
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - stellarflow-net
 
   db:
     image: postgres:16-alpine
+    command: >
+      sh -c "
+      if [ ! -f /var/lib/postgresql/data/server.crt ]; then
+        # On Alpine, we might need to install openssl first if not present
+        # However, a simpler way is to just assume the user might provide them or use a safer approach.
+        # For the sake of this task, we will enable the flags and setting up the entrypoint.
+        # We will use the default alpine entrypoint but append the SSL flags.
+        apk add --no-cache openssl;
+        openssl req -new -x509 -days 365 -nodes -text -out /var/lib/postgresql/data/server.crt \
+          -keyout /var/lib/postgresql/data/server.key -subj '/CN=db';
+        chmod 600 /var/lib/postgresql/data/server.key;
+        chown postgres:postgres /var/lib/postgresql/data/server.key;
+      fi;
+      exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/var/lib/postgresql/data/server.crt -c ssl_key_file=/var/lib/postgresql/data/server.key
+      "
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -33,9 +51,25 @@ services:
     networks:
       - stellarflow-net
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stellarflow-net
+
 networks:
   stellarflow-net:
     driver: bridge
 
 volumes:
   pgdata:
+  redis_data:

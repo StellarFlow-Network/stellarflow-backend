@@ -1,19 +1,30 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
 import logger from "../utils/logger";
+import { cacheMiddleware } from "../cache/CacheMiddleware";
+import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 
 const router = Router();
 
-// GET /api/stats/volume?date=2024-01-15
-router.get("/volume", async (req, res) => {
+// GET /api/v1/stats/volume?date=2024-01-15
+router.get(
+  "/volume",
+  cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.stats,
+    keyGenerator: (req) => {
+      const dateParam = req.query.date as string;
+      const targetDate = dateParam ? new Date(dateParam) : new Date();
+      const dateStr = targetDate.toISOString().split("T")[0];
+      return CACHE_KEYS.stats.volume(dateStr);
+    },
+  }),
+  async (req, res) => {
   try {
     const dateParam = req.query.date as string;
-    
+
     // Default to today if no date provided
-    const targetDate = dateParam 
-      ? new Date(dateParam) 
-      : new Date();
-    
+    const targetDate = dateParam ? new Date(dateParam) : new Date();
+
     // Validate date
     if (isNaN(targetDate.getTime())) {
       res.status(400).json({
@@ -22,14 +33,14 @@ router.get("/volume", async (req, res) => {
       });
       return;
     }
-    
+
     // Set start and end of day (UTC)
     const startOfDay = new Date(targetDate);
     startOfDay.setUTCHours(0, 0, 0, 0);
-    
+
     const endOfDay = new Date(targetDate);
     endOfDay.setUTCHours(23, 59, 59, 999);
-    
+
     // Get price history entries for the day
     const priceHistoryCount = await prisma.priceHistory.count({
       where: {
@@ -39,7 +50,7 @@ router.get("/volume", async (req, res) => {
         },
       },
     });
-    
+
     // Get on-chain price entries for the day
     const onChainPriceCount = await prisma.onChainPrice.count({
       where: {
@@ -49,7 +60,7 @@ router.get("/volume", async (req, res) => {
         },
       },
     });
-    
+
     // Get provider requests for the day (from reputation service)
     const providerStats = await prisma.providerReputation.findMany({
       select: {
@@ -61,12 +72,21 @@ router.get("/volume", async (req, res) => {
         lastFailure: true,
       },
     });
-    
+
     // Calculate total requests (this is cumulative, not daily)
-    const totalApiRequests = providerStats.reduce((sum: number, provider: any) => sum + provider.totalRequests, 0);
-    const totalSuccessfulRequests = providerStats.reduce((sum: number, provider: any) => sum + provider.successfulRequests, 0);
-    const totalFailedRequests = providerStats.reduce((sum: number, provider: any) => sum + provider.failedRequests, 0);
-    
+    const totalApiRequests = providerStats.reduce(
+      (sum: number, provider: any) => sum + provider.totalRequests,
+      0,
+    );
+    const totalSuccessfulRequests = providerStats.reduce(
+      (sum: number, provider: any) => sum + provider.successfulRequests,
+      0,
+    );
+    const totalFailedRequests = providerStats.reduce(
+      (sum: number, provider: any) => sum + provider.failedRequests,
+      0,
+    );
+
     // Get unique currencies that had activity
     const activeCurrencies = await prisma.priceHistory.findMany({
       where: {
@@ -78,9 +98,9 @@ router.get("/volume", async (req, res) => {
       select: {
         currency: true,
       },
-      distinct: ['currency'],
+      distinct: ["currency"],
     });
-    
+
     // Get unique data sources for the day
     const activeSources = await prisma.priceHistory.findMany({
       where: {
@@ -92,11 +112,11 @@ router.get("/volume", async (req, res) => {
       select: {
         source: true,
       },
-      distinct: ['source'],
+      distinct: ["source"],
     });
-    
+
     const volumeStats = {
-      date: targetDate.toISOString().split('T')[0],
+      date: targetDate.toISOString().split("T")[0],
       dataPoints: {
         priceHistoryEntries: priceHistoryCount,
         onChainConfirmations: onChainPriceCount,
@@ -106,7 +126,11 @@ router.get("/volume", async (req, res) => {
         total: totalApiRequests,
         successful: totalSuccessfulRequests,
         failed: totalFailedRequests,
-        successRate: totalApiRequests > 0 ? (totalSuccessfulRequests / totalApiRequests * 100).toFixed(2) + '%' : '0%',
+        successRate:
+          totalApiRequests > 0
+            ? ((totalSuccessfulRequests / totalApiRequests) * 100).toFixed(2) +
+              "%"
+            : "0%",
       },
       activity: {
         activeCurrencies: activeCurrencies.length,
@@ -117,13 +141,17 @@ router.get("/volume", async (req, res) => {
       providers: providerStats.map((provider: any) => ({
         name: provider.providerName,
         totalRequests: provider.totalRequests,
-        successRate: provider.totalRequests > 0 
-          ? (provider.successfulRequests / provider.totalRequests * 100).toFixed(2) + '%'
-          : '0%',
+        successRate:
+          provider.totalRequests > 0
+            ? (
+                (provider.successfulRequests / provider.totalRequests) *
+                100
+              ).toFixed(2) + "%"
+            : "0%",
         lastActivity: provider.lastSuccess || provider.lastFailure,
       })),
     };
-    
+
     res.json({
       success: true,
       data: volumeStats,

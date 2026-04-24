@@ -1,4 +1,6 @@
 import axios, { AxiosError } from "axios";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout";
+import { withRetry } from "../../utils/retryUtil";
 import {
   MarketRateFetcher,
   MarketRate,
@@ -8,6 +10,7 @@ import {
   filterOutliers,
   SourceTrustLevel,
   calculateWeightedAverage,
+ createFetcherLogger
 } from "./types";
 import logger from "../../utils/logger";
 
@@ -244,46 +247,25 @@ const APPROXIMATE_KES_USD_RATE = 130.5;
  * 4. Fallback to Central Bank of Kenya
  */
 export class KESRateFetcher implements MarketRateFetcher {
-  private readonly circuitBreaker: CircuitBreaker;
-  private readonly retryConfig: RetryConfig;
+  private readonly coinGeckoUrl =
+    "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=kes&include_last_updated_at=true";
+  private logger = createFetcherLogger("KESRate");
 
-  constructor() {
-    this.circuitBreaker = new CircuitBreaker({
-      failureThreshold: 5,
-      recoveryTimeoutMs: 30000,
-      halfOpenMaxAttempts: 3,
-    });
-
-    this.retryConfig = {
-      maxAttempts: 3,
-      baseDelayMs: 500,
-      maxDelayMs: 5000,
-      backoffMultiplier: 2,
-    };
-  }
-
-  /**
-   * Get the currency code this fetcher handles
-   */
   getCurrency(): string {
     return "KES";
   }
 
-  /**
-   * Fetch the KES/XLM rate with comprehensive error handling
-   * Tries multiple strategies in order of reliability
-   */
   async fetchRate(): Promise<MarketRate> {
-    const errors: RateFetchError[] = [];
-
-    // Strategy 1: Try Binance API (with circuit breaker and retry)
     try {
-      const binanceRate = await this.circuitBreaker.execute(() =>
-        withRetry(
-          () => this.fetchFromBinance(),
-          this.retryConfig,
-          "Binance API",
-        ),
+      const response = await withRetry(
+        () =>
+          axios.get(this.coinGeckoUrl, {
+            timeout: OUTGOING_HTTP_TIMEOUT_MS,
+            headers: {
+              "User-Agent": "StellarFlow-Oracle/1.0",
+            },
+          }),
+        { maxRetries: 3, retryDelay: 1000 },
       );
 
       if (binanceRate) {
@@ -549,49 +531,25 @@ export class KESRateFetcher implements MarketRateFetcher {
           Accept: "application/json",
         },
       });
+      const stellarPrice = response.data.stellar;
+      if (
+        stellarPrice &&
+        typeof stellarPrice.kes === "number" &&
+        stellarPrice.kes > 0
+      ) {
+        const lastUpdatedAt = stellarPrice.last_updated_at
+          ? new Date(stellarPrice.last_updated_at * 1000)
+          : new Date();
 
-      // CBK API returns rates in KES per USD
-      const rates = response.data;
-      if (rates && rates.length > 0) {
-        const latestRate = rates[0];
         return {
           currency: "KES",
-          rate: parseFloat(latestRate.rate),
-          timestamp: new Date(latestRate.date),
-          source: cbkSource.name,
+          rate: stellarPrice.kes,
+          timestamp: lastUpdatedAt,
+          source: "CoinGecko (KES)",
         };
       }
 
-      return null;
-    } catch (error) {
-      this.handleApiError(error, cbkSource.name);
-      return null;
-    }
-  }
-
-  /**
-   * Fetch rate from alternative sources
-   */
-  private async fetchFromSource(
-    source: RateSource,
-  ): Promise<MarketRate | null> {
-    try {
-      const response = await axios.get(source.url, {
-        timeout: 10000,
-        headers: {
-          "User-Agent": "StellarFlow-Oracle/1.0",
-          Accept: "application/json",
-        },
-      });
-
-      // Placeholder - in production, parse actual response
-      // For now, return approximate rate
-      return {
-        currency: "KES",
-        rate: APPROXIMATE_KES_USD_RATE,
-        timestamp: new Date(),
-        source: source.name,
-      };
+      throw new Error("Invalid response from CoinGecko for KES");
     } catch (error) {
       this.handleApiError(error, source.name);
       return null;
@@ -633,22 +591,6 @@ export class KESRateFetcher implements MarketRateFetcher {
     }
   }
 
-  /**
-   * Build comprehensive error message from all failures
-   */
-  private buildErrorMessage(errors: RateFetchError[]): string {
-    if (errors.length === 0) {
-      return "Failed to fetch KES rate: All sources returned no data";
-    }
-
-    const messages = errors.map((e) => `${e.source}: ${e.message}`).join("; ");
-    return `Failed to fetch KES rate from all sources. Errors: ${messages}`;
-  }
-
-  /**
-   * Health check for the fetcher
-   * Tests Binance API availability specifically
-   */
   async isHealthy(): Promise<boolean> {
     try {
       const testRate = await withRetry(
@@ -687,5 +629,11 @@ export class KESRateFetcher implements MarketRateFetcher {
   resetCircuitBreaker(): void {
     this.circuitBreaker.reset();
     logger.info("Circuit breaker reset");
+  }
+      const rate = await this.fetchRate();
+      return rate.rate > 0;
+    } catch {
+      return false;
+    }
   }
 }

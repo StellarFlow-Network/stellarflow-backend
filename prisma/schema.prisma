@@ -6,6 +6,7 @@ datasource db {
   provider = "postgresql"
 }
 
+
 model PriceHistory {
   id          Int       @id @default(autoincrement())
   currency    String    @db.VarChar(10)
@@ -148,4 +149,26 @@ model ErrorLog {
 
   @@index([providerName])
   @@index([occurredAt])
+}
+
+model Relayer {
+  id            Int      @id @default(autoincrement())
+  name          String   @db.VarChar(100)
+  apiKey        String   @unique @db.VarChar(255)
+  isActive      Boolean  @default(true)
+  allowedAssets String[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Hourly Statistics for smoothing out price spikes
+model HourlyStats {
+  id           Int      @id @default(autoincrement())
+  currency     String   @db.VarChar(10)
+  averageRate  Decimal  @db.Decimal(20, 10)
+  hour         DateTime // The start of the hour this average represents
+  createdAt    DateTime @default(now())
+
+  @@unique([currency, hour])
+  @@index([hour])
 }

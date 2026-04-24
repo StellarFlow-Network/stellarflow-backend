@@ -33,7 +33,9 @@ export const getRate = async (req, res) => {
 export const getAllRates = async (req, res) => {
     try {
         const results = await marketRateService.getAllRates();
-        const rates = results.filter((result) => result.success).map((result) => result.data);
+        const rates = results
+            .filter((result) => result.success)
+            .map((result) => result.data);
         res.json({
             success: true,
             data: rates,

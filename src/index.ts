@@ -1,26 +1,35 @@
-import express from "express";
 import { createServer } from "http";
+import compression from "compression";
 import cors from "cors";
 import dotenv from "dotenv";
-import morgan from "morgan";
+import express from "express";
 import { Horizon } from "@stellar/stellar-sdk";
-import swaggerUi from "swagger-ui-express";
-import marketRatesRouter from "./routes/marketRates";
-import historyRouter from "./routes/history";
-import statsRouter from "./routes/stats";
-import intelligenceRouter from "./routes/intelligence";
-import priceUpdatesRouter from "./routes/priceUpdates";
-import assetsRouter from "./routes/assets";
+import app from "./app";
 import prisma from "./lib/prisma";
+import { disconnectRedis } from "./lib/redis";
 import { initSocket } from "./lib/socket";
 import { SorobanEventListener } from "./services/sorobanEventListener";
-import { specs } from "./lib/swagger";
 import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 import logger from "./utils/logger";
+import { validateEnv } from "./utils/envValidator";
+import { enableGlobalLogMasking } from "./utils/logMasker";
+import { hourlyAverageService } from "./services/hourlyAverageService";
+import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
+import { watchConfig } from "./config/configWatcher";
+import { validateDatabaseSchema } from "./utils/dbValidator";
 
 // Load environment variables
 dotenv.config();
+
+// Enable log masking to prevent sensitive data leaks
+enableGlobalLogMasking();
+
+// [OPS] Implement "Environment Variable" Check on Start
+validateEnv();
+
+// [OPS] Validate database schema on startup
+await validateDatabaseSchema();
 
 // Validate required environment variables
 const requiredEnvVars = ["STELLAR_SECRET", "DATABASE_URL"] as const;
@@ -42,14 +51,15 @@ if (missingEnvVars.length > 0) {
 }
 
 const dashboardUrl =
-  process.env.DASHBOARD_URL || process.env.FRONTEND_URL || "http://localhost:3000";
+  process.env.DASHBOARD_URL ||
+  process.env.FRONTEND_URL ||
+  "http://localhost:3000";
 
 if (!dashboardUrl) {
   logger.error("❌ Missing required environment variable: DASHBOARD_URL");
   process.exit(1);
 }
 
-const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Horizon server for health checks
@@ -224,18 +234,21 @@ app.get("/", (req, res) => {
     endpoints: {
       health: "/health",
       marketRates: {
-        allRates: "/api/market-rates/rates",
-        singleRate: "/api/market-rates/rate/:currency",
-        health: "/api/market-rates/health",
-        currencies: "/api/market-rates/currencies",
-        cache: "/api/market-rates/cache",
-        clearCache: "POST /api/market-rates/cache/clear",
+        allRates: "/api/v1/market-rates/rates",
+        singleRate: "/api/v1/market-rates/rate/:currency",
+        health: "/api/v1/market-rates/health",
+        currencies: "/api/v1/market-rates/currencies",
+        cache: "/api/v1/market-rates/cache",
+        clearCache: "POST /api/v1/market-rates/cache/clear",
+      },
+      system: {
+        metrics: "/metrics",
       },
       stats: {
-        volume: "/api/stats/volume?date=YYYY-MM-DD",
+        volume: "/api/v1/stats/volume?date=YYYY-MM-DD",
       },
       history: {
-        assetHistory: "/api/history/:asset?range=1d|7d|30d|90d",
+        assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
       },
     },
   });
@@ -253,21 +266,86 @@ app.use(
     res.status(500).json({
       success: false,
       error: "Internal server error",
-    });
-  },
-);
-
-// 404 handler
-app.use("*", (req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Endpoint not found",
-  });
-});
-
 // Start server
 const httpServer = createServer(app);
 initSocket(httpServer);
+let sorobanEventListener: SorobanEventListener | null = null;
+let isShuttingDown = false;
+let stopEnvFileWatcher: (() => void) | undefined;
+const stopConfigWatcher = watchConfig((cfg) => {
+  sorobanEventListener?.restart(cfg.sorobanPollIntervalMs);
+  multiSigSubmissionService.restart(cfg.multiSigPollIntervalMs);
+  hourlyAverageService.restart(cfg.hourlyAverageCheckIntervalMs);
+});
+
+if (process.env.ENABLE_ENV_FILE_WATCHER === "true") {
+  stopEnvFileWatcher = startEnvFileWatcher();
+}
+
+const closeHttpServer = (): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (!httpServer.listening) {
+      resolve();
+      return;
+    }
+
+    httpServer.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+
+const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
+  if (isShuttingDown) {
+    console.log(
+      `Shutdown already in progress. Received duplicate ${signal} signal.`,
+    );
+    return;
+  }
+
+  isShuttingDown = true;
+  console.log(`${signal} received. Starting graceful shutdown...`);
+
+  try {
+    sorobanEventListener?.stop();
+    multiSigSubmissionService.stop();
+    hourlyAverageService.stop();
+    stopConfigWatcher();
+    stopEnvFileWatcher?.();
+
+    await closeHttpServer();
+    console.log("HTTP server closed.");
+
+    await prisma.$disconnect();
+    console.log("Database connections closed cleanly.");
+
+    await disconnectRedis();
+    console.log("Redis connections closed cleanly.");
+
+    process.exit(0);
+  } catch (error) {
+    console.error("Graceful shutdown failed:", error);
+    process.exit(1);
+  }
+};
+
+process.once("SIGINT", () => {
+  shutdown("SIGINT").catch((error) => {
+    console.error("Unhandled SIGINT shutdown error:", error);
+    process.exit(1);
+  });
+});
+
+process.once("SIGTERM", () => {
+  shutdown("SIGTERM").catch((error) => {
+    console.error("Unhandled SIGTERM shutdown error:", error);
+    process.exit(1);
+  });
+});
 
 httpServer.listen(PORT, () => {
   logger.info(`🌊 StellarFlow Backend running on port ${PORT}`);
@@ -282,9 +360,9 @@ httpServer.listen(PORT, () => {
 
   // Start Soroban event listener to track confirmed on-chain prices
   try {
-    const eventListener = new SorobanEventListener();
-    eventListener.start().catch((err) => {
-      logger.error("Failed to start event listener:", err);
+    sorobanEventListener = new SorobanEventListener();
+    sorobanEventListener.start().catch((err) => {
+      console.error("Failed to start event listener:", err);
     });
     logger.info(`👂 Soroban event listener started`);
   } catch (err) {
@@ -292,6 +370,7 @@ httpServer.listen(PORT, () => {
       "Event listener not started:",
       err instanceof Error ? err.message : err,
     );
+    sorobanEventListener = null;
   }
 
   // Start multi-sig submission service if enabled
@@ -307,6 +386,19 @@ httpServer.listen(PORT, () => {
         err instanceof Error ? err.message : err,
       );
     }
+  }
+
+  // Start background hourly average job
+  try {
+    hourlyAverageService.start().catch((err: Error) => {
+      console.error("Failed to start hourly average service:", err);
+    });
+    console.log(`📊 Hourly average service started`);
+  } catch (err) {
+    console.warn(
+      "Hourly average service not started:",
+      err instanceof Error ? err.message : err,
+    );
   }
 });
 

@@ -1,5 +1,7 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import { cacheMiddleware } from "../cache/CacheMiddleware";
+import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 
 const router = Router();
 
@@ -12,12 +14,12 @@ const RANGE_MAP: Record<string, number> = {
 
 /**
  * @swagger
- * /api/history/{asset}:
+ * /api/v1/history/{asset}:
  *   get:
  *     tags:
  *       - History
  *     summary: Get price history for an asset
- *     description: Retrieve historical price data for a specific asset within a specified time range
+ *     description: Retrieve historical price data for a specific asset within a specified time range or date range
  *     parameters:
  *       - in: path
  *         name: asset
@@ -31,8 +33,19 @@ const RANGE_MAP: Record<string, number> = {
  *         schema:
  *           type: string
  *           enum: ['1d', '7d', '30d', '90d']
- *           default: '7d'
- *         description: Time range for historical data
+ *         description: Predefined time range for historical data (ignored if from/to are provided)
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: Start date for historical data (ISO 8601)
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: End date for historical data (ISO 8601)
  *     responses:
  *       '200':
  *         description: Successfully retrieved price history
@@ -52,34 +65,72 @@ const RANGE_MAP: Record<string, number> = {
  *                   items:
  *                     $ref: '#/components/schemas/PriceHistory'
  *       '400':
- *         description: Invalid range parameter
+ *         description: Invalid range or date parameters
  *       '404':
  *         description: No history found for the asset
  *       '500':
  *         description: Internal server error
  */
-// GET /api/history/:asset?range=7d
-router.get("/:asset", async (req, res) => {
+// GET /api/v1/history/:asset?range=7d
+// GET /api/v1/history/:asset?from=2024-01-01&to=2024-01-07
+router.get(
+  "/:asset",
+  cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.history,
+    keyGenerator: (req) => {
+      const asset = req.params.asset.toUpperCase();
+      const range = (req.query.range as string) || "7d";
+      return CACHE_KEYS.history.asset(asset, range);
+    },
+  }),
+  async (req, res) => {
   const asset = req.params.asset.toUpperCase();
-  const rangeParam = (req.query.range as string) ?? "7d";
-  const days = RANGE_MAP[rangeParam];
+  const rangeParam = req.query.range as string;
+  const fromParam = req.query.from as string;
+  const toParam = req.query.to as string;
 
-  if (!days) {
-    res.status(400).json({
-      success: false,
-      error: `Invalid range. Supported values: ${Object.keys(RANGE_MAP).join(", ")}`,
-    });
-    return;
+  let since: Date | undefined;
+  let until: Date | undefined;
+
+  if (fromParam || toParam) {
+    if (fromParam) {
+      since = new Date(fromParam);
+      if (isNaN(since.getTime())) {
+        res.status(400).json({ success: false, error: "Invalid 'from' date" });
+        return;
+      }
+    }
+    if (toParam) {
+      until = new Date(toParam);
+      if (isNaN(until.getTime())) {
+        res.status(400).json({ success: false, error: "Invalid 'to' date" });
+        return;
+      }
+    }
+  } else {
+    const range = rangeParam ?? "7d";
+    const days = RANGE_MAP[range];
+    if (!days) {
+      res.status(400).json({
+        success: false,
+        error: `Invalid range. Supported values: ${Object.keys(RANGE_MAP).join(", ")}`,
+      });
+      return;
+    }
+    since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   }
 
   try {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const where: any = {
+      currency: asset,
+      timestamp: {},
+    };
+
+    if (since) where.timestamp.gte = since;
+    if (until) where.timestamp.lte = until;
 
     const rows = await prisma.priceHistory.findMany({
-      where: {
-        currency: asset,
-        timestamp: { gte: since },
-      },
+      where,
       orderBy: { timestamp: "asc" },
       select: { timestamp: true, rate: true, source: true },
     });
@@ -87,7 +138,7 @@ router.get("/:asset", async (req, res) => {
     if (rows.length === 0) {
       res.status(404).json({
         success: false,
-        error: `No history found for ${asset} in the last ${rangeParam}`,
+        error: `No history found for ${asset} in the specified timeframe`,
       });
       return;
     }
@@ -95,7 +146,7 @@ router.get("/:asset", async (req, res) => {
     res.json({
       success: true,
       asset,
-      range: rangeParam,
+      range: rangeParam || "custom",
       data: rows.map(
         (r: { timestamp: Date; rate: unknown; source: string }) => ({
           timestamp: r.timestamp.toISOString(),

@@ -1,12 +1,11 @@
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import prisma from "../lib/prisma";
 export class ReputationService {
     async recordSuccess(providerName, endpoint, latencyMs) {
         const existing = await prisma.providerReputation.findUnique({
             where: {
                 providerName_endpoint: {
                     providerName,
-                    endpoint: endpoint || '',
+                    endpoint: endpoint || "",
                 },
             },
         });
@@ -17,7 +16,9 @@ export class ReputationService {
         // Calculate new average latency
         let newAvgLatency = existing?.averageLatency || null;
         if (latencyMs && existing?.averageLatency) {
-            newAvgLatency = (existing.averageLatency * existing.successfulRequests + latencyMs) / newSuccessfulRequests;
+            newAvgLatency =
+                (existing.averageLatency * existing.successfulRequests + latencyMs) /
+                    newSuccessfulRequests;
         }
         else if (latencyMs) {
             newAvgLatency = latencyMs;
@@ -28,7 +29,7 @@ export class ReputationService {
             where: {
                 providerName_endpoint: {
                     providerName,
-                    endpoint: endpoint || '',
+                    endpoint: endpoint || "",
                 },
             },
             update: {
@@ -38,14 +39,14 @@ export class ReputationService {
                 lastSuccess: new Date(),
                 consecutiveFailures: newConsecutiveFailures,
                 consecutiveIncorrect: newConsecutiveIncorrect,
-                status: 'online',
+                status: "online",
                 reliabilityScore,
                 lastUpdated: new Date(),
             },
             create: {
                 providerName,
-                endpoint: endpoint || '',
-                status: 'online',
+                endpoint: endpoint || "",
+                status: "online",
                 totalRequests: 1,
                 successfulRequests: 1,
                 averageLatency: latencyMs || null,
@@ -59,7 +60,7 @@ export class ReputationService {
             where: {
                 providerName_endpoint: {
                     providerName,
-                    endpoint: endpoint || '',
+                    endpoint: endpoint || "",
                 },
             },
         });
@@ -67,16 +68,16 @@ export class ReputationService {
         const newFailedRequests = (existing?.failedRequests || 0) + 1;
         let newConsecutiveFailures = (existing?.consecutiveFailures || 0) + 1;
         let newConsecutiveIncorrect = existing?.consecutiveIncorrect || 0;
-        if (errorType === 'incorrect') {
+        if (errorType === "incorrect") {
             newConsecutiveIncorrect = (existing?.consecutiveIncorrect || 0) + 1;
         }
         // Determine status based on consecutive failures
-        let status = 'online';
+        let status = "online";
         if (newConsecutiveFailures >= 5) {
-            status = 'offline';
+            status = "offline";
         }
         else if (newConsecutiveFailures >= 2) {
-            status = 'degraded';
+            status = "degraded";
         }
         // Calculate reliability score
         const successfulRequests = existing?.successfulRequests || 0;
@@ -85,7 +86,7 @@ export class ReputationService {
             where: {
                 providerName_endpoint: {
                     providerName,
-                    endpoint: endpoint || '',
+                    endpoint: endpoint || "",
                 },
             },
             update: {
@@ -93,7 +94,7 @@ export class ReputationService {
                 failedRequests: newFailedRequests,
                 lastFailure: new Date(),
                 consecutiveFailures: newConsecutiveFailures,
-                ...(errorType === 'incorrect' && {
+                ...(errorType === "incorrect" && {
                     incorrectResponses: (existing?.incorrectResponses || 0) + 1,
                     lastIncorrect: new Date(),
                     consecutiveIncorrect: newConsecutiveIncorrect,
@@ -104,13 +105,13 @@ export class ReputationService {
             },
             create: {
                 providerName,
-                endpoint: endpoint || '',
-                status: 'degraded',
+                endpoint: endpoint || "",
+                status: "degraded",
                 totalRequests: 1,
                 failedRequests: 1,
                 lastFailure: new Date(),
                 consecutiveFailures: 1,
-                ...(errorType === 'incorrect' && {
+                ...(errorType === "incorrect" && {
                     incorrectResponses: 1,
                     lastIncorrect: new Date(),
                     consecutiveIncorrect: 1,
@@ -124,7 +125,7 @@ export class ReputationService {
             where: {
                 providerName_endpoint: {
                     providerName,
-                    endpoint: endpoint || '',
+                    endpoint: endpoint || "",
                 },
             },
         });
@@ -135,7 +136,7 @@ export class ReputationService {
                 reliabilityScore: { lt: threshold },
                 totalRequests: { gt: 10 },
             },
-            orderBy: { reliabilityScore: 'asc' },
+            orderBy: { reliabilityScore: "asc" },
         });
     }
     async resetConsecutiveFailures(providerName, endpoint) {
@@ -143,13 +144,13 @@ export class ReputationService {
             where: {
                 providerName_endpoint: {
                     providerName,
-                    endpoint: endpoint || '',
+                    endpoint: endpoint || "",
                 },
             },
             data: {
                 consecutiveFailures: 0,
                 consecutiveIncorrect: 0,
-                status: 'online',
+                status: "online",
             },
         });
     }

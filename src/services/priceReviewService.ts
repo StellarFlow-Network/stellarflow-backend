@@ -1,5 +1,6 @@
 import prisma from "../lib/prisma";
 import type { MarketRate } from "./marketRate/types";
+import { normalizeDateToUTC } from "../utils/timeUtils";
 import {
   evaluatePriceMovement,
   PRICE_REVIEW_WINDOW_MS,
@@ -104,7 +105,8 @@ export class PriceReviewService {
   private ensureSchema(): Promise<void> {
     if (!this.schemaReadyPromise) {
       this.schemaReadyPromise = prisma
-        .$executeRawUnsafe(`
+        .$executeRawUnsafe(
+          `
           CREATE TABLE IF NOT EXISTS price_review_records (
             id SERIAL PRIMARY KEY,
             currency VARCHAR(10) NOT NULL,
@@ -134,20 +136,32 @@ export class PriceReviewService {
 
           CREATE INDEX IF NOT EXISTS idx_price_review_contract_status
             ON price_review_records (currency, contract_status, fetched_at DESC);
-        `)
+        `,
+        )
         .then(() => undefined);
     }
 
-    return this.schemaReadyPromise;
+    return this.schemaReadyPromise || Promise.resolve();
   }
 
   async assessRate(rate: MarketRate): Promise<PriceAssessment> {
     await this.ensureSchema();
 
-    const currency = rate.currency.toUpperCase();
+    const normalizedRate = {
+      ...rate,
+      timestamp: normalizeDateToUTC(rate.timestamp),
+      ...(rate.comparisonTimestamp && {
+        comparisonTimestamp: normalizeDateToUTC(rate.comparisonTimestamp),
+      }),
+    };
+
+    const currency = normalizedRate.currency.toUpperCase();
     const reviewable = REVIEWABLE_CURRENCIES.has(currency);
     const baseline = reviewable
-      ? await this.getLatestSubmittedBaseline(currency, rate.timestamp)
+      ? await this.getLatestSubmittedBaseline(
+          currency,
+          normalizedRate.timestamp,
+        )
       : null;
 
     let reviewStatus: ReviewStatus = "AUTO_APPROVED";
@@ -159,7 +173,7 @@ export class PriceReviewService {
 
     if (reviewable && baseline) {
       const evaluation = evaluatePriceMovement({
-        currentRate: rate.rate,
+        currentRate: normalizedRate.rate,
         baselineRate: baseline.rate,
         currency,
       });
@@ -189,9 +203,9 @@ export class PriceReviewService {
       )
       VALUES (
         ${currency},
-        ${rate.rate},
-        ${rate.source},
-        ${rate.timestamp},
+        ${normalizedRate.rate},
+        ${normalizedRate.source},
+        ${normalizedRate.timestamp},
         ${reviewStatus},
         ${contractStatus},
         ${reason ?? null},
@@ -199,7 +213,7 @@ export class PriceReviewService {
         ${comparisonTimestamp ?? null},
         ${changePercent ?? null}
       )
-      RETURNING *
+      RETURNING *;
     `;
 
     const inserted = insertedRows[0];
@@ -207,21 +221,16 @@ export class PriceReviewService {
       throw new Error(`Failed to create price review record for ${currency}`);
     }
 
-    if (
-      reviewStatus === "PENDING" &&
-      reason &&
-      changePercent !== undefined &&
-      comparisonRate !== undefined
-    ) {
+    if (reviewStatus === "PENDING" && reason) {
       await webhookService.sendManualReviewNotification({
         reviewId: inserted.id,
         currency,
-        rate: rate.rate,
-        previousRate: comparisonRate,
-        changePercent,
-        source: rate.source,
-        timestamp: rate.timestamp,
-        reason,
+        rate: normalizedRate.rate,
+        previousRate: comparisonRate ?? 0,
+        changePercent: changePercent ?? 0,
+        source: normalizedRate.source,
+        timestamp: normalizedRate.timestamp,
+        reason: reason,
       });
     }
 
@@ -244,24 +253,24 @@ export class PriceReviewService {
 
     await prisma.$executeRaw`
       UPDATE price_review_records
-      SET
-        contract_status = 'SUBMITTED',
-        memo_id = ${memoId},
-        stellar_tx_hash = ${stellarTxHash},
-        updated_at = CURRENT_TIMESTAMP
+SET
+contract_status = 'SUBMITTED',
+  memo_id = ${memoId},
+stellar_tx_hash = ${stellarTxHash},
+updated_at = CURRENT_TIMESTAMP
       WHERE id = ${reviewRecordId}
-    `;
+`;
   }
 
   async getPendingReviews(): Promise<PendingPriceReview[]> {
     await this.ensureSchema();
 
     const rows = await prisma.$queryRaw<RawReviewRow[]>`
-      SELECT *
-      FROM price_review_records
+SELECT *
+  FROM price_review_records
       WHERE review_status = 'PENDING'
       ORDER BY created_at DESC
-    `;
+  `;
 
     return rows.map(mapReviewRow);
   }
@@ -272,12 +281,12 @@ export class PriceReviewService {
     await this.ensureSchema();
 
     const rows = await prisma.$queryRaw<RawReviewRow[]>`
-      SELECT *
-      FROM price_review_records
+SELECT *
+  FROM price_review_records
       WHERE id = ${reviewId}
         AND review_status = 'PENDING'
       LIMIT 1
-    `;
+  `;
 
     return rows[0] ? mapReviewRow(rows[0]) : null;
   }
@@ -293,25 +302,26 @@ export class PriceReviewService {
 
     const rows = await prisma.$queryRaw<RawReviewRow[]>`
       UPDATE price_review_records
-      SET
-        review_status = 'APPROVED',
-        contract_status = 'SUBMITTED',
-        review_notes = ${params.reviewNotes ?? null},
-        reviewed_by = ${params.reviewedBy ?? "manual-review"},
-        reviewed_at = CURRENT_TIMESTAMP,
-        memo_id = ${params.memoId},
-        stellar_tx_hash = ${params.stellarTxHash},
-        updated_at = CURRENT_TIMESTAMP
+SET
+review_status = 'APPROVED',
+  contract_status = 'SUBMITTED',
+  review_notes = ${params.reviewNotes ?? null},
+reviewed_by = ${params.reviewedBy ?? "manual-review"},
+reviewed_at = CURRENT_TIMESTAMP,
+  memo_id = ${params.memoId},
+stellar_tx_hash = ${params.stellarTxHash},
+updated_at = CURRENT_TIMESTAMP
       WHERE id = ${params.reviewId}
         AND review_status = 'PENDING'
-      RETURNING *
-    `;
+RETURNING *
+  `;
 
-    if (!rows[0]) {
+    const row = rows[0];
+    if (!row) {
       throw new Error(`Pending review ${params.reviewId} was not found`);
     }
 
-    return mapReviewRow(rows[0]);
+    return mapReviewRow(row);
   }
 
   async rejectReview(params: {
@@ -323,23 +333,24 @@ export class PriceReviewService {
 
     const rows = await prisma.$queryRaw<RawReviewRow[]>`
       UPDATE price_review_records
-      SET
-        review_status = 'REJECTED',
-        contract_status = 'SKIPPED',
-        review_notes = ${params.reviewNotes ?? null},
-        reviewed_by = ${params.reviewedBy ?? "manual-review"},
-        reviewed_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
+SET
+review_status = 'REJECTED',
+  contract_status = 'SKIPPED',
+  review_notes = ${params.reviewNotes ?? null},
+reviewed_by = ${params.reviewedBy ?? "manual-review"},
+reviewed_at = CURRENT_TIMESTAMP,
+  updated_at = CURRENT_TIMESTAMP
       WHERE id = ${params.reviewId}
         AND review_status = 'PENDING'
-      RETURNING *
-    `;
+RETURNING *
+  `;
 
-    if (!rows[0]) {
+    const row = rows[0];
+    if (!row) {
       throw new Error(`Pending review ${params.reviewId} was not found`);
     }
 
-    return mapReviewRow(rows[0]);
+    return mapReviewRow(row);
   }
 
   private async getLatestSubmittedBaseline(
@@ -348,15 +359,15 @@ export class PriceReviewService {
   ): Promise<{ rate: number; fetchedAt: Date } | null> {
     const windowStart = new Date(timestamp.getTime() - PRICE_REVIEW_WINDOW_MS);
     const rows = await prisma.$queryRaw<RawReviewRow[]>`
-      SELECT *
-      FROM price_review_records
+SELECT *
+  FROM price_review_records
       WHERE currency = ${currency}
         AND contract_status = 'SUBMITTED'
         AND fetched_at >= ${windowStart}
         AND fetched_at < ${timestamp}
       ORDER BY fetched_at DESC
       LIMIT 1
-    `;
+  `;
 
     const row = rows[0];
     if (!row) {

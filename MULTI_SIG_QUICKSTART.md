@@ -3,11 +3,13 @@
 ## 5-Minute Setup for 2-Server Multi-Sig
 
 ### Prerequisites
+
 - 2 StellarFlow backend instances running
 - Both connected to same database
 - Stellar TESTNET accounts set up
 
 ### Step 1: Generate Shared Token
+
 ```bash
 # Generate a random token (or use your own)
 openssl rand -hex 32
@@ -15,6 +17,7 @@ openssl rand -hex 32
 ```
 
 ### Step 2: Update Server 1 (.env)
+
 ```bash
 # Price Update Configuration
 MULTI_SIG_ENABLED=true
@@ -26,6 +29,7 @@ MULTI_SIG_POLL_INTERVAL_MS=30000
 ```
 
 ### Step 3: Update Server 2 (.env)
+
 ```bash
 # Price Update Configuration
 MULTI_SIG_ENABLED=true
@@ -37,16 +41,20 @@ MULTI_SIG_POLL_INTERVAL_MS=30000
 ```
 
 ### Step 4: Run Migrations
+
 On each server:
+
 ```bash
 npm run db:migrate
 ```
 
 This creates the new tables:
+
 - `MultiSigPrice`
 - `MultiSigSignature`
 
 ### Step 5: Restart Services
+
 ```bash
 # Server 1
 npm run start  # or: npm run dev
@@ -56,6 +64,7 @@ npm run start  # or: npm run dev
 ```
 
 Watch logs for:
+
 ```
 [MarketRateService] Multi-Sig mode ENABLED with 1 remote servers
 [MultiSigSubmissionService] Started with 30000ms poll interval
@@ -65,6 +74,7 @@ Watch logs for:
 ## Testing Multi-Sig
 
 ### Manual Test: Request a Price
+
 ```bash
 # Request NGN price (will trigger multi-sig flow)
 curl http://localhost:3000/api/market-rates/rate/NGN
@@ -84,6 +94,7 @@ curl http://localhost:3000/api/market-rates/rate/NGN
 ```
 
 ### Check Pending Multi-Sig Prices
+
 ```bash
 curl http://localhost:3000/api/price-updates/multi-sig/pending
 
@@ -105,6 +116,7 @@ curl http://localhost:3000/api/price-updates/multi-sig/pending
 ```
 
 ### Monitor Status Until Approval
+
 ```bash
 # Check status of price #123
 curl http://localhost:3000/api/price-updates/multi-sig/123/status
@@ -114,6 +126,7 @@ curl http://localhost:3000/api/price-updates/multi-sig/123/status
 ```
 
 ### Verify Multi-Sig Submission
+
 ```bash
 # Once APPROVED, check if signatures are ready
 curl http://localhost:3000/api/price-updates/multi-sig/123/signatures
@@ -140,13 +153,14 @@ curl http://localhost:3000/api/price-updates/multi-sig/123/signatures
 ```
 
 ### Check Stellar Submission
+
 ```bash
 # After background job submits to Stellar (check OnChainPrice table)
 # Price should appear in market rates with stellarTxHash set
 
-SELECT * FROM "OnChainPrice" 
-WHERE currency = 'NGN' 
-ORDER BY "confirmedAt" DESC 
+SELECT * FROM "OnChainPrice"
+WHERE currency = 'NGN'
+ORDER BY "confirmedAt" DESC
 LIMIT 1;
 
 # Should see the multi-signed transaction
@@ -157,12 +171,14 @@ LIMIT 1;
 ### Issue: Multi-Sig requests not being signed
 
 **Check 1: Is multi-sig enabled on both servers?**
+
 ```bash
 # Server logs should show:
 [MarketRateService] Multi-Sig mode ENABLED with 1 remote servers
 ```
 
 **Check 2: Can servers reach each other?**
+
 ```bash
 # From Server 1, test connectivity to Server 2:
 curl http://server2.internal:3000/api/price-updates/multi-sig/signer-info
@@ -171,6 +187,7 @@ curl http://server2.internal:3000/api/price-updates/multi-sig/signer-info
 ```
 
 **Check 3: Is auth token correct?**
+
 ```bash
 # Check error in logs:
 [API] Signature creation failed: Unauthorized - invalid token
@@ -181,6 +198,7 @@ curl http://server2.internal:3000/api/price-updates/multi-sig/signer-info
 ### Issue: Signatures stuck at 1/2
 
 **Check database:**
+
 ```bash
 SELECT * FROM "MultiSigSignature" WHERE "multiSigPriceId" = 123;
 
@@ -189,6 +207,7 @@ SELECT * FROM "MultiSigSignature" WHERE "multiSigPriceId" = 123;
 ```
 
 **Check logs for:**
+
 ```
 [MarketRateService] ⚠️ Signature request failed for http://server2.internal:3000
 [MarketRateService] ❌ Error requesting signature from http://server2.internal:3000
@@ -197,12 +216,14 @@ SELECT * FROM "MultiSigSignature" WHERE "multiSigPriceId" = 123;
 ### Issue: Background job not submitting approved prices
 
 **Check 1: Is submission service running?**
+
 ```bash
 # Logs should show:
 [MultiSigSubmissionService] Started with 30000ms poll interval
 ```
 
 **Check 2: Are there approved prices?**
+
 ```bash
 SELECT * FROM "MultiSigPrice" WHERE status = 'APPROVED';
 
@@ -211,6 +232,7 @@ SELECT * FROM "MultiSigPrice" WHERE status = 'APPROVED';
 ```
 
 **Check 3: Stellar submission failures**
+
 ```
 [MultiSigSubmissionService] Failed to submit multi-sig price 123: ...
 
@@ -220,6 +242,7 @@ SELECT * FROM "MultiSigPrice" WHERE status = 'APPROVED';
 ## Switching Modes
 
 ### Enable Multi-Sig (from single-sig)
+
 1. Update `.env` with `MULTI_SIG_ENABLED=true`
 2. Configure `REMOTE_ORACLE_SERVERS`
 3. Run `prisma migrate`
@@ -227,6 +250,7 @@ SELECT * FROM "MultiSigPrice" WHERE status = 'APPROVED';
 5. New prices will use multi-sig flow
 
 ### Disable Multi-Sig (revert to single-sig)
+
 1. Update `.env` with `MULTI_SIG_ENABLED=false`
 2. Restart services
 3. Existing pending multi-sig prices won't be submitted
@@ -253,6 +277,7 @@ Before deploying to production:
 ## Support
 
 For issues, check:
+
 1. `/workspaces/stellarflow-backend/MULTI_SIG_GUIDE.md` - Comprehensive guide
 2. `/workspaces/stellarflow-backend/MULTI_SIG_ARCHITECTURE.md` - Technical details
 3. Application logs - Most issues visible in detailed logs

@@ -20,37 +20,36 @@ type ExchangeRateApiResponse = {
   time_last_update_unix?: number;
 };
 
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout";
+import { withRetry } from "../../utils/retryUtil";
+import { createFetcherLogger } from "../../utils/logger";
+
+/**
+ * GHS/XLM rate fetcher using CoinGecko as primary source.
+ */
 export class GHSRateFetcher implements MarketRateFetcher {
   private readonly coinGeckoUrl =
-    "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=ghs,usd&include_last_updated_at=true";
-
-  private readonly usdToGhsUrl = "https://open.er-api.com/v6/latest/USD";
+    "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=ghs&include_last_updated_at=true";
+  private logger = createFetcherLogger("GHSRate");
 
   getCurrency(): string {
     return "GHS";
   }
 
   async fetchRate(): Promise<MarketRate> {
-    const prices: {
-      rate: number;
-      timestamp: Date;
-      source: string;
-      trustLevel: SourceTrustLevel;
-    }[] = [];
-
-    // Strategy 1: Try CoinGecko direct GHS price
     try {
-      const coinGeckoResponse = await axios.get<CoinGeckoPriceResponse>(
-        this.coinGeckoUrl,
-        {
-          timeout: 10000,
-          headers: {
-            "User-Agent": "StellarFlow-Oracle/1.0",
-          },
-        },
+      const response = await withRetry(
+        () =>
+          axios.get(this.coinGeckoUrl, {
+            timeout: OUTGOING_HTTP_TIMEOUT_MS,
+            headers: {
+              "User-Agent": "StellarFlow-Oracle/1.0",
+            },
+          }),
+        { maxRetries: 3, retryDelay: 1000 },
       );
 
-      const stellarPrice = coinGeckoResponse.data.stellar;
+      const stellarPrice = response.data.stellar;
       if (
         stellarPrice &&
         typeof stellarPrice.ghs === "number" &&
@@ -60,15 +59,12 @@ export class GHSRateFetcher implements MarketRateFetcher {
           ? new Date(stellarPrice.last_updated_at * 1000)
           : new Date();
 
-        prices.push({
+        return {
+          currency: "GHS",
           rate: stellarPrice.ghs,
           timestamp: lastUpdatedAt,
-          source: "CoinGecko (direct)",
-          trustLevel: "standard",
-        });
-        
-        // Success - reset error tracker
-        errorTracker.trackSuccess("GHS-price-fetch");
+          source: "CoinGecko (GHS)",
+        };
       }
     } catch (error) {
       logger.debug("CoinGecko direct GHS price failed");
@@ -186,42 +182,8 @@ export class GHSRateFetcher implements MarketRateFetcher {
         (latest, p) => (p.timestamp > latest ? p.timestamp : latest),
         prices[0]?.timestamp ?? new Date(),
       );
-
-      const weightedRate = calculateWeightedAverage(
-        prices.map((p) => ({
-          value: p.rate,
-          trustLevel: p.trustLevel as SourceTrustLevel,
-        }))
-      );
-
-      return {
-        currency: "GHS",
-        rate: weightedRate,
-        timestamp: mostRecentTimestamp,
-        source: `Weighted average of ${prices.length} sources (outliers filtered)`,
-      };
+      throw error;
     }
-
-    // All strategies failed - track failure and send notification if 3 consecutive failures
-    const error = new Error("All GHS rate sources failed");
-    const thresholdReached = errorTracker.trackFailure("GHS-price-fetch", {
-      errorMessage: error.message,
-      timestamp: new Date(),
-      service: "GHSRateFetcher",
-    });
-    
-    if (thresholdReached) {
-      await webhookService.sendErrorNotification({
-        errorType: "PRICE_FETCH_FAILED_CONSECUTIVE",
-        errorMessage: error.message,
-        attempts: 3,
-        service: "GHSRateFetcher",
-        pricePair: "XLM/GHS",
-        timestamp: new Date(),
-      });
-    }
-    
-    throw error;
   }
 
   async isHealthy(): Promise<boolean> {

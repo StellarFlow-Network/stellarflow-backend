@@ -7,7 +7,7 @@ async function runTest() {
   try {
     const staleCurrencies = await intelligenceService.getStaleCurrencies();
     console.log("Stale Currencies identified:", staleCurrencies);
-    
+
     if (Array.isArray(staleCurrencies)) {
       console.log("✅ Test PASSED: Returned a list of currencies.");
     } else {

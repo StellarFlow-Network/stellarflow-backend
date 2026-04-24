@@ -5,7 +5,7 @@ export class IntelligenceService {
   /**
    * Calculates the 24-hour price change for a given currency.
    * Compares the latest rate with the rate from approximately 24 hours ago.
-   * 
+   *
    * @param currency - The currency code (e.g., "NGN", "GHS")
    * @returns A formatted string like "+2.5%" or "-1.2%"
    */
@@ -39,10 +39,12 @@ export class IntelligenceService {
 
       // If no record exists before 24h ago, try to find the earliest record available
       // but only if it's at least some reasonable time ago (e.g. 1h)
-      const baseRecord = historicalRecord || await prisma.priceHistory.findFirst({
-        where: { currency: asset },
-        orderBy: { timestamp: "asc" },
-      });
+      const baseRecord =
+        historicalRecord ||
+        (await prisma.priceHistory.findFirst({
+          where: { currency: asset },
+          orderBy: { timestamp: "asc" },
+        }));
 
       if (!baseRecord || baseRecord.id === latestRecord.id) {
         return "0.0%";
@@ -57,7 +59,7 @@ export class IntelligenceService {
 
       const changePercent = ((currentPrice - pastPrice) / pastPrice) * 100;
       const sign = changePercent >= 0 ? "+" : "";
-      
+
       return `${sign}${changePercent.toFixed(1)}%`;
     } catch (error) {
       logger.error(`Error calculating 24h change for ${asset}:`, error);
@@ -67,7 +69,7 @@ export class IntelligenceService {
 
   /**
    * Identifies currencies that haven't been updated in the database for over 30 minutes.
-   * 
+   *
    * @returns A list of currency codes that are "Out of Date"
    */
   async getStaleCurrencies(): Promise<string[]> {
@@ -92,7 +94,7 @@ export class IntelligenceService {
         const latest = c.priceHistory[0];
         const hasNoHistory = !latest;
         const isOld = latest && new Date(latest.updatedAt) < staleTime;
-        
+
         if (hasNoHistory || isOld) {
           staleCurrencies.push(c.code);
         }

@@ -1,5 +1,71 @@
 import axios from "axios";
 import logger from "../utils/logger";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../utils/httpTimeout.js";
+import { withRetry } from "../utils/retryUtil.js";
+
+type MarkdownText = {
+  type: "mrkdwn";
+  text: string;
+};
+
+type PlainText = {
+  type: "plain_text";
+  text: string;
+};
+
+type DiscordEmbedField = {
+  name: string;
+  value: string;
+  inline?: boolean;
+};
+
+type DiscordPayload = {
+  embeds: Array<{
+    title: string;
+    color: number;
+    fields: DiscordEmbedField[];
+  }>;
+};
+
+type SlackPayload = {
+  blocks: Array<
+    | {
+        type: "header";
+        text: PlainText;
+      }
+    | {
+        type: "section";
+        fields?: MarkdownText[];
+        text?: MarkdownText;
+      }
+    | {
+        type: "context";
+        elements: MarkdownText[];
+      }
+  >;
+};
+
+type WebhookPayload = DiscordPayload | SlackPayload;
+
+type ErrorDetails = {
+  errorType: string;
+  errorMessage: string;
+  attempts: number;
+  service: string;
+  pricePair: string;
+  timestamp: Date;
+};
+
+type ReviewDetails = {
+  reviewId: number;
+  currency: string;
+  rate: number;
+  previousRate: number;
+  changePercent: number;
+  source: string;
+  timestamp: Date;
+  reason: string;
+};
 
 export class WebhookService {
   private webhookUrl: string | undefined;
@@ -11,55 +77,56 @@ export class WebhookService {
     this.platform = process.env.NOTIFICATION_PLATFORM || "slack";
   }
 
-  async sendErrorNotification(errorDetails: {
-    errorType: string;
-    errorMessage: string;
-    attempts: number;
-    service: string;
-    pricePair: string;
-    timestamp: Date;
-  }): Promise<void> {
-    if (!this.webhookUrl) return;
+  async sendErrorNotification(errorDetails: ErrorDetails): Promise<void> {
+    if (!this.webhookUrl) {
+      return;
+    }
 
     const message = this.formatErrorMessage(errorDetails);
     await this.postMessage(message);
   }
 
-  async sendManualReviewNotification(reviewDetails: {
-    reviewId: number;
-    currency: string;
-    rate: number;
-    previousRate: number;
-    changePercent: number;
-    source: string;
-    timestamp: Date;
-    reason: string;
-  }): Promise<void> {
-    if (!this.webhookUrl) return;
+  async sendManualReviewNotification(
+    reviewDetails: ReviewDetails,
+  ): Promise<void> {
+    if (!this.webhookUrl) {
+      return;
+    }
 
     const message = this.formatReviewMessage(reviewDetails);
     await this.postMessage(message);
   }
 
-  private async postMessage(message: unknown): Promise<void> {
+  private async postMessage(message: WebhookPayload): Promise<void> {
+    if (!this.webhookUrl) {
+      return;
+    }
+
+    const webhookUrl = this.webhookUrl;
+
     try {
-      await axios.post(this.webhookUrl!, message, {
-        headers: { "Content-Type": "application/json" },
-        timeout: 5000,
-      });
+      await withRetry(
+        () =>
+          axios.post(webhookUrl, message, {
+            headers: { "Content-Type": "application/json" },
+            timeout: OUTGOING_HTTP_TIMEOUT_MS,
+          }),
+        {
+          maxRetries: 3,
+          retryDelay: 1000,
+          onRetry: (attempt, error, delay) => {
+            console.debug(
+              `Webhook notification retry attempt ${attempt}/3 after ${delay}ms. Error: ${error.message}`,
+            );
+          },
+        },
+      );
     } catch (error) {
       logger.error("Failed to send webhook notification:", error);
     }
   }
 
-  private formatErrorMessage(errorDetails: {
-    errorType: string;
-    errorMessage: string;
-    attempts: number;
-    service: string;
-    pricePair: string;
-    timestamp: Date;
-  }): unknown {
+  private formatErrorMessage(errorDetails: ErrorDetails): WebhookPayload {
     const { errorMessage, attempts, service, pricePair, timestamp } =
       errorDetails;
 
@@ -114,16 +181,7 @@ export class WebhookService {
     };
   }
 
-  private formatReviewMessage(reviewDetails: {
-    reviewId: number;
-    currency: string;
-    rate: number;
-    previousRate: number;
-    changePercent: number;
-    source: string;
-    timestamp: Date;
-    reason: string;
-  }): unknown {
+  private formatReviewMessage(reviewDetails: ReviewDetails): WebhookPayload {
     const {
       reviewId,
       currency,

@@ -1,4 +1,6 @@
 import axios from "axios";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../utils/httpTimeout.js";
+import { withRetry } from "../utils/retryUtil.js";
 export class WebhookService {
     webhookUrl;
     platform;
@@ -8,26 +10,38 @@ export class WebhookService {
         this.platform = process.env.NOTIFICATION_PLATFORM || "slack";
     }
     async sendErrorNotification(errorDetails) {
-        if (!this.webhookUrl)
+        if (!this.webhookUrl) {
             return;
+        }
         const message = this.formatErrorMessage(errorDetails);
         await this.postMessage(message);
     }
     async sendManualReviewNotification(reviewDetails) {
-        if (!this.webhookUrl)
+        if (!this.webhookUrl) {
             return;
+        }
         const message = this.formatReviewMessage(reviewDetails);
         await this.postMessage(message);
     }
     async postMessage(message) {
+        if (!this.webhookUrl) {
+            return;
+        }
+        const webhookUrl = this.webhookUrl;
         try {
-            await axios.post(this.webhookUrl, message, {
+            await withRetry(() => axios.post(webhookUrl, message, {
                 headers: { "Content-Type": "application/json" },
-                timeout: 5000,
+                timeout: OUTGOING_HTTP_TIMEOUT_MS,
+            }), {
+                maxRetries: 3,
+                retryDelay: 1000,
+                onRetry: (attempt, error, delay) => {
+                    console.debug(`Webhook notification retry attempt ${attempt}/3 after ${delay}ms. Error: ${error.message}`);
+                },
             });
         }
         catch (error) {
-            console.error("Failed to send webhook notification:", error);
+            console.error("Failed to send webhook notification after retries:", error);
         }
     }
     formatErrorMessage(errorDetails) {
@@ -154,6 +168,5 @@ export class WebhookService {
         };
     }
 }
-export const webhookService = new WebhookService();
 export const webhookService = new WebhookService();
 //# sourceMappingURL=webhook.js.map

@@ -4,6 +4,7 @@ import { priceReviewService } from "./priceReviewService";
 import prisma from "../lib/prisma";
 import dotenv from "dotenv";
 import logger from "../utils/logger";
+import { isLockdownEnabled } from "../state/appState";
 
 dotenv.config();
 
@@ -66,12 +67,31 @@ export class MultiSigSubmissionService {
     logger.info("[MultiSigSubmissionService] Stopped");
   }
 
+  restart(newIntervalMs: number): void {
+    if (!this.isRunning) return;
+    if (newIntervalMs === this.pollIntervalMs) return;
+    this.pollIntervalMs = newIntervalMs;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+    }
+    this.pollTimer = setInterval(() => {
+      this.checkAndSubmitApprovedPrices().catch((err) => {
+        console.error("[MultiSigSubmissionService] Polling error:", err);
+      });
+    }, this.pollIntervalMs);
+    console.info(`[MultiSigSubmissionService] Poll interval updated to ${this.pollIntervalMs}ms`);
+  }
+
   /**
    * Check for approved multi-sig prices and submit them to Stellar.
    * This is the main polling function.
    */
   private async checkAndSubmitApprovedPrices(): Promise<void> {
     try {
+      if (await isLockdownEnabled()) {
+        return;
+      }
+
       // Find all approved multi-sig prices that haven't been submitted yet
       const approvedPrices = await prisma.multiSigPrice.findMany({
         where: {
@@ -103,7 +123,7 @@ export class MultiSigSubmissionService {
         } catch (error) {
           logger.error(
             `[MultiSigSubmissionService] Failed to submit multi-sig price ${multiSigPrice.id}:`,
-            error
+            error,
           );
           // Continue with next price, don't let one failure block others
         }
@@ -111,7 +131,7 @@ export class MultiSigSubmissionService {
     } catch (error) {
       logger.error(
         "[MultiSigSubmissionService] Error checking approved prices:",
-        error
+        error,
       );
     }
   }
@@ -144,21 +164,17 @@ export class MultiSigSubmissionService {
         multiSigPrice.currency,
         multiSigPrice.rate.toNumber(),
         memoId,
-        signatures
+        signatures,
       );
 
       // Record the submission
-      await multiSigService.recordSubmission(
-        multiSigPrice.id,
-        memoId,
-        txHash
-      );
+      await multiSigService.recordSubmission(multiSigPrice.id, memoId, txHash);
 
       // Mark the associated price review as submitted
       await priceReviewService.markContractSubmitted(
         multiSigPrice.priceReviewId,
         memoId,
-        txHash
+        txHash,
       );
 
       logger.info(
@@ -167,7 +183,7 @@ export class MultiSigSubmissionService {
     } catch (error) {
       logger.error(
         `[MultiSigSubmissionService] Error submitting multi-sig price ${multiSigPrice.id}:`,
-        error
+        error,
       );
       throw error;
     }

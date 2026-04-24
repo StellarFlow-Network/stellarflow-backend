@@ -7,12 +7,12 @@ export interface MarketRate {
   rate: number;
   timestamp: Date;
   source: string;
-  manualReviewRequired?: boolean;
-  reviewId?: number;
-  reviewReason?: string;
-  reviewChangePercent?: number;
-  comparisonRate?: number;
-  comparisonTimestamp?: Date;
+  manualReviewRequired?: boolean | undefined;
+  reviewId?: number | undefined;
+  reviewReason?: string | undefined;
+  reviewChangePercent?: number | undefined;
+  comparisonRate?: number | undefined;
+  comparisonTimestamp?: Date | undefined;
   contractSubmissionSkipped?: boolean;
   // Multi-sig fields
   pendingMultiSig?: boolean;

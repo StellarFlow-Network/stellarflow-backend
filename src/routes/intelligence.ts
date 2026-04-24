@@ -5,7 +5,7 @@ const router = Router();
 
 /**
  * @swagger
- * /api/intelligence/price-change/{currency}:
+ * /api/v1/intelligence/price-change/{currency}:
  *   get:
  *     tags:
  *       - Intelligence
@@ -39,10 +39,10 @@ const router = Router();
  */
 router.get("/price-change/:currency", async (req, res) => {
   const currency = req.params.currency.toUpperCase();
-  
+
   try {
     const change = await intelligenceService.calculate24hPriceChange(currency);
-    
+
     res.json({
       success: true,
       currency,
@@ -58,7 +58,7 @@ router.get("/price-change/:currency", async (req, res) => {
 
 /**
  * @swagger
- * /api/intelligence/stale:
+ * /api/v1/intelligence/stale:
  *   get:
  *     tags:
  *       - Intelligence
@@ -84,7 +84,7 @@ router.get("/price-change/:currency", async (req, res) => {
 router.get("/stale", async (req, res) => {
   try {
     const staleCurrencies = await intelligenceService.getStaleCurrencies();
-    
+
     res.json({
       success: true,
       staleCurrencies,

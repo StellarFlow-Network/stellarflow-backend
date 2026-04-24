@@ -1,5 +1,9 @@
 import axios from "axios";
-import { calculateMedian, filterOutliers } from "./types";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout.js";
+import { calculateWeightedAverage, filterOutliers, } from "./types";
+import { withRetry } from "../../utils/retryUtil.js";
+import { getNGNProviderWeight, } from "../../config/providerWeights.js";
+import { createFetcherLogger } from "../../utils/logger.js";
 function parseAmount(value) {
     if (value == null)
         return null;
@@ -11,16 +15,17 @@ function parseAmount(value) {
 /**
  * NGN/XLM rate fetcher.
  *
- * Primary path uses VTpass {@link https://www.vtpass.com/documentation/variation-codes/ service-variations}
- * to read a configured variation's `variation_amount` as the Naira price for one unit of the underlying
- * SKU (configure a 1 USD/BUSD reference variation so `variation_amount` ≈ NGN per USD). That value is
- * multiplied by CoinGecko XLM/USD for NGN per XLM.
+ * Primary path uses VTpass service variations to read a configured
+ * variation's `variation_amount` as the Naira price for one unit of
+ * the underlying SKU. That value is multiplied by CoinGecko XLM/USD
+ * for NGN per XLM.
  *
- * Falls back to CoinGecko XLM/NGN directly, then XLM/USD × USD→NGN (open.er-api), matching other fetchers.
+ * Falls back to CoinGecko XLM/NGN directly, then XLM/USD x USD->NGN.
  */
 export class NGNRateFetcher {
     coinGeckoUrl = "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=ngn,usd&include_last_updated_at=true";
     usdToNgnUrl = "https://open.er-api.com/v6/latest/USD";
+    logger = createFetcherLogger("NGNRate");
     vtpassBase() {
         return (process.env.VTPASS_API_BASE_URL ?? "https://vtpass.com/api").replace(/\/$/, "");
     }
@@ -46,14 +51,14 @@ export class NGNRateFetcher {
         const headers = this.vtpassHeaders();
         if (!headers)
             return null;
-        const response = await axios.get(`${this.vtpassBase()}/service-variations`, {
+        const response = await withRetry(() => axios.get(`${this.vtpassBase()}/service-variations`, {
             params: { serviceID: serviceId },
-            timeout: 15000,
+            timeout: OUTGOING_HTTP_TIMEOUT_MS,
             headers: {
                 ...headers,
                 "User-Agent": "StellarFlow-Oracle/1.0",
             },
-        });
+        }), { maxRetries: 3, retryDelay: 1000 });
         if (response.data.response_description !== "000") {
             return null;
         }
@@ -70,16 +75,15 @@ export class NGNRateFetcher {
     }
     async fetchRate() {
         const prices = [];
-        // Strategy 1: VTpass NGN-per-USD (variation) × CoinGecko XLM/USD
         try {
             const vt = await this.fetchNgnPerUsdFromVtpass();
             if (vt) {
-                const coinGeckoResponse = await axios.get(this.coinGeckoUrl, {
-                    timeout: 10000,
+                const coinGeckoResponse = await withRetry(() => axios.get(this.coinGeckoUrl, {
+                    timeout: OUTGOING_HTTP_TIMEOUT_MS,
                     headers: {
                         "User-Agent": "StellarFlow-Oracle/1.0",
                     },
-                });
+                }), { maxRetries: 3, retryDelay: 1000 });
                 const usd = coinGeckoResponse.data.stellar?.usd;
                 if (typeof usd === "number" && usd > 0) {
                     const lastUpdatedAt = coinGeckoResponse.data.stellar?.last_updated_at
@@ -90,22 +94,21 @@ export class NGNRateFetcher {
                         rate: usd * vt.ngnPerUsd,
                         timestamp: ts,
                         source: "VTpass variation + CoinGecko (XLM/USD)",
-                        trustLevel: "new",
+                        providerKey: "vtpassCoinGeckoUsd",
                     });
                 }
             }
         }
-        catch {
-            console.debug("VTpass + CoinGecko XLM/USD failed");
+        catch (error) {
+            this.logger.debug("VTpass + CoinGecko XLM/USD failed", { error: error instanceof Error ? error.message : error });
         }
-        // Strategy 2: CoinGecko direct XLM/NGN
         try {
-            const coinGeckoResponse = await axios.get(this.coinGeckoUrl, {
-                timeout: 10000,
+            const coinGeckoResponse = await withRetry(() => axios.get(this.coinGeckoUrl, {
+                timeout: OUTGOING_HTTP_TIMEOUT_MS,
                 headers: {
                     "User-Agent": "StellarFlow-Oracle/1.0",
                 },
-            });
+            }), { maxRetries: 3, retryDelay: 1000 });
             const stellarPrice = coinGeckoResponse.data.stellar;
             if (stellarPrice &&
                 typeof stellarPrice.ngn === "number" &&
@@ -117,31 +120,30 @@ export class NGNRateFetcher {
                     rate: stellarPrice.ngn,
                     timestamp: lastUpdatedAt,
                     source: "CoinGecko (direct NGN)",
-                    trustLevel: "standard",
+                    providerKey: "coinGeckoDirectNgn",
                 });
             }
         }
-        catch {
-            console.debug("CoinGecko direct NGN failed");
+        catch (error) {
+            this.logger.debug("CoinGecko direct NGN failed", { error: error instanceof Error ? error.message : error });
         }
-        // Strategy 3: CoinGecko XLM/USD × USD/NGN (open.er-api)
         try {
-            const coinGeckoResponse = await axios.get(this.coinGeckoUrl, {
-                timeout: 10000,
+            const coinGeckoResponse = await withRetry(() => axios.get(this.coinGeckoUrl, {
+                timeout: OUTGOING_HTTP_TIMEOUT_MS,
                 headers: {
                     "User-Agent": "StellarFlow-Oracle/1.0",
                 },
-            });
+            }), { maxRetries: 3, retryDelay: 1000 });
             const stellarPrice = coinGeckoResponse.data.stellar;
             if (stellarPrice &&
                 typeof stellarPrice.usd === "number" &&
                 stellarPrice.usd > 0) {
-                const fxResponse = await axios.get(this.usdToNgnUrl, {
-                    timeout: 10000,
+                const fxResponse = await withRetry(() => axios.get(this.usdToNgnUrl, {
+                    timeout: OUTGOING_HTTP_TIMEOUT_MS,
                     headers: {
                         "User-Agent": "StellarFlow-Oracle/1.0",
                     },
-                });
+                }), { maxRetries: 3, retryDelay: 1000 });
                 const usdToNgn = fxResponse.data.rates?.NGN;
                 if (fxResponse.data.result === "success" &&
                     typeof usdToNgn === "number" &&
@@ -155,35 +157,43 @@ export class NGNRateFetcher {
                     prices.push({
                         rate: stellarPrice.usd * usdToNgn,
                         timestamp: fxTimestamp > lastUpdatedAt ? fxTimestamp : lastUpdatedAt,
-                        source: "CoinGecko + ExchangeRate API (USD→NGN)",
-                        trustLevel: "trusted",
+                        source: "CoinGecko + ExchangeRate API (USD->NGN)",
+                        providerKey: "coinGeckoExchangeRateUsdNgn",
                     });
                 }
             }
         }
-        catch {
-            console.debug("CoinGecko + ExchangeRate API (NGN) failed");
+        catch (error) {
+            this.logger.debug("CoinGecko + ExchangeRate API (NGN) failed", { error: error instanceof Error ? error.message : error });
         }
-        if (prices.length > 0) {
-            let rateValues = prices.map((p) => p.rate).filter(p => p > 0);
-            rateValues = filterOutliers(rateValues);
-            const medianRate = calculateMedian(rateValues);
-            const mostRecentTimestamp = prices.reduce((latest, p) => (p.timestamp > latest ? p.timestamp : latest), prices[0]?.timestamp ?? new Date());
-            return {
-                currency: "NGN",
-                rate: weightedRate,
-                timestamp: mostRecentTimestamp,
-                source: `Median of ${prices.length} sources (outliers filtered)`,
-            };
+        if (prices.length === 0) {
+            const error = new Error("All NGN rate sources failed");
+            this.logger.fetcherError(error, "All price sources failed - no rates obtained", { attemptedSources: 3, pricesLength: prices.length });
+            throw error;
         }
-        throw new Error("All NGN rate sources failed");
+        const filteredRateValues = filterOutliers(prices.map((p) => p.rate).filter((rate) => rate > 0));
+        const filteredPrices = prices.filter((price) => filteredRateValues.includes(price.rate));
+        const pricesToUse = filteredPrices.length > 0 ? filteredPrices : prices;
+        const mostRecentTimestamp = prices.reduce((latest, p) => (p.timestamp > latest ? p.timestamp : latest), prices[0]?.timestamp ?? new Date());
+        const weightedRate = calculateWeightedAverage(pricesToUse.map((price) => ({
+            value: price.rate,
+            weight: getNGNProviderWeight(price.providerKey),
+        })));
+        return {
+            currency: "NGN",
+            rate: weightedRate,
+            timestamp: mostRecentTimestamp,
+            source: `Weighted average of ${pricesToUse.length} sources (outliers filtered)`,
+        };
     }
     async isHealthy() {
         try {
             const rate = await this.fetchRate();
+            this.logger.info("Health check passed", { rate: rate.rate, source: rate.source });
             return rate.rate > 0;
         }
-        catch {
+        catch (error) {
+            this.logger.error("Health check failed", undefined, error instanceof Error ? error : new Error(String(error)));
             return false;
         }
     }
