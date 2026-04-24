@@ -15,8 +15,10 @@
     "prepare": "husky",
     "test": "tsx test/marketRates.test.ts",
     "test:jest": "node --experimental-vm-modules ./node_modules/.bin/jest",
+    "test:cache": "node --experimental-vm-modules ./node_modules/.bin/jest cache.test.ts",
     "check:gas-balance": "tsx scripts/check-gas-balance.ts",
     "download:ngn-rates": "tsx scripts/download-ngn-rates.ts",
+    "cache:warm": "tsx scripts/cache-warming.ts",
     "db:backup": "bash scripts/pg_backup.sh",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
@@ -40,6 +42,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/driver-adapter-utils": "^7.8.0",
+    "@prisma/client": "^7.6.0",
     "@stellar/stellar-sdk": "^14.6.1",
     "@types/node": "^22.0.0",
     "@types/pdfkit": "^0.17.6",
@@ -65,7 +68,6 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@prisma/client": "^7.6.0",
     "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
@@ -81,7 +83,7 @@
     "jest": "^30.0.0",
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
-    "prisma": "^7.6.0",
+    "prisma": "^7.8.0",
     "ts-jest": "^29.4.4",
     "tsx": "^4.21.0",
     "typedoc": "^0.28.18"
