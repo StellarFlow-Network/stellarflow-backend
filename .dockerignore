@@ -8,3 +8,10 @@ docker-compose.yml
 Dockerfile
 .dockerignore
 prisma/migrations
+# Editor dirs
+.vscode
+.idea
+
+# OS/temp files
+.DS_Store
+Thumbs.db

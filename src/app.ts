@@ -1,23 +1,24 @@
-import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import morgan from "morgan";
+import express from "express";
 import helmet from "helmet";
+import morgan from "morgan";
 import swaggerUi from "swagger-ui-express";
-import marketRatesRouter from "./routes/marketRates";
-import historyRouter from "./routes/history";
-import statsRouter from "./routes/stats";
-import intelligenceRouter from "./routes/intelligence";
-import priceUpdatesRouter from "./routes/priceUpdates";
-import assetsRouter from "./routes/assets";
-import statusRouter from "./routes/status";
-import adminRouter from "./routes/admin";
-import derivedAssetsRouter from "./routes/derivedAssets";
-import sanityCheckRouter from "./routes/sanityCheck";
 import cacheMetricsRouter from "./cache/CacheMetrics";
-import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
-import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
 import { specs } from "./lib/swagger";
+import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
+import { maintenanceMiddleware } from "./middleware/maintenanceMiddleware";
+import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
+import adminRouter from "./routes/admin";
+import assetsRouter from "./routes/assets";
+import derivedAssetsRouter from "./routes/derivedAssets";
+import historyRouter from "./routes/history";
+import intelligenceRouter from "./routes/intelligence";
+import marketRatesRouter from "./routes/marketRates";
+import priceUpdatesRouter from "./routes/priceUpdates";
+import sanityCheckRouter from "./routes/sanityCheck";
+import statsRouter from "./routes/stats";
+import statusRouter from "./routes/status";
 
 dotenv.config();
 
@@ -29,6 +30,9 @@ const dashboardUrl =
   "http://localhost:3000";
 
 app.use(morgan("dev"));
+
+// Maintenance mode middleware: must be early in the chain
+app.use(maintenanceMiddleware);
 
 app.use(
   cors({
@@ -129,7 +133,8 @@ app.get("/", (req, res) => {
       },
       admin: {
         lockdown: "POST /api/admin/lockdown",
-        reportSummary: "/api/admin/reports/summary?format=html|pdf&month=YYYY-MM",
+        reportSummary:
+          "/api/admin/reports/summary?format=html|pdf&month=YYYY-MM",
       },
     },
   });

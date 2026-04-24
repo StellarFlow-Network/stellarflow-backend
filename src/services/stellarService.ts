@@ -9,6 +9,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import stellarProvider from "../lib/stellarProvider";
 import { assertSigningAllowed } from "../state/appState";
 
 dotenv.config();
@@ -31,12 +32,9 @@ export class StellarService {
     this.keypair = Keypair.fromSecret(secret);
     this.network = process.env.STELLAR_NETWORK || "TESTNET";
 
-    const horizonUrl =
-      this.network === "PUBLIC"
-        ? "https://horizon.stellar.org"
-        : "https://horizon-testnet.stellar.org";
-
-    this.server = new Horizon.Server(horizonUrl);
+    // Use the shared StellarProvider so all services benefits from the same
+    // failover state rather than each managing their own Horizon URL.
+    this.server = stellarProvider.getServer();
   }
 
   /**
@@ -207,6 +205,9 @@ export class StellarService {
 
     while (attempt <= maxRetries) {
       try {
+        // Always resolve the current active server — may have changed after a failover
+        this.server = stellarProvider.getServer();
+
         const sourceAccount = await this.server.loadAccount(
           this.keypair.publicKey(),
         );
@@ -222,6 +223,10 @@ export class StellarService {
         return await this.server.submitTransaction(transaction);
       } catch (error: any) {
         attempt++;
+
+        // Report to the provider — it will switch to the next node if this is
+        // a 5xx / network error, so the next attempt uses a healthy node.
+        stellarProvider.reportFailure(error);
 
         const isStuck = this.isStuckError(error);
 
@@ -265,6 +270,9 @@ export class StellarService {
 
     while (attempt <= maxRetries) {
       try {
+        // Always resolve the current active server — may have changed after a failover
+        this.server = stellarProvider.getServer();
+
         const sourceAccount = await this.server.loadAccount(
           this.keypair.publicKey(),
         );
@@ -313,6 +321,10 @@ export class StellarService {
         return await this.server.submitTransaction(transaction);
       } catch (error: any) {
         attempt++;
+
+        // Report to the provider — it will switch to the next node if this is
+        // a 5xx / network error, so the next attempt uses a healthy node.
+        stellarProvider.reportFailure(error);
 
         const isStuck = this.isStuckError(error);
 
