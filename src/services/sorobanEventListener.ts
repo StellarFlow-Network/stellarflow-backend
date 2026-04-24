@@ -2,7 +2,7 @@ import { Horizon, Keypair } from "@stellar/stellar-sdk";
 import type { ServerApi } from "@stellar/stellar-sdk/lib/horizon";
 import type { OnChainPrice } from "@prisma/client";
 import prisma from "../lib/prisma";
-import { getIO } from "../lib/socket";
+import { getIO, broadcastToSessions } from "../lib/socket";
 import stellarProvider from "../lib/stellarProvider";
 import dotenv from "dotenv";
 
@@ -255,9 +255,8 @@ export class SorobanEventListener {
 
   private emitPriceUpdates(prices: ConfirmedPrice[]): void {
     try {
-      const io = getIO();
       for (const price of prices) {
-        io.emit("price:confirmed", {
+        broadcastToSessions("price:confirmed", {
           currency: price.currency,
           rate: price.rate,
           txHash: price.txHash,

@@ -9,7 +9,7 @@ import { GHSRateFetcher } from "./ghsFetcher";
 import { NGNRateFetcher } from "./ngnFetcher";
 import { StellarService } from "../stellarService";
 import { multiSigService } from "../multiSigService";
-import { getIO } from "../../lib/socket";
+import { getIO, broadcastToSessions } from "../../lib/socket";
 import prisma from "../../lib/prisma";
 import { getRedisClient } from "../../lib/redis";
 import type { RedisClientType } from "redis";
@@ -299,15 +299,19 @@ export class MarketRateService {
       }
 
       try {
-        getIO().emit("price:update", {
-          currency: normalizedCurrency,
-          rate: enrichedRate,
-        });
-
-        if (reviewAssessment.manualReviewRequired) {
-          getIO().emit("price:review_required", {
+        if (!reviewAssessment.manualReviewRequired) {
+          broadcastToSessions("price:update", {
             currency: normalizedCurrency,
-            rate: enrichedRate,
+            rate: enrichedRate.rate,
+            source: enrichedRate.source,
+            timestamp: enrichedRate.timestamp,
+          });
+        } else {
+          broadcastToSessions("price:review_required", {
+            currency: normalizedCurrency,
+            rate: enrichedRate.rate,
+            reviewId: enrichedRate.reviewId,
+            reason: enrichedRate.reviewReason,
           });
         }
       } catch {
@@ -537,7 +541,7 @@ export class MarketRateService {
     this.cache.delete(pendingReview.currency.toUpperCase());
 
     try {
-      getIO().emit("price:review_resolved", {
+      broadcastToSessions("price:review_resolved", {
         action: "approved",
         review: approvedReview,
       });
@@ -562,7 +566,7 @@ export class MarketRateService {
     this.cache.delete(rejectedReview.currency.toUpperCase());
 
     try {
-      getIO().emit("price:review_resolved", {
+      broadcastToSessions("price:review_resolved", {
         action: "rejected",
         review: rejectedReview,
       });
