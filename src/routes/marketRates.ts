@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getRate, getAllRates } from "../controllers/marketRatesController";
 import { MarketRateService } from "../services/marketRate";
+import { isLockdownError } from "../state/appState";
 
 const marketRateService = new MarketRateService();
 
@@ -208,7 +209,7 @@ router.post("/reviews/:id/approve", async (req, res) => {
       data: review,
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(isLockdownError(error) ? error.statusCode : 500).json({
       success: false,
       error:
         error instanceof Error

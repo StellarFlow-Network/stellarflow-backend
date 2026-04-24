@@ -132,7 +132,7 @@ export class MultiSigService {
                 signerPublicKey: this.localSignerPublicKey,
             };
             // Make HTTP request to remote server
-            const response = await fetch(`${remoteServerUrl}/api/v1/price-updates/sign`, {
+            const response = await fetch(`${remoteServerUrl}/api/price-updates/sign`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

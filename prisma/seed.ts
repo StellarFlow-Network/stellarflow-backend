@@ -147,14 +147,53 @@ async function seedPriceHistory() {
   return entries.length;
 }
 
+async function seedRelayers() {
+  const relayers = [
+    {
+      name: "GHS Relayer",
+      apiKey: "relayer-ghs-key",
+      isActive: true,
+      allowedAssets: ["GHS"],
+    },
+    {
+      name: "NGN Relayer",
+      apiKey: "relayer-ngn-key",
+      isActive: true,
+      allowedAssets: ["NGN"],
+    },
+    {
+      name: "Admin Relayer",
+      apiKey: "relayer-admin-key",
+      isActive: true,
+      allowedAssets: ["NGN", "GHS", "KES"],
+    },
+  ];
+
+  for (const relayer of relayers) {
+    await prisma.relayer.upsert({
+      where: { apiKey: relayer.apiKey },
+      update: {
+        name: relayer.name,
+        isActive: relayer.isActive,
+        allowedAssets: relayer.allowedAssets,
+      },
+      create: relayer,
+    });
+  }
+
+  return relayers.length;
+}
+
 async function main() {
   console.log("Seeding database with demo data...");
 
   await seedCurrencies();
   const insertedEntries = await seedPriceHistory();
+  const insertedRelayers = await seedRelayers();
 
   console.log(`Seeded ${currencies.length} currencies.`);
   console.log(`Seeded ${insertedEntries} dummy price history entries.`);
+  console.log(`Seeded ${insertedRelayers} relayers.`);
   console.log("Seeding completed.");
 }
 

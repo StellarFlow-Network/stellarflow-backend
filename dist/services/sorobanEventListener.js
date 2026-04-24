@@ -91,8 +91,7 @@ export class SorobanEventListener {
         }
         catch (error) {
             // Account not found is expected for new accounts with no transactions
-            if (error instanceof Error &&
-                error.message.includes("status code 404")) {
+            if (error instanceof Error && error.message.includes("status code 404")) {
                 console.log("[EventListener] No transactions found for oracle account");
                 return;
             }

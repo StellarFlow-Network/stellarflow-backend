@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
 import { multiSigService, SignaturePayload } from "../services/multiSigService";
+import { isLockdownError } from "../state/appState";
 
 const router = express.Router();
 
@@ -24,6 +25,17 @@ router.post("/multi-sig/request", async (req: Request, res: Response) => {
         error:
           "Missing required fields: priceReviewId, currency, rate, source, memoId",
       });
+    }
+
+    // Enforce relayer asset authorization
+    if (req.relayer) {
+      const normalizedCurrency = currency.toUpperCase();
+      if (!req.relayer.allowedAssets.includes(normalizedCurrency)) {
+        return res.status(403).json({
+          success: false,
+          error: `Relayer not authorized for asset: ${normalizedCurrency}`,
+        });
+      }
     }
 
     const signatureRequest = await multiSigService.createMultiSigRequest(
@@ -100,9 +112,9 @@ router.post("/sign", async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("[API] Signature creation failed:", error);
-    res.status(400).json({
+    res.status(isLockdownError(error) ? error.statusCode : 400).json({
       success: false,
-      error: String(error),
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 });
@@ -220,7 +232,7 @@ router.get("/multi-sig/pending", async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      data: pendingPrices.map((price) => ({
+      data: pendingPrices.map((price: any) => ({
         id: price.id,
         currency: price.currency,
         rate: price.rate,
@@ -286,7 +298,7 @@ router.get(
           multiSigPriceId: multiSigPrice.id,
           currency: multiSigPrice.currency,
           rate: multiSigPrice.rate,
-          signatures: signatures.map((sig) => ({
+          signatures: signatures.map((sig: any) => ({
             signerPublicKey: sig.signerPublicKey,
             signerName: sig.signerName,
             signature: sig.signature,

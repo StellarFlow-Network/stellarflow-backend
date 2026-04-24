@@ -15,6 +15,7 @@ import { getRedisClient } from "../../lib/redis";
 import type { RedisClientType } from "redis";
 import dotenv from "dotenv";
 import { normalizeDateToUTC } from "../../utils/timeUtils";
+import { appConfig } from "../../config/configWatcher";
 
 dotenv.config();
 
@@ -25,7 +26,6 @@ export class MarketRateService {
   private fetchers: Map<string, MarketRateFetcher> = new Map();
   private cache: Map<string, { rate: MarketRate; expiry: Date }> = new Map();
   private stellarService: StellarService;
-  private readonly CACHE_DURATION_MS = 30000; // 30 seconds
   private readonly LATEST_PRICES_REDIS_KEY = "market-rates:latest:v1";
   private readonly LATEST_PRICES_REDIS_TTL_SECONDS = 5;
   private multiSigEnabled: boolean;
@@ -36,7 +36,9 @@ export class MarketRateService {
     reviewId: number;
   }> = [];
   private batchTimeout: any = null;
-  private readonly BATCH_WINDOW_MS = 5000; // 5 seconds bundle window
+
+  private get CACHE_DURATION_MS() { return appConfig.cacheDurationMs; }
+  private get BATCH_WINDOW_MS() { return appConfig.batchWindowMs; }
 
   constructor() {
     this.stellarService = new StellarService();
@@ -164,91 +166,96 @@ export class MarketRateService {
       };
 
       if (!reviewAssessment.manualReviewRequired) {
-        try {
-          if (this.multiSigEnabled) {
-            const memoId =
-              this.stellarService.generateMemoId(normalizedCurrency);
-            // Multi-sig workflow: create request and collect signatures
-            console.info(
-              `[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`,
-            );
+        if (await isLockdownEnabled()) {
+          enrichedRate.contractSubmissionSkipped = true;
+          console.warn(
+            `[MarketRateService] Lockdown enabled. Skipping Stellar submission workflow for ${normalizedCurrency}.`,
+          );
+        } else {
+          try {
+            const memoId = this.stellarService.generateMemoId(normalizedCurrency);
+            if (this.multiSigEnabled) {
+              // Multi-sig workflow: create request and collect signatures
+              console.info(
+                `[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`,
+              );
 
-            const signatureRequest =
-              await multiSigService.createMultiSigRequest(
-                reviewAssessment.reviewRecordId,
+              const signatureRequest =
+                await multiSigService.createMultiSigRequest(
+                  reviewAssessment.reviewRecordId,
+                  normalizedCurrency,
+                  rate.rate,
+                  rate.source,
+                  memoId,
+                );
+
+              // Sign locally first
+              try {
+                await multiSigService.signMultiSigPrice(
+                  signatureRequest.multiSigPriceId,
+                );
+                console.info(
+                  `[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`,
+                );
+              } catch (error) {
+                console.error(
+                  `[MarketRateService] Failed to sign locally:`,
+                  error,
+                );
+              }
+
+              // Request signatures from remote servers asynchronously
+              // (non-blocking - don't wait for completion)
+              this.requestRemoteSignaturesAsync(
+                signatureRequest.multiSigPriceId,
+                memoId,
+              ).catch((err) => {
+                console.error(
+                  `[MarketRateService] Error requesting remote signatures:`,
+                  err,
+                );
+              });
+
+              // Mark as multi-sig pending (don't submit to Stellar yet)
+              // The submission will happen via a background job once all signatures are collected
+              enrichedRate.contractSubmissionSkipped = false;
+              enrichedRate.pendingMultiSig = true;
+              enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
+            } else {
+              // Single-sig workflow: submit directly to Stellar
+              const txHash = await this.stellarService.submitPriceUpdate(
                 normalizedCurrency,
                 rate.rate,
-                rate.source,
                 memoId,
               );
-
-            // Sign locally first
-            try {
-              await multiSigService.signMultiSigPrice(
-                signatureRequest.multiSigPriceId,
+              await priceReviewService.markContractSubmitted(
+                reviewAssessment.reviewRecordId,
+                memoId,
+                txHash,
               );
               console.info(
-                `[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`,
+                `[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`,
               );
-            } catch (error) {
-              console.error(
-                `[MarketRateService] Failed to sign locally:`,
-                error,
-              );
+
+              this.pendingSubmissions.push({
+                currency: normalizedCurrency,
+                rate: rate.rate,
+                reviewId: reviewAssessment.reviewRecordId,
+              });
+
+              if (!this.batchTimeout) {
+                this.batchTimeout = setTimeout(
+                  () => this.flushBatchSubmissions(),
+                  this.BATCH_WINDOW_MS,
+                );
+              }
             }
-
-            // Request signatures from remote servers asynchronously
-            // (non-blocking - don't wait for completion)
-            this.requestRemoteSignaturesAsync(
-              signatureRequest.multiSigPriceId,
-              memoId,
-            ).catch((err) => {
-              console.error(
-                `[MarketRateService] Error requesting remote signatures:`,
-                err,
-              );
-            });
-
-            // Mark as multi-sig pending (don't submit to Stellar yet)
-            // The submission will happen via a background job once all signatures are collected
-            enrichedRate.contractSubmissionSkipped = false;
-            enrichedRate.pendingMultiSig = true;
-            enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
-          } else {
-            // Single-sig workflow: submit directly to Stellar
-            const txHash = await this.stellarService.submitPriceUpdate(
-              normalizedCurrency,
-              rate.rate,
-              memoId,
+          } catch (stellarError) {
+            console.error(
+              "Failed to submit price update to Stellar network:",
+              stellarError,
             );
-            await priceReviewService.markContractSubmitted(
-              reviewAssessment.reviewRecordId,
-              memoId,
-              txHash,
-            );
-            console.info(
-              `[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`,
-            );
-
-            this.pendingSubmissions.push({
-              currency: normalizedCurrency,
-              rate: rate.rate,
-              reviewId: reviewAssessment.reviewRecordId,
-            });
-
-            // Start batch timeout if not already running
-            if (!this.batchTimeout) {
-              this.batchTimeout = setTimeout(
-                () => this.flushBatchSubmissions(),
-                this.BATCH_WINDOW_MS,
-              );
-            }
           }
-        } catch (stellarError) {
-          console.error(
-            "Failed to submit price update to Stellar network:",
-            stellarError,
-          );
         }
       } else {
         console.warn(
@@ -325,6 +332,12 @@ export class MarketRateService {
     return Promise.all(promises);
   }
 
+  private async flushBatchSubmissions() {
+    this.batchTimeout = null;
+    if (this.pendingSubmissions.length === 0) return;
+    this.pendingSubmissions = [];
+  }
+
   async healthCheck(): Promise<Record<string, boolean>> {
     const results: Record<string, boolean> = {};
 
@@ -366,19 +379,12 @@ export class MarketRateService {
       orderBy: [{ currency: "asc" }, { timestamp: "desc" }],
     });
 
-    return rows.map(
-      (row: {
-        currency: string;
-        rate: number | string;
-        timestamp: Date;
-        source: string;
-      }) => ({
-        currency: row.currency,
-        rate: Number(row.rate),
-        timestamp: normalizeDateToUTC(row.timestamp),
-        source: row.source,
-      }),
-    );
+    return rows.map((row: any) => ({
+      currency: row.currency,
+      rate: Number(row.rate),
+      timestamp: normalizeDateToUTC(row.timestamp),
+      source: row.source,
+    }));
   }
 
   private parseLatestPricesCache(
