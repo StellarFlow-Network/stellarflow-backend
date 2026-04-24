@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import logger from "../utils/logger";
 import prisma from "../lib/prisma";
 
 export const apiKeyMiddleware = async (
@@ -45,12 +46,11 @@ export const apiKeyMiddleware = async (
     const expectedKey = process.env.API_KEY;
 
     if (!expectedKey) {
-      console.error("Critical: API_KEY not set in environment");
-      res.status(500).json({
-        success: false,
-        error: "Authentication configuration error",
-      });
-      return;
+        logger.error("Critical: API_KEY not set in environment");
+        return res.status(500).json({
+            success: false,
+            error: "Authentication configuration error",
+        });
     }
 
     if (apiKey === expectedKey) {

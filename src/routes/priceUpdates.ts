@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
 import { multiSigService, SignaturePayload } from "../services/multiSigService";
+import logger from "../utils/logger";
 import { isLockdownError } from "../state/appState";
 import {
   sanitizeMultiSigRequest,
@@ -52,6 +53,27 @@ router.post(
         error: String(error),
       });
     }
+
+    const signatureRequest = await multiSigService.createMultiSigRequest(
+      priceReviewId,
+      currency,
+      rate,
+      source,
+      memoId
+    );
+
+    res.json({
+      success: true,
+      data: signatureRequest,
+    });
+  } catch (error) {
+    logger.error("[API] Multi-sig request creation failed:", error);
+    res.status(500).json({
+      success: false,
+      error: String(error),
+    });
+  }
+});
   },
 );
 
@@ -109,6 +131,31 @@ router.post(
         error: error instanceof Error ? error.message : String(error),
       });
     }
+
+    // Sign the price update locally
+    const { signature, signerPublicKey } = await multiSigService.signMultiSigPrice(
+      multiSigPriceId
+    );
+
+    const signerInfo = multiSigService.getLocalSignerInfo();
+
+    res.json({
+      success: true,
+      data: {
+        multiSigPriceId,
+        signature,
+        signerPublicKey,
+        signerName: signerInfo.name,
+      },
+    });
+  } catch (error) {
+    logger.error("[API] Signature creation failed:", error);
+    res.status(400).json({
+      success: false,
+      error: String(error),
+    });
+  }
+});
   },
 );
 
@@ -156,6 +203,16 @@ router.post(
         error: String(error),
       });
     }
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error("[API] Remote signature request failed:", error);
+    res.status(500).json({
+      success: false,
+      error: String(error),
+    });
+  }
+});
   },
 );
 
@@ -211,6 +268,32 @@ router.get(
         error: String(error),
       });
     }
+
+    res.json({
+      success: true,
+      data: {
+        id: multiSigPrice.id,
+        currency: multiSigPrice.currency,
+        rate: multiSigPrice.rate,
+        status: multiSigPrice.status,
+        collectedSignatures: multiSigPrice.collectedSignatures,
+        requiredSignatures: multiSigPrice.requiredSignatures,
+        expiresAt: multiSigPrice.expiresAt,
+        signers: multiSigPrice.multiSigSignatures?.map((sig: any) => ({
+          publicKey: sig.signerPublicKey,
+          name: sig.signerName,
+          signedAt: sig.signedAt,
+        })),
+      },
+    });
+  } catch (error) {
+    logger.error("[API] Multi-sig status fetch failed:", error);
+    res.status(500).json({
+      success: false,
+      error: String(error),
+    });
+  }
+});
   },
 );
 
@@ -237,7 +320,7 @@ router.get("/multi-sig/pending", async (req: Request, res: Response) => {
       })),
     });
   } catch (error) {
-    console.error("[API] Pending multi-sig fetch failed:", error);
+    logger.error("[API] Pending multi-sig fetch failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),
@@ -305,6 +388,32 @@ router.get(
         error: String(error),
       });
     }
+
+    const signatures = await multiSigService.getSignatures(
+      parseInt(multiSigPriceId, 10)
+    );
+
+    res.json({
+      success: true,
+      data: {
+        multiSigPriceId: multiSigPrice.id,
+        currency: multiSigPrice.currency,
+        rate: multiSigPrice.rate,
+        signatures: signatures.map((sig) => ({
+          signerPublicKey: sig.signerPublicKey,
+          signerName: sig.signerName,
+          signature: sig.signature,
+        })),
+      },
+    });
+  } catch (error) {
+    logger.error("[API] Signature fetch failed:", error);
+    res.status(500).json({
+      success: false,
+      error: String(error),
+    });
+  }
+});
   },
 );
 
@@ -346,6 +455,22 @@ router.post(
         error: String(error),
       });
     }
+
+    await multiSigService.recordSubmission(
+      parseInt(multiSigPriceId, 10),
+      memoId,
+      stellarTxHash
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error("[API] Submission recording failed:", error);
+    res.status(500).json({
+      success: false,
+      error: String(error),
+    });
+  }
+});
   },
 );
 
@@ -362,7 +487,7 @@ router.get("/multi-sig/signer-info", async (req: Request, res: Response) => {
       data: signerInfo,
     });
   } catch (error) {
-    console.error("[API] Signer info fetch failed:", error);
+    logger.error("[API] Signer info fetch failed:", error);
     res.status(500).json({
       success: false,
       error: String(error),

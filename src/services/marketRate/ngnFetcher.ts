@@ -1,11 +1,7 @@
 import axios from "axios";
 import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout.js";
-import {
-  MarketRateFetcher,
-  MarketRate,
-  calculateWeightedAverage,
-  filterOutliers,
-} from "./types";
+import { MarketRateFetcher, MarketRate, calculateMedian, filterOutliers, SourceTrustLevel, calculateWeightedAverage } from "./types";
+import logger from "../../utils/logger";
 import { withRetry } from "../../utils/retryUtil.js";
 import {
   getNGNProviderWeight,
@@ -173,8 +169,8 @@ export class NGNRateFetcher implements MarketRateFetcher {
           });
         }
       }
-    } catch (error) {
-      this.logger.debug("VTpass + CoinGecko XLM/USD failed", { error: error instanceof Error ? error.message : error });
+    } catch {
+      logger.debug("VTpass + CoinGecko XLM/USD failed");
     }
 
     try {
@@ -206,8 +202,8 @@ export class NGNRateFetcher implements MarketRateFetcher {
           providerKey: "coinGeckoDirectNgn",
         });
       }
-    } catch (error) {
-      this.logger.debug("CoinGecko direct NGN failed", { error: error instanceof Error ? error.message : error });
+    } catch {
+      logger.debug("CoinGecko direct NGN failed");
     }
 
     try {
@@ -261,8 +257,8 @@ export class NGNRateFetcher implements MarketRateFetcher {
           });
         }
       }
-    } catch (error) {
-      this.logger.debug("CoinGecko + ExchangeRate API (NGN) failed", { error: error instanceof Error ? error.message : error });
+    } catch {
+      logger.debug("CoinGecko + ExchangeRate API (NGN) failed");
     }
 
     if (prices.length === 0) {

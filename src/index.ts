@@ -10,6 +10,8 @@ import { disconnectRedis } from "./lib/redis";
 import { initSocket } from "./lib/socket";
 import { SorobanEventListener } from "./services/sorobanEventListener";
 import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
+import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
+import logger from "./utils/logger";
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
@@ -40,9 +42,9 @@ for (const envVar of requiredEnvVars) {
 }
 
 if (missingEnvVars.length > 0) {
-  console.error("❌ Missing required environment variables:");
-  missingEnvVars.forEach((varName) => console.error(`   - ${varName}`));
-  console.error(
+  logger.error("❌ Missing required environment variables:");
+  missingEnvVars.forEach((varName) => logger.error(`   - ${varName}`));
+  logger.error(
     "\nPlease set these variables in your .env file and restart the server.",
   );
   process.exit(1);
@@ -54,7 +56,7 @@ const dashboardUrl =
   "http://localhost:3000";
 
 if (!dashboardUrl) {
-  console.error("❌ Missing required environment variable: DASHBOARD_URL");
+  logger.error("❌ Missing required environment variable: DASHBOARD_URL");
   process.exit(1);
 }
 
@@ -67,6 +69,63 @@ const horizonUrl =
     ? "https://horizon.stellar.org"
     : "https://horizon-testnet.stellar.org";
 const horizonServer = new Horizon.Server(horizonUrl);
+
+// Middleware
+app.use(
+  morgan(":method :url :status :res[content-length] - :response-time ms", {
+    stream: {
+      write: (message) => logger.http(message.trim()),
+    },
+  }),
+);
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow non-browser requests (e.g. curl, server-to-server)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (origin === dashboardUrl) {
+        return callback(null, true);
+      }
+
+      return callback(
+        new Error(
+          `CORS policy: Access denied from origin ${origin}. Allowed origin: ${dashboardUrl}`,
+        ),
+      );
+    },
+    credentials: true,
+  }),
+);
+app.use(express.json());
+
+// Swagger documentation
+app.use("/api/docs", swaggerUi.serve);
+app.get(
+  "/api/docs",
+  swaggerUi.setup(specs, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+    customCss: `
+    .topbar { display: none; }
+    .swagger-ui .api-info { margin-bottom: 20px; }
+  `,
+    customSiteTitle: "StellarFlow API Documentation",
+  }),
+);
+// Apply API Key Middleware to all /api routes
+app.use("/api", apiKeyMiddleware);
+
+// Routes
+app.use("/api/market-rates", marketRatesRouter);
+app.use("/api/history", historyRouter);
+app.use("/api/stats", statsRouter);
+app.use("/api/intelligence", intelligenceRouter);
+app.use("/api/price-updates", priceUpdatesRouter);
+app.use("/api/assets", assetsRouter);
 
 // Health check endpoint
 /**
@@ -195,6 +254,18 @@ app.get("/", (req, res) => {
   });
 });
 
+// Error handling middleware
+app.use(
+  (
+    err: Error,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    logger.error(`Unhandled error: ${err.message}`, { stack: err.stack });
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
 // Start server
 const httpServer = createServer(app);
 initSocket(httpServer);
@@ -277,15 +348,15 @@ process.once("SIGTERM", () => {
 });
 
 httpServer.listen(PORT, () => {
-  console.log(`🌊 StellarFlow Backend running on port ${PORT}`);
-  console.log(
+  logger.info(`🌊 StellarFlow Backend running on port ${PORT}`);
+  logger.info(
     `📊 Market Rates API available at http://localhost:${PORT}/api/market-rates`,
   );
-  console.log(
+  logger.info(
     `📚 API Documentation available at http://localhost:${PORT}/api/docs`,
   );
-  console.log(`🏥 Health check at http://localhost:${PORT}/health`);
-  console.log(`🔌 Socket.io ready for dashboard connections`);
+  logger.info(`🏥 Health check at http://localhost:${PORT}/health`);
+  logger.info(`🔌 Socket.io ready for dashboard connections`);
 
   // Start Soroban event listener to track confirmed on-chain prices
   try {
@@ -293,9 +364,9 @@ httpServer.listen(PORT, () => {
     sorobanEventListener.start().catch((err) => {
       console.error("Failed to start event listener:", err);
     });
-    console.log(`👂 Soroban event listener started`);
+    logger.info(`👂 Soroban event listener started`);
   } catch (err) {
-    console.warn(
+    logger.warn(
       "Event listener not started:",
       err instanceof Error ? err.message : err,
     );
@@ -306,11 +377,11 @@ httpServer.listen(PORT, () => {
   if (process.env.MULTI_SIG_ENABLED === "true") {
     try {
       multiSigSubmissionService.start().catch((err: Error) => {
-        console.error("Failed to start multi-sig submission service:", err);
+        logger.error("Failed to start multi-sig submission service:", err);
       });
-      console.log(`🔐 Multi-Sig submission service started`);
+      logger.info(`🔐 Multi-Sig submission service started`);
     } catch (err) {
-      console.warn(
+      logger.warn(
         "Multi-sig submission service not started:",
         err instanceof Error ? err.message : err,
       );

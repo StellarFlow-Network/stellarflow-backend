@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma";
+import logger from "../utils/logger";
 
 export class IntelligenceService {
   /**
@@ -61,7 +62,7 @@ export class IntelligenceService {
 
       return `${sign}${changePercent.toFixed(1)}%`;
     } catch (error) {
-      console.error(`Error calculating 24h change for ${asset}:`, error);
+      logger.error(`Error calculating 24h change for ${asset}:`, error);
       return "0.0%";
     }
   }
@@ -101,7 +102,7 @@ export class IntelligenceService {
 
       return staleCurrencies;
     } catch (error) {
-      console.error("Error detecting stale currencies:", error);
+      logger.error("Error detecting stale currencies:", error);
       return [];
     }
   }

@@ -1,5 +1,6 @@
 import { Server, Socket } from "socket.io";
 import { randomUUID } from "crypto";
+import logger from "../utils/logger";
 
 interface Session {
   id: string; // connectionSessionId
@@ -44,6 +45,10 @@ export function initSocket(server: import("http").Server): Server {
     pingTimeout: HEARTBEAT_TIMEOUT,
   });
 
+  io.on("connection", (socket) => {
+    logger.info(`🔌 Client connected: ${socket.id}`);
+    socket.on("disconnect", () =>
+      logger.info(`🔌 Client disconnected: ${socket.id}`)
   io.on("connection", (socket: Socket) => {
     console.log(`🔌 Client connected: ${socket.id}`);
 

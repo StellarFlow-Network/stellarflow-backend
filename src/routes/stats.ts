@@ -1,5 +1,6 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import logger from "../utils/logger";
 import { cacheMiddleware } from "../cache/CacheMiddleware";
 import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 
@@ -156,7 +157,7 @@ router.get(
       data: volumeStats,
     });
   } catch (error) {
-    console.error("Error fetching volume stats:", error);
+    logger.error("Error fetching volume stats:", error);
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : "Internal server error",

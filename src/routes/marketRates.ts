@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getRate, getAllRates } from "../controllers/marketRatesController";
 import { MarketRateService } from "../services/marketRate";
+import logger from "../utils/logger";
 import { cacheMiddleware, invalidateCache } from "../cache/CacheMiddleware";
 import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 import { isLockdownError } from "../state/appState";
@@ -91,6 +92,8 @@ router.get(
             : "Failed to fetch pending price reviews",
       });
     }
+  } catch (error) {
+    logger.error("Error fetching latest prices:", error);
   },
 );
 

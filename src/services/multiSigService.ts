@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma";
 import { Keypair } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import logger from "../utils/logger";
 import { assertSigningAllowed } from "../state/appState";
 
 /* global fetch */
@@ -96,8 +97,8 @@ export class MultiSigService {
       },
     });
 
-    console.info(
-      `[MultiSig] Created signature request ${created.id} for ${currency} rate ${rate}`,
+    logger.info(
+      `[MultiSig] Created signature request ${created.id} for ${currency} rate ${rate}`
     );
 
     return {
@@ -179,9 +180,9 @@ export class MultiSigService {
         },
       });
 
-      console.info(
-        `[MultiSig] Added signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`,
-      );
+    logger.info(
+      `[MultiSig] Added signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`
+    );
 
       if (updated.collectedSignatures >= updated.requiredSignatures) {
         await this.approveMultiSigPrice(multiSigPriceId);
@@ -284,8 +285,8 @@ export class MultiSigService {
           },
         });
 
-        console.info(
-          `[MultiSig] Added remote signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`,
+        logger.info(
+          `[MultiSig] Added remote signature ${updated.collectedSignatures}/${updated.requiredSignatures} for MultiSigPrice ${multiSigPriceId}`
         );
 
         if (updated.collectedSignatures >= updated.requiredSignatures) {
@@ -295,7 +296,7 @@ export class MultiSigService {
 
       return { success: true };
     } catch (error) {
-      console.error(
+      logger.error(
         `[MultiSig] Failed to request signature from ${remoteServerUrl}:`,
         error,
       );
@@ -359,12 +360,29 @@ export class MultiSigService {
     });
 
     if (result.count > 0) {
-      console.warn(
-        `[MultiSig] Expired ${result.count} multi-sig price requests`,
+      logger.warn(
+        `[MultiSig] Expired ${result.count} multi-sig price requests`
       );
     }
 
     return result.count;
+  }
+
+  /**
+   * Mark a multi-sig price as approved (all signatures collected).
+   * This happens automatically when all required signatures are collected.
+   */
+  private async approveMultiSigPrice(multiSigPriceId: number): Promise<void> {
+    await prisma.multiSigPrice.update({
+      where: { id: multiSigPriceId },
+      data: {
+        status: "APPROVED",
+      },
+    });
+
+    logger.info(
+      `[MultiSig] MultiSigPrice ${multiSigPriceId} is now APPROVED (all signatures collected)`
+    );
   }
 
   /**
@@ -395,8 +413,8 @@ export class MultiSigService {
       },
     });
 
-    console.info(
-      `[MultiSig] MultiSigPrice ${multiSigPriceId} submitted to Stellar - TxHash: ${stellarTxHash}`,
+    logger.info(
+      `[MultiSig] MultiSigPrice ${multiSigPriceId} submitted to Stellar - TxHash: ${stellarTxHash}`
     );
   }
 

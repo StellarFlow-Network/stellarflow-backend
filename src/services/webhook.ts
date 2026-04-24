@@ -1,4 +1,5 @@
 import axios from "axios";
+import logger from "../utils/logger";
 import { OUTGOING_HTTP_TIMEOUT_MS } from "../utils/httpTimeout.js";
 import { withRetry } from "../utils/retryUtil.js";
 
@@ -121,10 +122,7 @@ export class WebhookService {
         },
       );
     } catch (error) {
-      console.error(
-        "Failed to send webhook notification after retries:",
-        error,
-      );
+      logger.error("Failed to send webhook notification:", error);
     }
   }
 
