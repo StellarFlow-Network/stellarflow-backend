@@ -22,6 +22,13 @@ export default [
         console: "readonly",
         process: "readonly",
         setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        atob: "readonly",
+        btoa: "readonly",
+        URL: "readonly",
+        URLSearchParams: "readonly",
       },
     },
     plugins: {
@@ -43,6 +50,22 @@ export default [
   {
     rules: {
       ...eslintConfigPrettier.rules,
+    },
+  },
+  {
+    files: ["test/**/*.ts", "tests/**/*.ts"],
+    languageOptions: {
+      globals: {
+        describe: "readonly",
+        it: "readonly",
+        test: "readonly",
+        expect: "readonly",
+        beforeAll: "readonly",
+        afterAll: "readonly",
+        beforeEach: "readonly",
+        afterEach: "readonly",
+        jest: "readonly",
+      },
     },
   },
 ];

@@ -2,7 +2,8 @@ import { Horizon, Keypair } from "@stellar/stellar-sdk";
 import type { ServerApi } from "@stellar/stellar-sdk/lib/horizon";
 import type { OnChainPrice } from "@prisma/client";
 import prisma from "../lib/prisma";
-import { getIO } from "../lib/socket";
+import { getIO, broadcastToSessions } from "../lib/socket";
+import stellarProvider from "../lib/stellarProvider";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -36,13 +37,9 @@ export class SorobanEventListener {
     this.oraclePublicKey = Keypair.fromSecret(secret).publicKey();
     this.pollIntervalMs = pollIntervalMs;
 
-    const network = process.env.STELLAR_NETWORK || "TESTNET";
-    const horizonUrl =
-      network === "PUBLIC"
-        ? "https://horizon.stellar.org"
-        : "https://horizon-testnet.stellar.org";
-
-    this.server = new Horizon.Server(horizonUrl);
+    // Use the shared StellarProvider so failover state is shared across all
+    // services rather than each managing its own Horizon URL.
+    this.server = stellarProvider.getServer();
   }
 
   async start(): Promise<void> {
@@ -87,8 +84,26 @@ export class SorobanEventListener {
     console.log("[EventListener] Stopped");
   }
 
+  restart(newIntervalMs: number): void {
+    if (!this.isRunning) return;
+    if (newIntervalMs === this.pollIntervalMs) return;
+    this.pollIntervalMs = newIntervalMs;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+    }
+    this.pollTimer = setInterval(() => {
+      this.pollTransactions().catch((err) => {
+        console.error("[EventListener] Poll error:", err);
+      });
+    }, this.pollIntervalMs);
+    console.info(`[EventListener] Poll interval updated to ${this.pollIntervalMs}ms`);
+  }
+
   private async pollTransactions(): Promise<void> {
     try {
+      // Refresh the server reference in case a failover occurred since last poll
+      this.server = stellarProvider.getServer();
+
       const transactions = await this.server
         .transactions()
         .forAccount(this.oraclePublicKey)
@@ -128,6 +143,9 @@ export class SorobanEventListener {
         }
       }
     } catch (error) {
+      // Report to the provider — triggers a failover if this is a 5xx / network error
+      stellarProvider.reportFailure(error);
+
       // Account not found is expected for new accounts with no transactions
       if (error instanceof Error && error.message.includes("status code 404")) {
         console.log("[EventListener] No transactions found for oracle account");
@@ -237,9 +255,8 @@ export class SorobanEventListener {
 
   private emitPriceUpdates(prices: ConfirmedPrice[]): void {
     try {
-      const io = getIO();
       for (const price of prices) {
-        io.emit("price:confirmed", {
+        broadcastToSessions("price:confirmed", {
           currency: price.currency,
           rate: price.rate,
           txHash: price.txHash,

@@ -1,10 +1,23 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import { cacheMiddleware } from "../cache/CacheMiddleware";
+import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 
 const router = Router();
 
 // GET /api/v1/stats/volume?date=2024-01-15
-router.get("/volume", async (req, res) => {
+router.get(
+  "/volume",
+  cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.stats,
+    keyGenerator: (req) => {
+      const dateParam = req.query.date as string;
+      const targetDate = dateParam ? new Date(dateParam) : new Date();
+      const dateStr = targetDate.toISOString().split("T")[0];
+      return CACHE_KEYS.stats.volume(dateStr);
+    },
+  }),
+  async (req, res) => {
   try {
     const dateParam = req.query.date as string;
 

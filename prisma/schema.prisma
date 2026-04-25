@@ -151,6 +151,16 @@ model ErrorLog {
   @@index([occurredAt])
 }
 
+model Relayer {
+  id            Int      @id @default(autoincrement())
+  name          String   @db.VarChar(100)
+  apiKey        String   @unique @db.VarChar(255)
+  isActive      Boolean  @default(true)
+  allowedAssets String[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 // Hourly Statistics for smoothing out price spikes
 model HourlyStats {
   id           Int      @id @default(autoincrement())
@@ -161,4 +171,26 @@ model HourlyStats {
 
   @@unique([currency, hour])
   @@index([hour])
+}
+
+// Compliance Metadata Store for relayer performance auditing
+// Tracks latency violations and other compliance events
+model ComplianceMetadata {
+  id                Int       @id @default(autoincrement())
+  relayerId         Int?      // Optional link to relayer (if known)
+  relayerName       String?   @db.VarChar(100)  // Relayer name at time of violation
+  eventType         String    @db.VarChar(50)  // e.g., "LATENCY_VIOLATION", "PAYLOAD_REJECTED"
+  payloadTimestamp  DateTime? @db.Timestamp(3) // Timestamp from the relayer payload
+  receivedAt       DateTime  @db.Timestamp(3)  // When the payload was received
+  latencyDiffMs     Int?      // Calculated latency difference in milliseconds
+  thresholdMs       Int?      // The threshold that was exceeded
+  details           String?   @db.Text         // Additional JSON details about the event
+  resolved          Boolean   @default(false)  // Whether the violation has been addressed
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([relayerId])
+  @@index([eventType])
+  @@index([createdAt])
+  @@index([relayerName, createdAt])
 }

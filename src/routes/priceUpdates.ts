@@ -1,5 +1,10 @@
 import express, { Request, Response } from "express";
 import { multiSigService, SignaturePayload } from "../services/multiSigService";
+import { isLockdownError } from "../state/appState";
+import {
+  sanitizeMultiSigRequest,
+  sanitizeSignatureRequest,
+} from "../middleware/payloadSanitizer";
 
 const router = express.Router();
 
@@ -7,45 +12,48 @@ const router = express.Router();
  * POST /api/v1/price-updates/multi-sig/request
  * Creates a multi-sig price update request.
  * Called by the initializing server to start the approval process.
+ *
+ * Request body is validated by sanitizeMultiSigRequest middleware.
  */
-router.post("/multi-sig/request", async (req: Request, res: Response) => {
-  try {
-    const { priceReviewId, currency, rate, source, memoId } = req.body;
+router.post(
+  "/multi-sig/request",
+  sanitizeMultiSigRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { priceReviewId, currency, rate, source, memoId } = req.body;
 
-    if (
-      !priceReviewId ||
-      !currency ||
-      rate === undefined ||
-      !source ||
-      !memoId
-    ) {
-      return res.status(400).json({
+      // Enforce relayer asset authorization
+      if (req.relayer) {
+        const normalizedCurrency = currency.toUpperCase();
+        if (!req.relayer.allowedAssets.includes(normalizedCurrency)) {
+          return res.status(403).json({
+            success: false,
+            error: `Relayer not authorized for asset: ${normalizedCurrency}`,
+          });
+        }
+      }
+
+      const signatureRequest = await multiSigService.createMultiSigRequest(
+        priceReviewId,
+        currency,
+        rate,
+        source,
+        memoId,
+      );
+
+      res.json({
+        success: true,
+        data: signatureRequest,
+      });
+    } catch (error) {
+      console.error("[API] Multi-sig request creation failed:", error);
+      res.status(500).json({
         success: false,
-        error:
-          "Missing required fields: priceReviewId, currency, rate, source, memoId",
+        error: String(error),
       });
     }
-
-    const signatureRequest = await multiSigService.createMultiSigRequest(
-      priceReviewId,
-      currency,
-      rate,
-      source,
-      memoId,
-    );
-
-    res.json({
-      success: true,
-      data: signatureRequest,
-    });
-  } catch (error) {
-    console.error("[API] Multi-sig request creation failed:", error);
-    res.status(500).json({
-      success: false,
-      error: String(error),
-    });
-  }
-});
+  },
+);
 
 /**
  * POST /api/v1/price-updates/sign
@@ -54,58 +62,55 @@ router.post("/multi-sig/request", async (req: Request, res: Response) => {
  *
  * Requires:
  * - Authorization header with token (if MULTI_SIG_AUTH_TOKEN is set)
- * - Signature payload in body
+ * - Signature payload in body (validated by sanitizeSignatureRequest middleware)
  */
-router.post("/sign", async (req: Request, res: Response) => {
-  try {
-    // Validate authorization if token is configured
-    const authToken = process.env.MULTI_SIG_AUTH_TOKEN;
-    if (authToken) {
-      const authHeader = req.headers.authorization || "";
-      const token = authHeader.startsWith("Bearer ")
-        ? authHeader.slice(7)
-        : authHeader;
+router.post(
+  "/sign",
+  sanitizeSignatureRequest,
+  async (req: Request, res: Response) => {
+    try {
+      // Validate authorization if token is configured
+      const authToken = process.env.MULTI_SIG_AUTH_TOKEN;
+      if (authToken) {
+        const authHeader = req.headers.authorization || "";
+        const token = authHeader.startsWith("Bearer ")
+          ? authHeader.slice(7)
+          : authHeader;
 
-      if (token !== authToken) {
-        return res.status(403).json({
-          success: false,
-          error: "Unauthorized - invalid token",
-        });
+        if (token !== authToken) {
+          return res.status(403).json({
+            success: false,
+            error: "Unauthorized - invalid token",
+          });
+        }
       }
-    }
 
-    const { multiSigPriceId } = req.body as SignaturePayload;
+      const { multiSigPriceId } = req.body as SignaturePayload;
 
-    if (!multiSigPriceId) {
-      return res.status(400).json({
+      // Sign the price update locally
+      const { signature, signerPublicKey } =
+        await multiSigService.signMultiSigPrice(multiSigPriceId);
+
+      const signerInfo = multiSigService.getLocalSignerInfo();
+
+      res.json({
+        success: true,
+        data: {
+          multiSigPriceId,
+          signature,
+          signerPublicKey,
+          signerName: signerInfo.name,
+        },
+      });
+    } catch (error) {
+      console.error("[API] Signature creation failed:", error);
+      res.status(isLockdownError(error) ? error.statusCode : 400).json({
         success: false,
-        error: "Missing multiSigPriceId",
+        error: error instanceof Error ? error.message : String(error),
       });
     }
-
-    // Sign the price update locally
-    const { signature, signerPublicKey } =
-      await multiSigService.signMultiSigPrice(multiSigPriceId);
-
-    const signerInfo = multiSigService.getLocalSignerInfo();
-
-    res.json({
-      success: true,
-      data: {
-        multiSigPriceId,
-        signature,
-        signerPublicKey,
-        signerName: signerInfo.name,
-      },
-    });
-  } catch (error) {
-    console.error("[API] Signature creation failed:", error);
-    res.status(400).json({
-      success: false,
-      error: String(error),
-    });
-  }
-});
+  },
+);
 
 /**
  * POST /api/v1/price-updates/multi-sig/:multiSigPriceId/request-signature
@@ -220,7 +225,7 @@ router.get("/multi-sig/pending", async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      data: pendingPrices.map((price) => ({
+      data: pendingPrices.map((price: any) => ({
         id: price.id,
         currency: price.currency,
         rate: price.rate,
@@ -286,7 +291,7 @@ router.get(
           multiSigPriceId: multiSigPrice.id,
           currency: multiSigPrice.currency,
           rate: multiSigPrice.rate,
-          signatures: signatures.map((sig) => ({
+          signatures: signatures.map((sig: any) => ({
             signerPublicKey: sig.signerPublicKey,
             signerName: sig.signerName,
             signature: sig.signature,

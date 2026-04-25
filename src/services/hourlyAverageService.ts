@@ -54,6 +54,21 @@ export class HourlyAverageService {
     console.info("[HourlyAverageService] Stopped");
   }
 
+  restart(newIntervalMs: number): void {
+    if (!this.isRunning) return;
+    if (newIntervalMs === this.checkIntervalMs) return;
+    this.checkIntervalMs = newIntervalMs;
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+    this.timer = setInterval(() => {
+      this.processMissingHourlyStats().catch((err) => {
+        console.error("[HourlyAverageService] Background job error:", err);
+      });
+    }, this.checkIntervalMs);
+    console.info(`[HourlyAverageService] Check interval updated to ${this.checkIntervalMs}ms`);
+  }
+
   /**
    * Main logic to find missing hourly stats and calculate them.
    * Checks the last 24 hours for any gaps.

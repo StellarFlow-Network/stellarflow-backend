@@ -1,14 +1,22 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import { cacheMiddleware } from "../cache/CacheMiddleware";
+import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 const router = Router();
 // GET /api/v1/stats/volume?date=2024-01-15
-router.get("/volume", async (req, res) => {
+router.get("/volume", cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.stats,
+    keyGenerator: (req) => {
+        const dateParam = req.query.date;
+        const targetDate = dateParam ? new Date(dateParam) : new Date();
+        const dateStr = targetDate.toISOString().split("T")[0];
+        return CACHE_KEYS.stats.volume(dateStr);
+    },
+}), async (req, res) => {
     try {
         const dateParam = req.query.date;
         // Default to today if no date provided
-        const targetDate = dateParam
-            ? new Date(dateParam)
-            : new Date();
+        const targetDate = dateParam ? new Date(dateParam) : new Date();
         // Validate date
         if (isNaN(targetDate.getTime())) {
             res.status(400).json({
@@ -66,7 +74,7 @@ router.get("/volume", async (req, res) => {
             select: {
                 currency: true,
             },
-            distinct: ['currency'],
+            distinct: ["currency"],
         });
         // Get unique data sources for the day
         const activeSources = await prisma.priceHistory.findMany({
@@ -79,10 +87,10 @@ router.get("/volume", async (req, res) => {
             select: {
                 source: true,
             },
-            distinct: ['source'],
+            distinct: ["source"],
         });
         const volumeStats = {
-            date: targetDate.toISOString().split('T')[0],
+            date: targetDate.toISOString().split("T")[0],
             dataPoints: {
                 priceHistoryEntries: priceHistoryCount,
                 onChainConfirmations: onChainPriceCount,
@@ -92,7 +100,10 @@ router.get("/volume", async (req, res) => {
                 total: totalApiRequests,
                 successful: totalSuccessfulRequests,
                 failed: totalFailedRequests,
-                successRate: totalApiRequests > 0 ? (totalSuccessfulRequests / totalApiRequests * 100).toFixed(2) + '%' : '0%',
+                successRate: totalApiRequests > 0
+                    ? ((totalSuccessfulRequests / totalApiRequests) * 100).toFixed(2) +
+                        "%"
+                    : "0%",
             },
             activity: {
                 activeCurrencies: activeCurrencies.length,
@@ -104,8 +115,9 @@ router.get("/volume", async (req, res) => {
                 name: provider.providerName,
                 totalRequests: provider.totalRequests,
                 successRate: provider.totalRequests > 0
-                    ? (provider.successfulRequests / provider.totalRequests * 100).toFixed(2) + '%'
-                    : '0%',
+                    ? ((provider.successfulRequests / provider.totalRequests) *
+                        100).toFixed(2) + "%"
+                    : "0%",
                 lastActivity: provider.lastSuccess || provider.lastFailure,
             })),
         };

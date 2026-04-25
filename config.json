@@ -1,0 +1,8 @@
+{
+  "fetchIntervalMs": 10000,
+  "sorobanPollIntervalMs": 15000,
+  "multiSigPollIntervalMs": 30000,
+  "hourlyAverageCheckIntervalMs": 900000,
+  "cacheDurationMs": 30000,
+  "batchWindowMs": 5000
+}
