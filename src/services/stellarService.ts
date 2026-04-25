@@ -1,3 +1,5 @@
+import stellarProvider from "../lib/stellarProvider";
+import { sequenceManager } from "./sequence-manager";
 import {
   Keypair,
   TransactionBuilder,
@@ -7,6 +9,7 @@ import {
   Memo,
   Horizon,
   xdr,
+  Account,
 } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
 
@@ -190,7 +193,7 @@ export class StellarService {
    */
   async submitTransactionWithRetries(
     builderFn: (
-      sourceAccount: Horizon.AccountResponse,
+      sourceAccount: Account | Horizon.AccountResponse,
       currentFee: number,
     ) => Transaction,
     maxRetries = this.MAX_RETRIES,
@@ -200,9 +203,14 @@ export class StellarService {
 
     while (attempt <= maxRetries) {
       try {
-        const sourceAccount = await this.server.loadAccount(
+        const nextSequence = await sequenceManager.getNextSequence(
           this.keypair.publicKey(),
         );
+        const sourceAccount = new Account(
+          this.keypair.publicKey(),
+          nextSequence,
+        );
+
         const currentFee = Math.floor(
           baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt),
         );
@@ -212,6 +220,17 @@ export class StellarService {
 
         return await this.server.submitTransaction(transaction);
       } catch (error: any) {
+        const resultCode =
+          error.response?.data?.extras?.result_codes?.transaction;
+
+        // If sequence is bad, force a reset in SequenceManager to re-sync with Horizon
+        if (resultCode === "tx_bad_seq") {
+          console.warn(
+            "⚠️ SequenceManager: tx_bad_seq detected. Invalidating sequence and retrying...",
+          );
+          sequenceManager.invalidate(this.keypair.publicKey());
+        }
+
         attempt++;
 
         const isStuck = this.isStuckError(error);
@@ -245,7 +264,7 @@ export class StellarService {
    */
   private async submitMultiSignedTransaction(
     builderFn: (
-      sourceAccount: Horizon.AccountResponse,
+      sourceAccount: Account | Horizon.AccountResponse,
       currentFee: number,
     ) => Transaction,
     signatures: Array<{ signerPublicKey: string; signature: string }>,
@@ -256,9 +275,14 @@ export class StellarService {
 
     while (attempt <= maxRetries) {
       try {
-        const sourceAccount = await this.server.loadAccount(
+        const nextSequence = await sequenceManager.getNextSequence(
           this.keypair.publicKey(),
         );
+        const sourceAccount = new Account(
+          this.keypair.publicKey(),
+          nextSequence,
+        );
+
         const currentFee = Math.floor(
           baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt),
         );
@@ -301,6 +325,17 @@ export class StellarService {
 
         return await this.server.submitTransaction(transaction);
       } catch (error: any) {
+        const resultCode =
+          error.response?.data?.extras?.result_codes?.transaction;
+
+        // If sequence is bad, force a reset in SequenceManager to re-sync with Horizon
+        if (resultCode === "tx_bad_seq") {
+          console.warn(
+            "⚠️ SequenceManager: tx_bad_seq detected in multi-sig. Invalidating sequence and retrying...",
+          );
+          sequenceManager.invalidate(this.keypair.publicKey());
+        }
+
         attempt++;
 
         const isStuck = this.isStuckError(error);
