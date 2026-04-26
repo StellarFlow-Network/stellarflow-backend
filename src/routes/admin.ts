@@ -1,10 +1,15 @@
 import { Router } from "express";
+import fs from "fs";
+import path from "path";
+import Joi from "joi";
 import {
   buildMonthlySummary,
   renderHTML,
   renderPDF,
 } from "../services/reportService";
 import { updateSecretKey } from "../services/secretManager";
+import { appConfig } from "../config/configWatcher";
+import { refreshWhitelistCache } from "../middleware/rateLimitMiddleware";
 
 const router = Router();
 
@@ -164,6 +169,158 @@ router.post("/reload-secret", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to reload secret key",
+    });
+  }
+});
+
+const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
+
+/** Joi schema for validating rate-limit update payloads */
+const rateLimitUpdateSchema = Joi.object({
+  windowMs: Joi.number().integer().min(1000).max(86_400_000).optional(),
+  maxRequests: Joi.number().integer().min(1).max(100_000).optional(),
+  enabled: Joi.boolean().optional(),
+}).min(1);
+
+/**
+ * @swagger
+ * /api/admin/rate-limit:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get current global rate-limit configuration
+ *     description: Returns the active rate-limit settings (windowMs, maxRequests, enabled).
+ *     responses:
+ *       '200':
+ *         description: Current rate-limit config
+ */
+router.get("/rate-limit", (_req, res) => {
+  res.json({
+    success: true,
+    rateLimit: appConfig.rateLimit,
+  });
+});
+
+/**
+ * @swagger
+ * /api/admin/rate-limit:
+ *   put:
+ *     tags:
+ *       - Admin
+ *     summary: Update global rate-limit configuration in real-time
+ *     description: >
+ *       Merges the supplied fields into the active rate-limit config and
+ *       persists the change to config.json so it survives a restart.
+ *       All fields are optional — only the provided fields are updated.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               windowMs:
+ *                 type: integer
+ *                 description: Rolling window in milliseconds (1000–86400000)
+ *                 example: 900000
+ *               maxRequests:
+ *                 type: integer
+ *                 description: Max requests per IP per window (1–100000)
+ *                 example: 100
+ *               enabled:
+ *                 type: boolean
+ *                 description: Toggle global throttling on/off
+ *                 example: true
+ *     responses:
+ *       '200':
+ *         description: Config updated successfully
+ *       '400':
+ *         description: Validation error
+ *       '500':
+ *         description: Failed to persist config
+ */
+router.put("/rate-limit", async (req, res) => {
+  const { error, value } = rateLimitUpdateSchema.validate(req.body, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
+
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: "Validation failed",
+      details: error.details.map((d) => d.message),
+    });
+  }
+
+  // Apply to in-memory config immediately (takes effect on next request)
+  Object.assign(appConfig.rateLimit, value);
+
+  // Persist to config.json so the change survives a restart
+  try {
+    let fileConfig: Record<string, unknown> = {};
+    try {
+      fileConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Record<
+        string,
+        unknown
+      >;
+    } catch {
+      // file may not exist yet — start fresh
+    }
+
+    const existing = (fileConfig.rateLimit as Record<string, unknown>) ?? {};
+    fileConfig.rateLimit = { ...existing, ...value };
+    fs.writeFileSync(
+      CONFIG_PATH,
+      JSON.stringify(fileConfig, null, 2) + "\n",
+      "utf-8",
+    );
+  } catch (err) {
+    console.error("[AdminRateLimit] Failed to persist config.json:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Rate-limit updated in memory but failed to persist to disk",
+    });
+  }
+
+  console.info(
+    "[AdminRateLimit] Rate-limit config updated:",
+    appConfig.rateLimit,
+  );
+
+  return res.json({
+    success: true,
+    message: "Rate-limit configuration updated",
+    rateLimit: appConfig.rateLimit,
+  });
+});
+
+/**
+ * @swagger
+ * /api/admin/rate-limit/whitelist/refresh:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Force-refresh the IP whitelist cache
+ *     description: >
+ *       Immediately reloads whitelisted IPs from the Relayer table.
+ *       Useful after adding or removing IPs from a relayer record.
+ *     responses:
+ *       '200':
+ *         description: Whitelist refreshed
+ */
+router.post("/rate-limit/whitelist/refresh", async (_req, res) => {
+  try {
+    await refreshWhitelistCache();
+    return res.json({
+      success: true,
+      message: "IP whitelist cache refreshed",
+    });
+  } catch (err) {
+    console.error("[AdminRateLimit] Whitelist refresh failed:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to refresh whitelist cache",
     });
   }
 });

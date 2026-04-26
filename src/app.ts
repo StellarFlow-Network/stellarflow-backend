@@ -156,6 +156,11 @@ app.get("/", (req, res) => {
         lockdown: "POST /api/admin/lockdown",
         reportSummary:
           "/api/admin/reports/summary?format=html|pdf&month=YYYY-MM",
+        rateLimit: {
+          getConfig: "GET /api/admin/rate-limit",
+          updateConfig: "PUT /api/admin/rate-limit",
+          refreshWhitelist: "POST /api/admin/rate-limit/whitelist/refresh",
+        },
       },
     },
   });
