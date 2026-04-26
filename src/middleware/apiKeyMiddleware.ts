@@ -36,6 +36,7 @@ export const apiKeyMiddleware = async (
         id: relayer.id,
         name: relayer.name,
         allowedAssets: relayer.allowedAssets,
+        publicKey: relayer.publicKey,
       };
       next();
       return;

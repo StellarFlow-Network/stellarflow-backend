@@ -20,6 +20,7 @@ import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 
 import { latencyValidationMiddleware } from "./middleware/latencyGuardMiddleware";
 
+import { signatureVerificationMiddleware } from "./middleware/signatureVerificationMiddleware";
 import { maintenanceMiddleware } from "./middleware/maintenanceMiddleware";
 
 import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
@@ -45,6 +46,7 @@ import statsRouter from "./routes/stats";
 
 import statusRouter from "./routes/status";
 import systemControlRouter from "./routes/systemControl";
+import systemFailoverRouter from "./routes/systemFailover";
 
 
 
@@ -198,6 +200,8 @@ app.use("/api", apiKeyMiddleware);
 app.use("/api/v1", apiKeyMiddleware);
 
 
+// Ed25519 signature verification for relayer payloads (Issue #225)
+app.use("/api/v1/price-updates", signatureVerificationMiddleware);
 
 // Latency validation for relayer payloads - validates timestamps to prevent stale data
 
@@ -208,6 +212,7 @@ app.use("/api/v1/price-updates", latencyValidationMiddleware);
 app.use("/api/admin", adminMiddleware, adminRouter);
 
 app.use("/api/admin/system", adminMiddleware, systemControlRouter);
+app.use("/api/v1/system", adminMiddleware, systemFailoverRouter);
 app.use("/api/v1/market-rates", marketRatesRouter);
 
 app.use("/api/v1/history", historyRouter);
@@ -298,6 +303,11 @@ app.get("/", (req, res) => {
 
           "/api/admin/reports/summary?format=html|pdf&month=YYYY-MM",
 
+        rateLimit: {
+          getConfig: "GET /api/admin/rate-limit",
+          updateConfig: "PUT /api/admin/rate-limit",
+          refreshWhitelist: "POST /api/admin/rate-limit/whitelist/refresh",
+        },
       },
 
     },

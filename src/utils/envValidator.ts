@@ -26,12 +26,14 @@ export function validateEnv() {
   }
 
   // Log optional but recommended environment variables
-  const recommendedEnvVars = ["MAX_LATENCY_MS"];
+  const recommendedEnvVars = ["MAX_LATENCY_MS", "REDIS_URL", "TRUST_PROXY"];
   for (const envVar of recommendedEnvVars) {
     if (!process.env[envVar]) {
-      console.warn(`⚠️ [OPS] Recommended environment variable not set: ${envVar}`);
+      console.warn(
+        `⚠️ [OPS] Recommended environment variable not set: ${envVar}`,
+      );
     } else {
-      console.info(`✅ [OPS] ${envVar} = ${process.env[envVar]}ms`);
+      console.info(`✅ [OPS] ${envVar} = ${process.env[envVar]}`);
     }
   }
 }

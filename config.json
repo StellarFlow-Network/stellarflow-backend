@@ -4,5 +4,10 @@
   "multiSigPollIntervalMs": 30000,
   "hourlyAverageCheckIntervalMs": 900000,
   "cacheDurationMs": 30000,
-  "batchWindowMs": 5000
+  "batchWindowMs": 5000,
+  "rateLimit": {
+    "windowMs": 900000,
+    "maxRequests": 100,
+    "enabled": true
+  }
 }
