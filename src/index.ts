@@ -17,6 +17,7 @@ import { multiSigSubmissionService } from "./services/multiSigSubmissionService"
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
+import { getRegionalHealthService } from "./services/regionalHealthService";
 import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
 import { watchConfig } from "./config/configWatcher";
 import { validateDatabaseSchema } from "./utils/dbValidator";
@@ -38,6 +39,9 @@ registerTracingShutdownHandlers();
 
 // Enable log masking to prevent sensitive data leaks
 enableGlobalLogMasking();
+
+// Start regional health monitoring before we accept requests.
+await getRegionalHealthService().startMonitoring();
 
 // [OPS] Implement "Environment Variable" Check on Start
 validateEnv();
