@@ -1,0 +1,1200 @@
+{
+  "info": {
+    "name": "StellarFlow Backend API",
+    "description": "Complete API collection for StellarFlow Backend - Oracle price feeds and multi-sig operations",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{API_KEY}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "your-api-key-here",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "your-admin-token-here",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Status",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check the overall health of the backend including database and Stellar Horizon connectivity"
+          }
+        },
+        {
+          "name": "API Root",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/",
+              "host": ["{{base_url}}"],
+              "path": [""]
+            },
+            "description": "Get information about available API endpoints"
+          }
+        },
+        {
+          "name": "System Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "status"]
+            },
+            "description": "Returns DB health and last successful price sync time for dashboard indicators"
+          }
+        },
+        {
+          "name": "Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/metrics",
+              "host": ["{{base_url}}"],
+              "path": ["metrics"]
+            },
+            "description": "Get application metrics and performance data"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Market Rates",
+      "item": [
+        {
+          "name": "Get All Rates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/rates",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "rates"]
+            },
+            "description": "Get all available market rates"
+          }
+        },
+        {
+          "name": "Get Single Rate",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/rate/:currency",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "rate", ":currency"],
+              "variable": [
+                {
+                  "key": "currency",
+                  "value": "NGN",
+                  "description": "Currency code (e.g., NGN, KES, GHS)"
+                }
+              ]
+            },
+            "description": "Get rate for specific currency"
+          }
+        },
+        {
+          "name": "Get Latest Rates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/latest",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "latest"]
+            },
+            "description": "Get the latest cached market rates"
+          }
+        },
+        {
+          "name": "Get Supported Currencies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/currencies",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "currencies"]
+            },
+            "description": "Get list of supported currencies"
+          }
+        },
+        {
+          "name": "Market Rates Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "health"]
+            },
+            "description": "Check health of market rates service"
+          }
+        },
+        {
+          "name": "Get Pending Reviews",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/reviews/pending",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "reviews", "pending"]
+            },
+            "description": "Get all pending price reviews"
+          }
+        },
+        {
+          "name": "Approve Price Review",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reviewedBy\": \"admin@example.com\",\n  \"note\": \"Approved after verification\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/reviews/:reviewId/approve",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "market-rates",
+                "reviews",
+                ":reviewId",
+                "approve"
+              ],
+              "variable": [
+                {
+                  "key": "reviewId",
+                  "value": "1",
+                  "description": "Review ID to approve"
+                }
+              ]
+            },
+            "description": "Approve a pending price review"
+          }
+        },
+        {
+          "name": "Reject Price Review",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reviewedBy\": \"admin@example.com\",\n  \"note\": \"Rejected due to data inconsistency\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/reviews/:reviewId/reject",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "reviews", ":reviewId", "reject"],
+              "variable": [
+                {
+                  "key": "reviewId",
+                  "value": "1",
+                  "description": "Review ID to reject"
+                }
+              ]
+            },
+            "description": "Reject a pending price review"
+          }
+        },
+        {
+          "name": "Get Cache Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/cache",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "cache"]
+            },
+            "description": "Get cache status and statistics"
+          }
+        },
+        {
+          "name": "Clear Cache",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/market-rates/cache/clear",
+              "host": ["{{base_url}}"],
+              "path": ["api", "market-rates", "cache", "clear"]
+            },
+            "description": "Clear all market rates cache"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Price History",
+      "item": [
+        {
+          "name": "Get Asset History (7 days)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/history/:asset?range=7d",
+              "host": ["{{base_url}}"],
+              "path": ["api", "history", ":asset"],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "7d",
+                  "description": "Time range: 1d, 7d, 30d, 90d"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "asset",
+                  "value": "NGN",
+                  "description": "Asset code (e.g., GHS, NGN, KES)"
+                }
+              ]
+            },
+            "description": "Get price history for an asset within specified time range"
+          }
+        },
+        {
+          "name": "Get Asset History (Custom Date Range)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/history/:asset?from=2024-01-01&to=2024-01-07",
+              "host": ["{{base_url}}"],
+              "path": ["api", "history", ":asset"],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2024-01-01",
+                  "description": "Start date (ISO 8601)"
+                },
+                {
+                  "key": "to",
+                  "value": "2024-01-07",
+                  "description": "End date (ISO 8601)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "asset",
+                  "value": "NGN",
+                  "description": "Asset code (e.g., GHS, NGN, KES)"
+                }
+              ]
+            },
+            "description": "Get price history for an asset within custom date range"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Price Updates (Multi-Sig)",
+      "item": [
+        {
+          "name": "Create Multi-Sig Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceReviewId\": 123,\n  \"currency\": \"NGN\",\n  \"rate\": 0.0021,\n  \"source\": \"NGNX\",\n  \"memoId\": \"memo-123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/price-updates/multi-sig/request",
+              "host": ["{{base_url}}"],
+              "path": ["api", "price-updates", "multi-sig", "request"]
+            },
+            "description": "Create a multi-sig price update request"
+          }
+        },
+        {
+          "name": "Sign Multi-Sig Price",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{MULTI_SIG_AUTH_TOKEN}}",
+                "description": "Multi-sig auth token if configured"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"multiSigPriceId\": 456\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/price-updates/sign",
+              "host": ["{{base_url}}"],
+              "path": ["api", "price-updates", "sign"]
+            },
+            "description": "Add signature to a multi-sig price update"
+          }
+        },
+        {
+          "name": "Request Remote Signature",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"remoteServerUrl\": \"https://remote-server.example.com/api/price-updates/sign\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/price-updates/multi-sig/:multiSigPriceId/request-signature",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "price-updates",
+                "multi-sig",
+                ":multiSigPriceId",
+                "request-signature"
+              ],
+              "variable": [
+                {
+                  "key": "multiSigPriceId",
+                  "value": "456",
+                  "description": "Multi-sig price ID"
+                }
+              ]
+            },
+            "description": "Request signature from remote server"
+          }
+        },
+        {
+          "name": "Get Multi-Sig Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/price-updates/multi-sig/:multiSigPriceId/status",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "price-updates",
+                "multi-sig",
+                ":multiSigPriceId",
+                "status"
+              ],
+              "variable": [
+                {
+                  "key": "multiSigPriceId",
+                  "value": "456",
+                  "description": "Multi-sig price ID"
+                }
+              ]
+            },
+            "description": "Get status of multi-sig price update"
+          }
+        },
+        {
+          "name": "Get Pending Multi-Sig Prices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/price-updates/multi-sig/pending",
+              "host": ["{{base_url}}"],
+              "path": ["api", "price-updates", "multi-sig", "pending"]
+            },
+            "description": "Get all pending multi-sig price updates"
+          }
+        },
+        {
+          "name": "Get Multi-Sig Signatures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/price-updates/multi-sig/:multiSigPriceId/signatures",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "price-updates",
+                "multi-sig",
+                ":multiSigPriceId",
+                "signatures"
+              ],
+              "variable": [
+                {
+                  "key": "multiSigPriceId",
+                  "value": "456",
+                  "description": "Multi-sig price ID"
+                }
+              ]
+            },
+            "description": "Get all signatures for approved multi-sig price"
+          }
+        },
+        {
+          "name": "Record Submission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memoId\": \"memo-123\",\n  \"stellarTxHash\": \"hash-123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/price-updates/multi-sig/:multiSigPriceId/record-submission",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "price-updates",
+                "multi-sig",
+                ":multiSigPriceId",
+                "record-submission"
+              ],
+              "variable": [
+                {
+                  "key": "multiSigPriceId",
+                  "value": "456",
+                  "description": "Multi-sig price ID"
+                }
+              ]
+            },
+            "description": "Record that multi-sig price has been submitted to Stellar"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Statistics",
+      "item": [
+        {
+          "name": "Get Relayer Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/stats/relayers",
+              "host": ["{{base_url}}"],
+              "path": ["api", "stats", "relayers"]
+            },
+            "description": "Get statistics for all relayers (oracle servers)"
+          }
+        },
+        {
+          "name": "Get Volume Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/stats/volume?date=2024-01-15",
+              "host": ["{{base_url}}"],
+              "path": ["api", "stats", "volume"],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2024-01-15",
+                  "description": "Target date in YYYY-MM-DD format (defaults to today)"
+                }
+              ]
+            },
+            "description": "Get volume statistics for a specific date"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Intelligence",
+      "item": [
+        {
+          "name": "Get Hourly Volatility",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/intelligence/hourly-volatility",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "intelligence", "hourly-volatility"]
+            },
+            "description": "Get hourly volatility snapshot for all active currencies"
+          }
+        },
+        {
+          "name": "Get 24h Price Change",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/intelligence/price-change/:currency",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "v1",
+                "intelligence",
+                "price-change",
+                ":currency"
+              ],
+              "variable": [
+                {
+                  "key": "currency",
+                  "value": "NGN",
+                  "description": "Currency code (e.g., NGN, GHS, KES)"
+                }
+              ]
+            },
+            "description": "Get 24-hour price change percentage for a currency"
+          }
+        },
+        {
+          "name": "Get Stale Currencies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/intelligence/stale",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "intelligence", "stale"]
+            },
+            "description": "Get list of currencies not updated in the last 30 minutes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Assets",
+      "item": [
+        {
+          "name": "Get All Assets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/assets",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "assets"]
+            },
+            "description": "Get list of all active currency assets"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Derived Assets",
+      "item": [
+        {
+          "name": "Get Cross Rate",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/derived-assets/rate/:base/:quote",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "v1",
+                "derived-assets",
+                "rate",
+                ":base",
+                ":quote"
+              ],
+              "variable": [
+                {
+                  "key": "base",
+                  "value": "NGN",
+                  "description": "Base currency code"
+                },
+                {
+                  "key": "quote",
+                  "value": "GHS",
+                  "description": "Quote currency code"
+                }
+              ]
+            },
+            "description": "Get synthetic cross-rate between two currencies"
+          }
+        },
+        {
+          "name": "Get NGN/GHS Rate",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/derived-assets/ngn-ghs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "derived-assets", "ngn-ghs"]
+            },
+            "description": "Get synthetic NGN per 1 GHS rate"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sanity Check",
+      "item": [
+        {
+          "name": "Check Single Currency",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/sanity-check/check/:currency",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sanity-check", "check", ":currency"],
+              "variable": [
+                {
+                  "key": "currency",
+                  "value": "NGN",
+                  "description": "Currency code to check"
+                }
+              ]
+            },
+            "description": "Perform sanity check for a specific currency"
+          }
+        },
+        {
+          "name": "Check All Currencies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/sanity-check/check-all",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sanity-check", "check-all"]
+            },
+            "description": "Perform sanity check for all supported currencies"
+          }
+        },
+        {
+          "name": "Get Threshold",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/sanity-check/threshold",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "sanity-check", "threshold"]
+            },
+            "description": "Get current sanity check deviation threshold"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cache Management",
+      "item": [
+        {
+          "name": "Get Cache Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/cache/metrics",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "cache", "metrics"]
+            },
+            "description": "Get cache performance metrics and statistics"
+          }
+        },
+        {
+          "name": "Clear All Cache",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/cache/clear",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "cache", "clear"]
+            },
+            "description": "Clear both L1 and L2 cache layers"
+          }
+        },
+        {
+          "name": "Cache Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/cache/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "cache", "health"]
+            },
+            "description": "Check health status of cache layers"
+          }
+        }
+      ]
+    },
+    {
+      "name": "System Control (Admin)",
+      "item": [
+        {
+          "name": "Initiate System Halt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Emergency maintenance required\",\n  \"duration\": 24,\n  \"emergencyLevel\": \"HIGH\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/system/halt",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "system", "halt"]
+            },
+            "description": "Initiate system halt requiring consensus approval"
+          }
+        },
+        {
+          "name": "Initiate System Upgrade",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": \"2.1.0\",\n  \"upgradeType\": \"MINOR\",\n  \"scheduledAt\": \"2024-01-15T10:00:00Z\",\n  \"rollbackPlan\": \"Rollback to previous version\",\n  \"notes\": \"Feature enhancements\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/system/upgrade",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "system", "upgrade"]
+            },
+            "description": "Initiate system upgrade requiring consensus approval"
+          }
+        },
+        {
+          "name": "Add Consensus Signature",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"signature\": \"abcd1234567890...\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/system/consensus/:consensusId/signature",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "admin",
+                "system",
+                "consensus",
+                ":consensusId",
+                "signature"
+              ],
+              "variable": [
+                {
+                  "key": "consensusId",
+                  "value": "123",
+                  "description": "Consensus request ID"
+                }
+              ]
+            },
+            "description": "Add admin signature to consensus request"
+          }
+        },
+        {
+          "name": "Execute Consensus Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/system/consensus/:consensusId/execute",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "admin",
+                "system",
+                "consensus",
+                ":consensusId",
+                "execute"
+              ],
+              "variable": [
+                {
+                  "key": "consensusId",
+                  "value": "123",
+                  "description": "Consensus request ID"
+                }
+              ]
+            },
+            "description": "Execute approved consensus request"
+          }
+        },
+        {
+          "name": "Get Pending Consensus Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/system/consensus/pending",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "system", "consensus", "pending"]
+            },
+            "description": "Get all pending consensus requests"
+          }
+        },
+        {
+          "name": "Get Consensus Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/system/consensus/:consensusId",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "system", "consensus", ":consensusId"],
+              "variable": [
+                {
+                  "key": "consensusId",
+                  "value": "123",
+                  "description": "Consensus request ID"
+                }
+              ]
+            },
+            "description": "Get detailed information about consensus request"
+          }
+        }
+      ]
+    },
+    {
+      "name": "System Failover",
+      "item": [
+        {
+          "name": "Perform Failover",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetRegion\": \"SECONDARY\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/system/failover",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "system", "failover"]
+            },
+            "description": "Manually switch active regional backend cluster"
+          }
+        },
+        {
+          "name": "Reset Failover",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/system/failover/reset",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "system", "failover", "reset"]
+            },
+            "description": "Reset manual failover override to automatic logic"
+          }
+        },
+        {
+          "name": "Get Failover Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/system/failover",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "system", "failover"]
+            },
+            "description": "Get current regional failover status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Operations",
+      "item": [
+        {
+          "name": "Generate Monthly Report",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/reports/summary?format=html&month=2024-03",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "reports", "summary"],
+              "query": [
+                {
+                  "key": "format",
+                  "value": "html",
+                  "description": "Output format: html or pdf"
+                },
+                {
+                  "key": "month",
+                  "value": "2024-03",
+                  "description": "Target month in YYYY-MM format"
+                }
+              ]
+            },
+            "description": "Generate Oracle usage summary report"
+          }
+        },
+        {
+          "name": "Reload Secret Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"secretKey\": \"S...\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/reload-secret",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "reload-secret"]
+            },
+            "description": "Reload Stellar secret key without restarting"
+          }
+        },
+        {
+          "name": "Get Relayer Registry",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/relayer-registry",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "relayer-registry"]
+            },
+            "description": "Get all relayer registry entries"
+          }
+        },
+        {
+          "name": "Get Relayer by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/relayer-registry/:relayerId",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "relayer-registry", ":relayerId"],
+              "variable": [
+                {
+                  "key": "relayerId",
+                  "value": "1",
+                  "description": "Relayer ID"
+                }
+              ]
+            },
+            "description": "Get relayer registry entry by ID"
+          }
+        },
+        {
+          "name": "Update Rate Limit Config",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"windowMs\": 900000,\n  \"maxRequests\": 100,\n  \"enabled\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/rate-limit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "rate-limit"]
+            },
+            "description": "Update rate limiting configuration"
+          }
+        },
+        {
+          "name": "Refresh IP Whitelist",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ADMIN_TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/admin/rate-limit/whitelist/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "rate-limit", "whitelist", "refresh"]
+            },
+            "description": "Force refresh IP whitelist cache"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Documentation",
+      "item": [
+        {
+          "name": "API Documentation",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/docs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "docs"]
+            },
+            "description": "Access Swagger/OpenAPI documentation"
+          }
+        }
+      ]
+    }
+  ]
+}
