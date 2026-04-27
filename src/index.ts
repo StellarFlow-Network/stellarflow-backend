@@ -21,10 +21,12 @@ import { hourlyAverageService } from "./services/hourlyAverageService";
 import { getRegionalHealthService } from "./services/regionalHealthService";
 import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
 import { watchConfig } from "./config/configWatcher";
+import { startEnvFileWatcher } from "./config/envFileWatcher";
 import { validateDatabaseSchema } from "./utils/dbValidator";
 import { initializeTracing } from "./config/tracingConfig";
 import { setupAxiosTracing } from "./lib/tracing";
 import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
+import { providerSecretRotationService } from "./services/providerSecretRotationService";
 
 // Load environment variables
 dotenv.config();
@@ -289,6 +291,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     // FIX 2: Optional chaining — safe to call even if service never started
     gasBalanceMonitorService?.stop();
     hourlyAverageService.stop();
+    providerSecretRotationService.stop();
     stopConfigWatcher();
     stopEnvFileWatcher?.();
 

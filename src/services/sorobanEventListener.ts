@@ -1,10 +1,11 @@
-import { Horizon, Keypair } from "@stellar/stellar-sdk";
+import { Horizon } from "@stellar/stellar-sdk";
+// import type { OnChainPrice } from "@prisma/client";
 import type { ServerApi } from "@stellar/stellar-sdk/lib/horizon";
-import type { OnChainPrice } from "@prisma/client";
 import prisma from "../lib/prisma";
-import { getIO, broadcastToSessions } from "../lib/socket";
+import { broadcastToSessions } from "../lib/socket";
 import stellarProvider from "../lib/stellarProvider";
 import dotenv from "dotenv";
+import { signer } from "../signer";
 
 dotenv.config();
 
@@ -26,15 +27,7 @@ export class SorobanEventListener {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(pollIntervalMs: number = 15000) {
-    const secret =
-      process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
-    if (!secret) {
-      throw new Error(
-        "ORACLE_SECRET_KEY or SOROBAN_ADMIN_SECRET not found in environment variables",
-      );
-    }
-
-    this.oraclePublicKey = Keypair.fromSecret(secret).publicKey();
+    this.oraclePublicKey = ""; // Initialized in start()
     this.pollIntervalMs = pollIntervalMs;
 
     // Use the shared StellarProvider so failover state is shared across all
@@ -49,6 +42,8 @@ export class SorobanEventListener {
     }
 
     this.isRunning = true;
+    this.oraclePublicKey = await signer.getPublicKey();
+    
     console.log(
       `[EventListener] Starting listener for account ${this.oraclePublicKey}`,
     );
@@ -301,7 +296,7 @@ export class SorobanEventListener {
       take: limit,
     });
 
-    return records.map((record: OnChainPrice) => ({
+    return records.map((record: any) => ({
       currency: record.currency,
       rate: Number(record.rate),
       txHash: record.txHash,
