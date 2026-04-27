@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { Keypair } from '@stellar/stellar-sdk';
+import { ISigner } from '../signer/signer.interface';
 
 export interface ExportOptions {
   startDate: Date;
@@ -80,11 +81,11 @@ function createSignatureMessage(
 }
 
 /**
- * Signs audit data using Ed25519
+ * Signs audit data using the provided signer
  */
-function signAuditData(message: string, secretKey: string): string {
-  const keypair = Keypair.fromSecret(secretKey);
-  return keypair.sign(Buffer.from(message, 'utf-8')).toString('hex');
+async function signAuditData(message: string, signer: ISigner): Promise<string> {
+  const signature = await signer.sign(Buffer.from(message, 'utf-8'));
+  return signature.toString('hex');
 }
 
 /**
@@ -120,7 +121,7 @@ function filterAuditRecords(
 export async function generateAuditExportCSV(
   records: AuditRecord[],
   options: ExportOptions,
-  secretKey: string
+  signer: ISigner
 ): Promise<{ filePath: string; metadata: ExportMetadata }> {
   const outputDir = ensureExportsDirectory(options.outputDir);
   const filteredRecords = filterAuditRecords(records, options);
@@ -130,8 +131,8 @@ export async function generateAuditExportCSV(
   const startStr = options.startDate.toISOString().split('T')[0] || '';
   const endStr = options.endDate.toISOString().split('T')[0] || '';
   const signatureMessage = createSignatureMessage(startStr, endStr, filteredRecords.length, dataHash);
-  const signature = signAuditData(signatureMessage, secretKey);
-  const signerAddress = Keypair.fromSecret(secretKey).publicKey();
+  const signature = await signAuditData(signatureMessage, signer);
+  const signerAddress = await signer.getPublicKey();
 
   const metadata: ExportMetadata = {
     dataHash,
