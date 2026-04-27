@@ -131,3 +131,26 @@ model MultiSigSignature {
   @@index([multiSigPriceId])
   @@index([signerPublicKey])
 }
+
+// IP Whitelist Model for VIP Pool
+// Stores institutional IP addresses that get priority access during high-volatility events
+model IPWhitelist {
+  id                Int       @id @default(autoincrement())
+  ipAddress         String    @db.VarChar(45)   // IPv4 or IPv6 address
+  label             String    @db.VarChar(100)  // Institution name or identifier
+  priority          Int       @default(1)       // Priority level (higher = more priority, 1-10 scale)
+  isActive          Boolean   @default(true)    // Whether this IP is currently whitelisted
+  rateLimitOverride Int       @default(1000)    // Custom rate limit for this IP (requests per minute)
+  notes             String?   @db.Text          // Additional notes or contact information
+  
+  // Access tracking
+  lastAccessed      DateTime?                   // Last time this IP made a request
+  totalRequests     Int       @default(0)       // Total requests from this IP
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@unique([ipAddress])
+  @@index([isActive, priority])
+  @@index([ipAddress])
+}
