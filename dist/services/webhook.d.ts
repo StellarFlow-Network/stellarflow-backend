@@ -25,6 +25,7 @@ export declare class WebhookService {
     private postMessage;
     private formatErrorMessage;
     private formatReviewMessage;
+    private formatPriorityAlert;
 }
 export declare const webhookService: WebhookService;
 export {};

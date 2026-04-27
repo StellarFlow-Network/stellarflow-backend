@@ -194,4 +194,83 @@ router.post("/cache/clear", (req, res) => {
     }
 });
 export default router;
+import { apiKeyAuth } from "../middleware/apiKeyAuth.middleware";
+const router = Router();
+// Apply scope-aware auth to EVERY route in this file.
+// Remove if individual routes need different treatment.
+router.use(apiKeyAuth());
+// ── GET endpoints — require "read" scope ─────────────────────────
+/**
+ * GET /api/v1/market-rate
+ * Returns the latest cached market rates.
+ */
+router.get("/", (_req, res) => {
+    // req.apiKey is guaranteed here (middleware already validated)
+    res.json({
+        success: true,
+        message: "Latest market rates",
+        rates: [
+            { pair: "NGN/XLM", price: 0.0021, source: "NGNX" },
+            { pair: "KES/XLM", price: 0.0052, source: "KESX" },
+            { pair: "GHS/XLM", price: 0.062, source: "GHSX" },
+        ],
+    });
+});
+/**
+ * GET /api/v1/market-rate/history
+ * Returns historical price records.
+ */
+router.get("/history", (_req, res) => {
+    res.json({ success: true, message: "Price history", data: [] });
+});
+/**
+ * GET /api/v1/market-rate/stats
+ * Returns aggregated statistics.
+ */
+router.get("/stats", (_req, res) => {
+    res.json({ success: true, message: "Market statistics", data: {} });
+});
+// ── POST endpoints — require "write" scope ───────────────────────
+/**
+ * POST /api/v1/market-rate/update
+ * Submit a new price update to the oracle pipeline.
+ *
+ * Body: { pair: string, price: number, source: string }
+ */
+router.post("/update", (req, res) => {
+    const { pair, price, source } = req.body ?? {};
+    if (!pair || price == null || !source) {
+        res.status(400).json({
+            success: false,
+            error: { code: "BAD_REQUEST", message: "pair, price, and source are required." },
+        });
+        return;
+    }
+    // TODO: hand off to MarketRateService for sanity check + submission
+    res.status(202).json({
+        success: true,
+        message: "Price update accepted and queued for review.",
+        submittedBy: req.apiKey?.label ?? req.apiKey?.id,
+        payload: { pair, price, source },
+    });
+});
+/**
+ * POST /api/v1/market-rate/bulk-update
+ * Submit multiple price updates in one call.
+ */
+router.post("/bulk-update", (req, res) => {
+    const { updates } = req.body ?? {};
+    if (!Array.isArray(updates) || updates.length === 0) {
+        res.status(400).json({
+            success: false,
+            error: { code: "BAD_REQUEST", message: "updates must be a non-empty array." },
+        });
+        return;
+    }
+    res.status(202).json({
+        success: true,
+        message: `${updates.length} updates accepted for batch processing.`,
+    });
+});
+export default router;
 //# sourceMappingURL=marketRates.js.map
