@@ -19,10 +19,12 @@ import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
 import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
 import { watchConfig } from "./config/configWatcher";
+import { startEnvFileWatcher } from "./config/envFileWatcher";
 import { validateDatabaseSchema } from "./utils/dbValidator";
 import { initializeTracing } from "./config/tracingConfig";
 import { setupAxiosTracing } from "./lib/tracing";
 import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
+import { providerSecretRotationService } from "./services/providerSecretRotationService";
 
 // Load environment variables
 dotenv.config();
@@ -277,6 +279,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     sorobanEventListener?.stop();
     multiSigSubmissionService.stop();
     hourlyAverageService.stop();
+    providerSecretRotationService.stop();
     stopConfigWatcher();
     stopEnvFileWatcher?.();
 
@@ -360,6 +363,17 @@ httpServer.listen(PORT, () => {
   } catch (err) {
     console.warn(
       "Hourly average service not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  try {
+    providerSecretRotationService.start().catch((err: Error) => {
+      console.error("Failed to start provider secret rotation service:", err);
+    });
+  } catch (err) {
+    console.warn(
+      "Provider secret rotation service not started:",
       err instanceof Error ? err.message : err,
     );
   }
