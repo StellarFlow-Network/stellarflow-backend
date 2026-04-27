@@ -167,6 +167,65 @@ export class WebhookService {
             ],
         };
     }
+    formatPriorityAlert(details) {
+        const { currency, rate, zScore, mean, stdDev, timestamp } = details;
+        if (this.platform === "discord") {
+            return {
+                embeds: [
+                    {
+                        title: "🚨 PRIORITY ALERT: Price Anomaly Detected",
+                        color: 0xff0000,
+                        description: `Significant deviation from moving average detected for ${currency}.`,
+                        fields: [
+                            { name: "Currency", value: currency, inline: true },
+                            { name: "Current Rate", value: rate.toString(), inline: true },
+                            { name: "Z-Score", value: zScore.toFixed(2), inline: true },
+                            { name: "Mean (μ)", value: mean.toFixed(4), inline: true },
+                            { name: "Std Dev (σ)", value: stdDev.toFixed(4), inline: true },
+                            { name: "Threshold", value: "> 3.0σ", inline: true },
+                            { name: "Time", value: timestamp.toISOString() },
+                        ],
+                        footer: { text: "StellarFlow Predictive Analytics" }
+                    },
+                ],
+            };
+        }
+        return {
+            blocks: [
+                {
+                    type: "header",
+                    text: { type: "plain_text", text: "🚨 PRIORITY ALERT: Price Anomaly" },
+                },
+                {
+                    type: "section",
+                    text: {
+                        type: "mrkdwn",
+                        text: `*Significant deviation detected for ${currency} price feed.*`,
+                    },
+                },
+                {
+                    type: "section",
+                    fields: [
+                        { type: "mrkdwn", text: `*Currency:*\n${currency}` },
+                        { type: "mrkdwn", text: `*Current Rate:*\n${rate}` },
+                        { type: "mrkdwn", text: `*Z-Score:*\n${zScore.toFixed(2)}σ` },
+                        { type: "mrkdwn", text: `*Moving Average:*\n${mean.toFixed(4)}` },
+                        { type: "mrkdwn", text: `*Std Dev:*\n${stdDev.toFixed(4)}` },
+                        { type: "mrkdwn", text: `*Time:*\n${timestamp.toISOString()}` },
+                    ],
+                },
+                {
+                    type: "context",
+                    elements: [
+                        {
+                            type: "mrkdwn",
+                            text: "Predicted anomaly based on historical distribution (3σ threshold).",
+                        },
+                    ],
+                },
+            ],
+        };
+    }
 }
 export const webhookService = new WebhookService();
 //# sourceMappingURL=webhook.js.map
