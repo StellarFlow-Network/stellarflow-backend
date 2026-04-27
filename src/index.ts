@@ -8,12 +8,14 @@ import marketRatesRouter from "./routes/marketRates";
 import historyRouter from "./routes/history";
 import priceUpdatesRouter from "./routes/priceUpdates";
 import statsRouter from "./routes/stats";
+import vipRouter from "./routes/vip";
 import app from "./app";
 import prisma from "./lib/prisma";
 import { disconnectRedis } from "./lib/redis";
 import { initSocket } from "./lib/socket";
 import { SorobanEventListener } from "./services/sorobanEventListener";
 import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
+import { vipPoolMiddleware, rateLimitMiddleware } from "./middleware/vipPool";
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
@@ -92,11 +94,16 @@ const horizonServer = new Horizon.Server(horizonUrl);
 app.use(cors());
 app.use(express.json());
 
+// VIP Pool Middleware - Must run before routes to attach VIP context
+app.use(vipPoolMiddleware);
+app.use(rateLimitMiddleware);
+
 // Routes
 app.use("/api/market-rates", marketRatesRouter);
 app.use("/api/history", historyRouter);
 app.use("/api/price-updates", priceUpdatesRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/vip", vipRouter);
 
 // Health check endpoint
 /**
@@ -228,6 +235,11 @@ app.get("/", (req, res) => {
       },
       stats: {
         relayers: "/api/stats/relayers",
+      },
+      vip: {
+        whitelist: "/api/vip/whitelist",
+        stats: "/api/vip/stats",
+        checkIP: "/api/vip/check/:ipAddress",
       },
     },
   });
