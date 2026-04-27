@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stellarflow-config
+  labels:
+    app: stellarflow-backend
+data:
+  dashboard-url: "https://your-dashboard.example.com" # Replace with your actual dashboard URL
+  primary-cluster-health-url: "https://primary-cluster.example.com/health"
+  secondary-cluster-health-url: "https://secondary-cluster.example.com/health"
+  admin-ip: "127.0.0.1" # Replace with your admin IP for rate limiting
