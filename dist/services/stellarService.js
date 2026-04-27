@@ -1,24 +1,27 @@
-import { Keypair, TransactionBuilder, Operation, Networks, Memo, Horizon, xdr, } from "@stellar/stellar-sdk";
+import { Keypair, TransactionBuilder, Operation, Networks, Memo, xdr, } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import stellarProvider from "../lib/stellarProvider";
+import { assertSigningAllowed } from "../state/appState";
+import { getSecretKey } from "./secretManager";
 dotenv.config();
 export class StellarService {
     server;
-    keypair;
     network;
     MAX_RETRIES = 3;
     FEE_INCREMENT_PERCENTAGE = 0.5; // 50% increase each retry
     RETRY_DELAY_MS = 2000; // 2 seconds delay between retries
     constructor() {
-        const secret = process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
-        if (!secret) {
-            throw new Error("Stellar secret key not found in environment variables");
-        }
-        this.keypair = Keypair.fromSecret(secret);
         this.network = process.env.STELLAR_NETWORK || "TESTNET";
-        const horizonUrl = this.network === "PUBLIC"
-            ? "https://horizon.stellar.org"
-            : "https://horizon-testnet.stellar.org";
-        this.server = new Horizon.Server(horizonUrl);
+        // Use the shared StellarProvider so all services benefits from the same
+        // failover state rather than each managing their own Horizon URL.
+        this.server = stellarProvider.getServer();
+    }
+    /**
+     * Returns a Keypair derived from the currently active secret key.
+     * Called at sign time so key rotations are reflected immediately.
+     */
+    getKeypair() {
+        return Keypair.fromSecret(getSecretKey());
     }
     /**
      * Fetches the recommended transaction fee from Horizon fee_stats.
@@ -39,6 +42,7 @@ export class StellarService {
      * @param memoId - Unique ID for auditing
      */
     async submitPriceUpdate(currency, price, memoId) {
+        await assertSigningAllowed();
         const baseFee = parseInt(await this.getRecommendedFee(), 10);
         const result = await this.submitTransactionWithRetries((sourceAccount, currentFee) => {
             return new TransactionBuilder(sourceAccount, {
@@ -66,6 +70,7 @@ export class StellarService {
         if (updates.length === 0) {
             throw new Error("Cannot submit empty batch of price updates");
         }
+        await assertSigningAllowed();
         const baseFee = parseInt(await this.getRecommendedFee(), 10);
         const result = await this.submitTransactionWithRetries((sourceAccount, currentFee) => {
             const builder = new TransactionBuilder(sourceAccount, {
@@ -93,6 +98,7 @@ export class StellarService {
      * @param signatures - Array of signatures from different signers
      */
     async submitMultiSignedPriceUpdate(currency, price, memoId, signatures) {
+        await assertSigningAllowed();
         const baseFee = parseInt(await this.getRecommendedFee(), 10);
         const result = await this.submitMultiSignedTransaction((sourceAccount, currentFee) => {
             return new TransactionBuilder(sourceAccount, {
@@ -121,14 +127,21 @@ export class StellarService {
         let attempt = 0;
         while (attempt <= maxRetries) {
             try {
-                const sourceAccount = await this.server.loadAccount(this.keypair.publicKey());
+                // Always resolve the current active server — may have changed after a failover
+                this.server = stellarProvider.getServer();
+                const sourceAccount = await this.server.loadAccount(this.getKeypair().publicKey());
                 const currentFee = Math.floor(baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt));
                 const transaction = builderFn(sourceAccount, currentFee);
-                transaction.sign(this.keypair);
+                await assertSigningAllowed();
+                transaction.sign(this.getKeypair());
+                await assertSigningAllowed();
                 return await this.server.submitTransaction(transaction);
             }
             catch (error) {
                 attempt++;
+                // Report to the provider — it will switch to the next node if this is
+                // a 5xx / network error, so the next attempt uses a healthy node.
+                stellarProvider.reportFailure(error);
                 const isStuck = this.isStuckError(error);
                 if (isStuck && attempt <= maxRetries) {
                     console.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);
@@ -152,15 +165,18 @@ export class StellarService {
         let attempt = 0;
         while (attempt <= maxRetries) {
             try {
-                const sourceAccount = await this.server.loadAccount(this.keypair.publicKey());
+                // Always resolve the current active server — may have changed after a failover
+                this.server = stellarProvider.getServer();
+                const sourceAccount = await this.server.loadAccount(this.getKeypair().publicKey());
                 const currentFee = Math.floor(baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt));
                 const transaction = builderFn(sourceAccount, currentFee);
                 // Sign with the local keypair first
-                transaction.sign(this.keypair);
+                await assertSigningAllowed();
+                transaction.sign(this.getKeypair());
                 // Add signatures from other signers
                 for (const sig of signatures) {
                     // Skip if this is the local signer's public key (already signed)
-                    if (sig.signerPublicKey === this.keypair.publicKey()) {
+                    if (sig.signerPublicKey === this.getKeypair().publicKey()) {
                         continue;
                     }
                     // Add the remote signature to the transaction
@@ -181,10 +197,14 @@ export class StellarService {
                         // Continue without this signature (may cause failure on Stellar side)
                     }
                 }
+                await assertSigningAllowed();
                 return await this.server.submitTransaction(transaction);
             }
             catch (error) {
                 attempt++;
+                // Report to the provider — it will switch to the next node if this is
+                // a 5xx / network error, so the next attempt uses a healthy node.
+                stellarProvider.reportFailure(error);
                 const isStuck = this.isStuckError(error);
                 if (isStuck && attempt <= maxRetries) {
                     console.warn(`⚠️ Multi-sig transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying in ${this.RETRY_DELAY_MS}ms...`);

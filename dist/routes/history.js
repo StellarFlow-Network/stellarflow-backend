@@ -1,5 +1,7 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import { cacheMiddleware } from "../cache/CacheMiddleware";
+import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 const router = Router();
 const RANGE_MAP = {
     "1d": 1,
@@ -68,7 +70,14 @@ const RANGE_MAP = {
  */
 // GET /api/v1/history/:asset?range=7d
 // GET /api/v1/history/:asset?from=2024-01-01&to=2024-01-07
-router.get("/:asset", async (req, res) => {
+router.get("/:asset", cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.history,
+    keyGenerator: (req) => {
+        const asset = req.params.asset.toUpperCase();
+        const range = req.query.range || "7d";
+        return CACHE_KEYS.history.asset(asset, range);
+    },
+}), async (req, res) => {
     const asset = req.params.asset.toUpperCase();
     const rangeParam = req.query.range;
     const fromParam = req.query.from;

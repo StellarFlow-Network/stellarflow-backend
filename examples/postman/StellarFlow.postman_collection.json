@@ -1,0 +1,956 @@
+{
+  "info": {
+    "_postman_id": "d238c4e5-0642-4f84-bf18-d24c0a65da5f",
+    "name": "StellarFlow API Playground",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "49726950"
+  },
+  "item": [
+    {
+      "name": "Base",
+      "item": [
+        {
+          "name": "GET /",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/docs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/docs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "docs"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Market Rates",
+      "item": [
+        {
+          "name": "GET /api/v1/market-rates/rates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/rates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "rates"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/market-rates/latest",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/latest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "latest"
+              ]
+            },
+            "description": "Retrieves the most recent aggregated market rates for all supported currencies."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/market-rates/rate/{{currency}}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/rate/{{currency}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "rate",
+                "{{currency}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/market-rates/reviews/pending",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/reviews/pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "reviews",
+                "pending"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/market-rates/reviews/{{reviewId}}/approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approvedBy\": \"reviewer@example.com\",\n  \"comment\": \"Approved after verification\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/reviews/{{reviewId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "reviews",
+                "{{reviewId}}",
+                "approve"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/market-rates/reviews/{{reviewId}}/reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rejectedBy\": \"reviewer@example.com\",\n  \"reason\": \"Rate source data is inconsistent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/reviews/{{reviewId}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "reviews",
+                "{{reviewId}}",
+                "reject"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/market-rates/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/market-rates/currencies",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/currencies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "currencies"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/market-rates/cache",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/cache",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "cache"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/market-rates/cache/clear",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scope\": \"all\",\n  \"requestedBy\": \"admin@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/market-rates/cache/clear",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "market-rates",
+                "cache",
+                "clear"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "History & Stats",
+      "item": [
+        {
+          "name": "GET /api/v1/history/{{asset}}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/history/{{asset}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "history",
+                "{{asset}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/stats/volume",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/stats/volume",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stats",
+                "volume"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Intelligence",
+      "item": [
+        {
+          "name": "GET /api/v1/intelligence/price-change/{{currency}}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intelligence/price-change/{{currency}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intelligence",
+                "price-change",
+                "{{currency}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/intelligence/stale",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/intelligence/stale",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "intelligence",
+                "stale"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Assets & Status",
+      "item": [
+        {
+          "name": "GET /api/v1/assets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/assets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "assets"
+              ]
+            },
+            "description": " Returns the list of supported assets available in the system."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "status"
+              ]
+            },
+            "description": "Returns the current health and status of the API."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Derived Assets",
+      "item": [
+        {
+          "name": "GET /api/v1/derived-assets/rate/{{baseCurrency}}/{{quoteCurrency}}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/derived-assets/rate/{{baseCurrency}}/{{quoteCurrency}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "derived-assets",
+                "rate",
+                "{{baseCurrency}}",
+                "{{quoteCurrency}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/derived-assets/ngn-ghs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/derived-assets/ngn-ghs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "derived-assets",
+                "ngn-ghs"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sanity Check",
+      "item": [
+        {
+          "name": "GET /api/v1/sanity-check/check/{{currency}}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sanity-check/check/{{currency}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sanity-check",
+                "check",
+                "{{currency}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/sanity-check/check-all",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sanity-check/check-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sanity-check",
+                "check-all"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/sanity-check/threshold",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/sanity-check/threshold",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sanity-check",
+                "threshold"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Price Updates",
+      "item": [
+        {
+          "name": "POST /api/v1/price-updates/multi-sig/request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"asset\": \"{{asset}}\",\n  \"currency\": \"{{currency}}\",\n  \"price\": 74500.12,\n  \"requestedBy\": \"trader@example.com\",\n  \"reason\": \"Scheduled price refresh\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/price-updates/multi-sig/request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "price-updates",
+                "multi-sig",
+                "request"
+              ]
+            },
+            "description": "Initiates a new multi-signature price update request that requires approvals."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/price-updates/sign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"multiSigPriceId\": \"{{multiSigPriceId}}\",\n  \"signer\": \"signer@example.com\",\n  \"signature\": \"sample-signature\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/price-updates/sign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "price-updates",
+                "sign"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/price-updates/multi-sig/{{multiSigPriceId}}/request-signature",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestedSigner\": \"signer@example.com\",\n  \"note\": \"Please sign this price update\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/price-updates/multi-sig/{{multiSigPriceId}}/request-signature",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "price-updates",
+                "multi-sig",
+                "{{multiSigPriceId}}",
+                "request-signature"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/price-updates/multi-sig/{{multiSigPriceId}}/status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/price-updates/multi-sig/{{multiSigPriceId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "price-updates",
+                "multi-sig",
+                "{{multiSigPriceId}}",
+                "status"
+              ]
+            },
+            "description": "Retrieves the current approval and submission status of a multi-signature price update."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/price-updates/multi-sig/pending",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/price-updates/multi-sig/pending",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "price-updates",
+                "multi-sig",
+                "pending"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/price-updates/multi-sig/{{multiSigPriceId}}/signatures",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/price-updates/multi-sig/{{multiSigPriceId}}/signatures",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "price-updates",
+                "multi-sig",
+                "{{multiSigPriceId}}",
+                "signatures"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/price-updates/multi-sig/{{multiSigPriceId}}/record-submission",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txHash\": \"0xsampletransactionhash\",\n  \"submittedBy\": \"operator@example.com\",\n  \"network\": \"testnet\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/price-updates/multi-sig/{{multiSigPriceId}}/record-submission",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "price-updates",
+                "multi-sig",
+                "{{multiSigPriceId}}",
+                "record-submission"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/price-updates/multi-sig/signer-info",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/price-updates/multi-sig/signer-info",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "price-updates",
+                "multi-sig",
+                "signer-info"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "GET /api/admin/reports/summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/reports/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "reports",
+                "summary"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/admin/reload-secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"requestedBy\": \"admin@example.com\",\n  \"reason\": \"Rotate cached secret material\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/reload-secret",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "reload-secret"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cache",
+      "item": [
+        {
+          "name": "GET /api/v1/cache/metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cache/metrics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cache",
+                "metrics"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/cache/clear",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scope\": \"all\",\n  \"requestedBy\": \"admin@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cache/clear",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cache",
+                "clear"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/cache/health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cache/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "cache",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "currency",
+      "value": "NGN"
+    },
+    {
+      "key": "asset",
+      "value": "BTC"
+    },
+    {
+      "key": "baseCurrency",
+      "value": "NGN"
+    },
+    {
+      "key": "quoteCurrency",
+      "value": "GHS"
+    },
+    {
+      "key": "reviewId",
+      "value": "sample-review-id"
+    },
+    {
+      "key": "multiSigPriceId",
+      "value": "sample-multisig-id"
+    }
+  ]
+}

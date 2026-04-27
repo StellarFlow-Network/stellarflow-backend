@@ -3,6 +3,8 @@ import {
   getDerivedRate,
   getNGNGHSRate,
 } from "../controllers/derivedAssetController";
+import { cacheMiddleware } from "../cache/CacheMiddleware";
+import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 
 const router = Router();
 
@@ -33,7 +35,15 @@ const router = Router();
  *       '500':
  *         description: Internal server error
  */
-router.get("/rate/:base/:quote", getDerivedRate);
+router.get(
+  "/rate/:base/:quote",
+  cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.derivedAssets,
+    keyGenerator: (req) =>
+      CACHE_KEYS.derivedAssets.crossRate(req.params.base, req.params.quote),
+  }),
+  getDerivedRate,
+);
 
 /**
  * @swagger
@@ -49,6 +59,13 @@ router.get("/rate/:base/:quote", getDerivedRate);
  *       '500':
  *         description: Internal server error
  */
-router.get("/ngn-ghs", getNGNGHSRate);
+router.get(
+  "/ngn-ghs",
+  cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.derivedAssets,
+    keyGenerator: () => CACHE_KEYS.derivedAssets.ngnGhs(),
+  }),
+  getNGNGHSRate,
+);
 
 export default router;

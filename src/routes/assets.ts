@@ -1,5 +1,8 @@
 import { Router } from "express";
 import prisma from "../lib/prisma";
+import { cacheMiddleware } from "../cache/CacheMiddleware";
+import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
+import prisma from "../lib/prisma";
 
 const router = Router();
 
@@ -35,7 +38,13 @@ const router = Router();
  *       '500':
  *         description: Internal server error
  */
-router.get("/", async (req, res) => {
+router.get(
+  "/",
+  cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.assets,
+    keyGenerator: () => CACHE_KEYS.assets.all(),
+  }),
+  async (req, res) => {
   try {
     const assets = await prisma.currency.findMany({
       where: { isActive: true },

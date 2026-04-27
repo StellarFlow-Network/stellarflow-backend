@@ -1,23 +1,27 @@
 import express from "express";
 import { multiSigService } from "../services/multiSigService";
+import { isLockdownError } from "../state/appState";
+import { sanitizeMultiSigRequest, sanitizeSignatureRequest, } from "../middleware/payloadSanitizer";
 const router = express.Router();
 /**
  * POST /api/v1/price-updates/multi-sig/request
  * Creates a multi-sig price update request.
  * Called by the initializing server to start the approval process.
+ *
+ * Request body is validated by sanitizeMultiSigRequest middleware.
  */
-router.post("/multi-sig/request", async (req, res) => {
+router.post("/multi-sig/request", sanitizeMultiSigRequest, async (req, res) => {
     try {
         const { priceReviewId, currency, rate, source, memoId } = req.body;
-        if (!priceReviewId ||
-            !currency ||
-            rate === undefined ||
-            !source ||
-            !memoId) {
-            return res.status(400).json({
-                success: false,
-                error: "Missing required fields: priceReviewId, currency, rate, source, memoId",
-            });
+        // Enforce relayer asset authorization
+        if (req.relayer) {
+            const normalizedCurrency = currency.toUpperCase();
+            if (!req.relayer.allowedAssets.includes(normalizedCurrency)) {
+                return res.status(403).json({
+                    success: false,
+                    error: `Relayer not authorized for asset: ${normalizedCurrency}`,
+                });
+            }
         }
         const signatureRequest = await multiSigService.createMultiSigRequest(priceReviewId, currency, rate, source, memoId);
         res.json({
@@ -40,9 +44,9 @@ router.post("/multi-sig/request", async (req, res) => {
  *
  * Requires:
  * - Authorization header with token (if MULTI_SIG_AUTH_TOKEN is set)
- * - Signature payload in body
+ * - Signature payload in body (validated by sanitizeSignatureRequest middleware)
  */
-router.post("/sign", async (req, res) => {
+router.post("/sign", sanitizeSignatureRequest, async (req, res) => {
     try {
         // Validate authorization if token is configured
         const authToken = process.env.MULTI_SIG_AUTH_TOKEN;
@@ -59,12 +63,6 @@ router.post("/sign", async (req, res) => {
             }
         }
         const { multiSigPriceId } = req.body;
-        if (!multiSigPriceId) {
-            return res.status(400).json({
-                success: false,
-                error: "Missing multiSigPriceId",
-            });
-        }
         // Sign the price update locally
         const { signature, signerPublicKey } = await multiSigService.signMultiSigPrice(multiSigPriceId);
         const signerInfo = multiSigService.getLocalSignerInfo();
@@ -80,9 +78,9 @@ router.post("/sign", async (req, res) => {
     }
     catch (error) {
         console.error("[API] Signature creation failed:", error);
-        res.status(400).json({
+        res.status(isLockdownError(error) ? error.statusCode : 400).json({
             success: false,
-            error: String(error),
+            error: error instanceof Error ? error.message : String(error),
         });
     }
 });

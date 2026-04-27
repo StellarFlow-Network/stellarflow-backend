@@ -4,6 +4,10 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import { Horizon } from "@stellar/stellar-sdk";
+import marketRatesRouter from "./routes/marketRates";
+import historyRouter from "./routes/history";
+import priceUpdatesRouter from "./routes/priceUpdates";
+import statsRouter from "./routes/stats";
 import app from "./app";
 import prisma from "./lib/prisma";
 import { disconnectRedis } from "./lib/redis";
@@ -14,16 +18,37 @@ import { GasBalanceMonitorService, getGasBalanceMonitorService } from "./service
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
+import { getRegionalHealthService } from "./services/regionalHealthService";
 import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
+import { watchConfig } from "./config/configWatcher";
+import { validateDatabaseSchema } from "./utils/dbValidator";
+import { initializeTracing } from "./config/tracingConfig";
+import { setupAxiosTracing } from "./lib/tracing";
+import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
 
 // Load environment variables
 dotenv.config();
 
+// Initialize tracing before other services
+initializeTracing();
+
+// Setup axios tracing for HTTP requests
+setupAxiosTracing();
+
+// Register tracing shutdown handlers
+registerTracingShutdownHandlers();
+
 // Enable log masking to prevent sensitive data leaks
 enableGlobalLogMasking();
 
+// Start regional health monitoring before we accept requests.
+await getRegionalHealthService().startMonitoring();
+
 // [OPS] Implement "Environment Variable" Check on Start
 validateEnv();
+
+// [OPS] Validate database schema on startup
+await validateDatabaseSchema();
 
 // Validate required environment variables
 const requiredEnvVars = ["STELLAR_SECRET", "DATABASE_URL"] as const;
@@ -63,6 +88,16 @@ const horizonUrl =
     ? "https://horizon.stellar.org"
     : "https://horizon-testnet.stellar.org";
 const horizonServer = new Horizon.Server(horizonUrl);
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Routes
+app.use("/api/market-rates", marketRatesRouter);
+app.use("/api/history", historyRouter);
+app.use("/api/price-updates", priceUpdatesRouter);
+app.use("/api/stats", statsRouter);
 
 // Health check endpoint
 /**
@@ -187,6 +222,14 @@ app.get("/", (req, res) => {
       history: {
         assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
       },
+      intelligence: {
+        hourlyVolatility: "/api/v1/intelligence/hourly-volatility",
+        priceChange: "/api/v1/intelligence/price-change/:currency",
+        staleCurrencies: "/api/v1/intelligence/stale",
+      },
+      stats: {
+        relayers: "/api/stats/relayers",
+      },
     },
   });
 });
@@ -201,6 +244,16 @@ let sorobanEventListener: SorobanEventListener | null = null;
 let gasBalanceMonitorService: GasBalanceMonitorService | null = null;
 
 let isShuttingDown = false;
+let stopEnvFileWatcher: (() => void) | undefined;
+const stopConfigWatcher = watchConfig((cfg) => {
+  sorobanEventListener?.restart(cfg.sorobanPollIntervalMs);
+  multiSigSubmissionService.restart(cfg.multiSigPollIntervalMs);
+  hourlyAverageService.restart(cfg.hourlyAverageCheckIntervalMs);
+});
+
+if (process.env.ENABLE_ENV_FILE_WATCHER === "true") {
+  stopEnvFileWatcher = startEnvFileWatcher();
+}
 
 const closeHttpServer = (): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -236,6 +289,8 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     // FIX 2: Optional chaining — safe to call even if service never started
     gasBalanceMonitorService?.stop();
     hourlyAverageService.stop();
+    stopConfigWatcher();
+    stopEnvFileWatcher?.();
 
     await closeHttpServer();
     console.log("HTTP server closed.");

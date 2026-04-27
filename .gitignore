@@ -11,4 +11,5 @@ prisma/migrations/
 !prisma/migrations/migration_lock.toml
 docs/
 backups/
+.env
 

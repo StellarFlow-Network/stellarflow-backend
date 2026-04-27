@@ -1,0 +1,14 @@
+Timestamp,Event Type,Currency,Rate,Transaction Hash,Ledger Sequence,Source,Memo ID,Provider Name,Error Message,Relayer Name,Latency Diff (ms),Threshold (ms),Resolved,Details
+2024-01-01T00:00:00.000Z,PRICE_CONFIRMED_ONCHAIN,USD,1.23,abc123,12345,CoinGecko,SF-USD-1234567890-001,,,,,,,"{""source"":""test"",""confidence"":0.95}"
+2024-01-01T01:00:00.000Z,PRICE_CONFIRMED_ONCHAIN,NGN,850.5,def456,12346,ExchangeRateAPI,SF-NGN-1234567890-002,,,,,,,"{""source"":""test"",""confidence"":0.88}"
+# STELLARFLOW AUDIT EXPORT METADATA
+# Generated: 2026-04-25T21:27:53.957Z
+# Date Range: 2024-01-01 to 2024-01-02
+# Asset Pair: USD/NGN
+# Record Count: 2
+# Data Hash (SHA-256): 7890c3376bf4c88dc1a77577caa7ecea118160072d9e03094037d6cbae28f246
+# Signature (Ed25519): 28fbb944ee3abac6f0ec0ee86cc2818b9f1dece3cb64cf3fa2671c55099481427479d799229acce8efd86012ffacb0b1465660daa8f76290ed56f6c4c3b0e30c
+# Signer Address: GCN3T7NACOBCOEHIVX6Z3OK4PPVRAQ75WMP5TKSI564Z6QDIJFJIYZSV
+# Verification: Use stellar-sdk to verify signature with the signature message
+# Signature Message: STELLARFLOW-AUDIT-2024-01-01-2024-01-02-2-7890c3376bf4c88dc1a77577caa7ecea118160072d9e03094037d6cbae28f246
+# END METADATA

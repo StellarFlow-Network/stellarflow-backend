@@ -14,7 +14,7 @@ export class ZScoreAnomalyFilter {
     if (!this.windows.has(asset)) {
       this.windows.set(asset, []);
     }
-    
+
     const window = this.windows.get(asset)!;
 
     // Need at least 2 prices to calculate a meaningful standard deviation
@@ -34,7 +34,7 @@ export class ZScoreAnomalyFilter {
         logger.warn(`[Volatility Alert] Price anomaly detected for ${asset}. Price: ${price}, Mean: ${mean}, StdDev: 0`);
         return false;
       }
-      
+
       this.updateWindow(window, price);
       return true;
     }
@@ -67,7 +67,7 @@ export class ZScoreAnomalyFilter {
       const diff = value - mean;
       return diff * diff;
     });
-    
+
     const avgSquareDiff = this.calculateMean(squareDiffs);
     return Math.sqrt(avgSquareDiff); // Sample population standard deviation
   }
