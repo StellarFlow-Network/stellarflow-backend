@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stellarflow-backend
+  labels:
+    app: stellarflow-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: stellarflow-backend
+  template:
+    metadata:
+      labels:
+        app: stellarflow-backend
+    spec:
+      containers:
+        - name: stellarflow-backend
+          image: stellarflow/stellarflow-backend:latest # Replace with your actual image
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: "production"
+            # Database configuration - replace with your actual values or use ConfigMap/Secret
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: redis-url
+            # Stellar configuration
+            - name: STELLAR_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: stellar-secret
+            - name: STELLAR_NETWORK
+              value: "TESTNET" # or "PUBLIC" for mainnet
+            # Dashboard URL
+            - name: DASHBOARD_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: stellarflow-config
+                  key: dashboard-url
+            # API Key
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: api-key
+            # Optional: Soroban admin secret
+            - name: SOROBAN_ADMIN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: soroban-admin-secret
+            # Gas account monitoring
+            - name: GAS_ACCOUNT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: gas-account-public-key
+            - name: GAS_ALERT_THRESHOLD_XLM
+              value: "10"
+            # Regional health check URLs
+            - name: PRIMARY_CLUSTER_HEALTH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: stellarflow-config
+                  key: primary-cluster-health-url
+            - name: SECONDARY_CLUSTER_HEALTH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: stellarflow-config
+                  key: secondary-cluster-health-url
+            # Rate limiting
+            - name: ADMIN_IP
+              valueFrom:
+                configMapKeyRef:
+                  name: stellarflow-config
+                  key: admin-ip
+            - name: ADMIN_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: admin-api-key
+            # Optional: VTpass configuration
+            - name: VTPASS_API_BASE_URL
+              value: "https://vtpass.com/api"
+            - name: VTPASS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: vtpass-api-key
+            - name: VTPASS_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: vtpass-public-key
+            - name: VTPASS_NGN_SERVICE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: vtpass-ngn-service-id
+            - name: VTPASS_NGN_VARIATION_CODE
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: vtpass-ngn-variation-code
+            # Optional: OpenExchangeRates API key
+            - name: OPENEXCHANGE_RATES_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: stellarflow-secrets
+                  key: openexchange-rates-api-key
+            # Enable env file watcher if needed
+            - name: ENABLE_ENV_FILE_WATCHER
+              value: "false"
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
