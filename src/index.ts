@@ -10,6 +10,7 @@ import { disconnectRedis } from "./lib/redis";
 import { initSocket } from "./lib/socket";
 import { SorobanEventListener } from "./services/sorobanEventListener";
 import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
+import { GasBalanceMonitorService, getGasBalanceMonitorService } from "./services/gasBalanceMonitorService";
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
@@ -194,6 +195,11 @@ app.get("/", (req, res) => {
 const httpServer = createServer(app);
 initSocket(httpServer);
 let sorobanEventListener: SorobanEventListener | null = null;
+
+// FIX 1: Typed as nullable — constructor is not called at module level,
+// so a missing secret env var won't crash the process before the server starts.
+let gasBalanceMonitorService: GasBalanceMonitorService | null = null;
+
 let isShuttingDown = false;
 
 const closeHttpServer = (): Promise<void> =>
@@ -227,6 +233,8 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
   try {
     sorobanEventListener?.stop();
     multiSigSubmissionService.stop();
+    // FIX 2: Optional chaining — safe to call even if service never started
+    gasBalanceMonitorService?.stop();
     hourlyAverageService.stop();
 
     await closeHttpServer();
@@ -309,6 +317,22 @@ httpServer.listen(PORT, () => {
   } catch (err) {
     console.warn(
       "Hourly average service not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // FIX 3: getGasBalanceMonitorService() moved inside the listen callback so
+  // the constructor (and Keypair.fromSecret) only runs after the server is up.
+  // A missing secret env var now warns gracefully instead of crashing the process.
+  try {
+    gasBalanceMonitorService = getGasBalanceMonitorService();
+    gasBalanceMonitorService.start().catch((err: Error) => {
+      console.error("Failed to start gas balance monitor service:", err);
+    });
+    console.log(`⛽ Gas balance monitor service started`);
+  } catch (err) {
+    console.warn(
+      "Gas balance monitor service not started:",
       err instanceof Error ? err.message : err,
     );
   }
