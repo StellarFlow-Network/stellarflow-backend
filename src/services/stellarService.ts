@@ -13,7 +13,7 @@ import {
 import stellarProvider from "../lib/stellarProvider";
 import { sequenceManager } from "./sequence-manager";
 import { assertSigningAllowed } from "../state/appState";
-import { getSecretKey } from "./secretManager";
+import { signer } from "../signer";
 
 dotenv.config();
 
@@ -33,11 +33,10 @@ export class StellarService {
   }
 
   /**
-   * Returns a Keypair derived from the currently active secret key.
-   * Called at sign time so key rotations are reflected immediately.
+   * Returns the Stellar public key from the signer.
    */
-  private getKeypair(): Keypair {
-    return Keypair.fromSecret(getSecretKey());
+  private async getPublicKey(): Promise<string> {
+    return signer.getPublicKey();
   }
 
   /**
@@ -185,14 +184,10 @@ export class StellarService {
         this.server = stellarProvider.getServer();
 
         // Use SequenceManager to avoid collisions and redundant loadAccount calls
-        const nextSequence = await sequenceManager.getNextSequence(
-          this.getKeypair().publicKey()
-        );
+        const publicKey = await this.getPublicKey();
+        const nextSequence = await sequenceManager.getNextSequence(publicKey);
 
-        const sourceAccount = new Account(
-          this.getKeypair().publicKey(),
-          nextSequence
-        );
+        const sourceAccount = new Account(publicKey, nextSequence);
 
         const currentFee = Math.floor(
           baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt),
@@ -200,7 +195,17 @@ export class StellarService {
 
         const transaction = builderFn(sourceAccount, currentFee);
         await assertSigningAllowed();
-        transaction.sign(this.getKeypair());
+        
+        const txHash = transaction.hash();
+        const signature = await signer.sign(txHash);
+        const kp = Keypair.fromPublicKey(publicKey);
+        
+        transaction.signatures.push(
+          new xdr.DecoratedSignature({
+            hint: kp.signatureHint(),
+            signature: signature,
+          })
+        );
 
         return await this.server.submitTransaction(transaction);
       } catch (error: any) {
@@ -208,7 +213,7 @@ export class StellarService {
 
         if (resultCode === "tx_bad_seq") {
           console.warn("⚠️ SequenceManager: tx_bad_seq detected. Invalidating sequence and retrying...");
-          sequenceManager.invalidate(this.getKeypair().publicKey());
+          sequenceManager.invalidate(await this.getPublicKey());
         }
 
         attempt++;
@@ -245,14 +250,10 @@ export class StellarService {
       try {
         this.server = stellarProvider.getServer();
 
-        const nextSequence = await sequenceManager.getNextSequence(
-          this.getKeypair().publicKey()
-        );
+        const publicKey = await this.getPublicKey();
+        const nextSequence = await sequenceManager.getNextSequence(publicKey);
 
-        const sourceAccount = new Account(
-          this.getKeypair().publicKey(),
-          nextSequence
-        );
+        const sourceAccount = new Account(publicKey, nextSequence);
 
         const currentFee = Math.floor(
           baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt),
@@ -261,10 +262,20 @@ export class StellarService {
         const transaction = builderFn(sourceAccount, currentFee);
 
         await assertSigningAllowed();
-        transaction.sign(this.getKeypair());
+        
+        const txHash = transaction.hash();
+        const signature = await signer.sign(txHash);
+        const kp = Keypair.fromPublicKey(publicKey);
+        
+        transaction.signatures.push(
+          new xdr.DecoratedSignature({
+            hint: kp.signatureHint(),
+            signature: signature,
+          })
+        );
 
         for (const sig of signatures) {
-          if (sig.signerPublicKey === this.getKeypair().publicKey()) continue;
+          if (sig.signerPublicKey === publicKey) continue;
 
           try {
             const signatureBuffer = Buffer.from(sig.signature, "hex");
@@ -287,7 +298,7 @@ export class StellarService {
 
         if (resultCode === "tx_bad_seq") {
           console.warn("⚠️ SequenceManager: tx_bad_seq detected in multi-sig. Invalidating sequence...");
-          sequenceManager.invalidate(this.getKeypair().publicKey());
+          sequenceManager.invalidate(await this.getPublicKey());
         }
 
         attempt++;

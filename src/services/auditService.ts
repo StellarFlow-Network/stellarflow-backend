@@ -6,6 +6,7 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import * as crypto from "crypto";
 import { generateAuditExportCSV, ExportOptions, AuditRecord, ExportMetadata } from "../utils/exportUtils";
+import { signer } from "../signer";
 
 export interface CertifiedAuditData {
   records: AuditRecord[];
@@ -44,19 +45,14 @@ export interface AuditSummary {
 }
 
 export class AuditService {
-  private readonly signerSecret: string;
-  private readonly signerPublicKey: string;
+  private signerPublicKey: string = "";
 
-  constructor(secretKey?: string) {
-    // Use provided secret key or environment variable
-    this.signerSecret = secretKey || process.env.ORACLE_SECRET_KEY || "";
-    
-    if (!this.signerSecret) {
-      throw new Error("Oracle secret key is required for audit service");
-    }
+  constructor() {
+    this.initializeSigner();
+  }
 
-    // Generate public key from secret
-    this.signerPublicKey = Keypair.fromSecret(this.signerSecret).publicKey();
+  private async initializeSigner() {
+    this.signerPublicKey = await signer.getPublicKey();
   }
 
   /**
@@ -72,11 +68,11 @@ export class AuditService {
   }
 
   /**
-   * Signs audit data using Ed25519
+   * Signs audit data using the signer
    */
-  private signAuditData(message: string): string {
-    const keypair = Keypair.fromSecret(this.signerSecret);
-    return keypair.sign(Buffer.from(message, "utf-8")).toString("hex");
+  private async signAuditData(message: string): Promise<string> {
+    const signature = await signer.sign(Buffer.from(message, "utf-8"));
+    return signature.toString("hex");
   }
 
   /**
@@ -158,7 +154,7 @@ export class AuditService {
       dataHash
     );
 
-    const signature = this.signAuditData(signatureMessage);
+    const signature = await this.signAuditData(signatureMessage);
 
     return {
       records: filteredRecords.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
@@ -192,7 +188,7 @@ export class AuditService {
       dataHash,
     );
 
-    const signature = this.signAuditData(signatureMessage);
+    const signature = await this.signAuditData(signatureMessage);
 
     return {
       period: {
@@ -276,7 +272,7 @@ export class AuditService {
     return await generateAuditExportCSV(
       certifiedData.records,
       exportOptions,
-      this.signerSecret
+      signer
     );
   }
 

@@ -1,5 +1,5 @@
 import prisma from "../lib/prisma";
-import { Keypair } from "@stellar/stellar-sdk";
+import { signer } from "../signer";
 import dotenv from "dotenv";
 import axios from "axios";
 import { assertSigningAllowed } from "../state/appState";
@@ -39,25 +39,14 @@ type RemoteSignatureResponse = {
 };
 
 export class MultiSigService {
-  private readonly localSignerPublicKey: string;
-  private readonly localSignerSecret: string;
+  private localSignerPublicKey: string = "";
   private readonly signerName: string;
   private readonly SIGNATURE_EXPIRY_MS = 60 * 60 * 1000;
   private readonly REQUIRED_SIGNATURES: number;
 
   constructor() {
-    const secret =
-      process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
-    if (!secret) {
-      throw new Error(
-        "ORACLE_SECRET_KEY or SOROBAN_ADMIN_SECRET not found in environment variables",
-      );
-    }
-
-    this.localSignerSecret = secret;
-    this.localSignerPublicKey = Keypair.fromSecret(secret).publicKey();
     this.signerName = process.env.ORACLE_SIGNER_NAME || "oracle-server";
-
+    
     const requiredSignatures = Number.parseInt(
       process.env.MULTI_SIG_REQUIRED_COUNT || "2",
       10,
@@ -66,6 +55,12 @@ export class MultiSigService {
       Number.isFinite(requiredSignatures) && requiredSignatures > 0
         ? requiredSignatures
         : 2;
+        
+    this.initializeSigner();
+  }
+
+  private async initializeSigner() {
+    this.localSignerPublicKey = await signer.getPublicKey();
   }
 
   /**
@@ -145,8 +140,7 @@ export class MultiSigService {
       multiSigPrice.rate.toString(),
       multiSigPrice.source,
     );
-    const signature = Keypair.fromSecret(this.localSignerSecret)
-      .sign(Buffer.from(signatureMessage, "utf-8"))
+    const signature = (await signer.sign(Buffer.from(signatureMessage, "utf-8")))
       .toString("hex");
 
     let createdSignature = true;
