@@ -1,12 +1,16 @@
 import { Transaction, Horizon } from "@stellar/stellar-sdk";
 export declare class StellarService {
     private server;
-    private keypair;
     private network;
     private readonly MAX_RETRIES;
     private readonly FEE_INCREMENT_PERCENTAGE;
     private readonly RETRY_DELAY_MS;
     constructor();
+    /**
+     * Returns a Keypair derived from the currently active secret key.
+     * Called at sign time so key rotations are reflected immediately.
+     */
+    private getKeypair;
     /**
      * Fetches the recommended transaction fee from Horizon fee_stats.
      * Uses p50 (median) of recent fees to avoid overpaying while ensuring inclusion.
@@ -21,6 +25,16 @@ export declare class StellarService {
      * @param memoId - Unique ID for auditing
      */
     submitPriceUpdate(currency: string, price: number, memoId: string): Promise<string>;
+    /**
+     * Submit multiple price updates to the Stellar network in a single bundle transaction.
+     * Leverages submitTransactionWithRetries for automatic fee bumping if stuck.
+     * @param updates - Array of price updates { currency, price }
+     * @param memoId - Unique ID for auditing
+     */
+    submitBatchedPriceUpdates(updates: Array<{
+        currency: string;
+        price: number;
+    }>, memoId: string): Promise<string>;
     /**
      * Submit a multi-signed price update to the Stellar network.
      * Accepts signatures from multiple oracle servers.

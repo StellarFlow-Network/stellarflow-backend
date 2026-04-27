@@ -1,19 +1,27 @@
 import express from "express";
 import { multiSigService } from "../services/multiSigService";
+import { isLockdownError } from "../state/appState";
+import { sanitizeMultiSigRequest, sanitizeSignatureRequest, } from "../middleware/payloadSanitizer";
 const router = express.Router();
 /**
- * POST /api/price-updates/multi-sig/request
+ * POST /api/v1/price-updates/multi-sig/request
  * Creates a multi-sig price update request.
  * Called by the initializing server to start the approval process.
+ *
+ * Request body is validated by sanitizeMultiSigRequest middleware.
  */
-router.post("/multi-sig/request", async (req, res) => {
+router.post("/multi-sig/request", sanitizeMultiSigRequest, async (req, res) => {
     try {
         const { priceReviewId, currency, rate, source, memoId } = req.body;
-        if (!priceReviewId || !currency || rate === undefined || !source || !memoId) {
-            return res.status(400).json({
-                success: false,
-                error: "Missing required fields: priceReviewId, currency, rate, source, memoId",
-            });
+        // Enforce relayer asset authorization
+        if (req.relayer) {
+            const normalizedCurrency = currency.toUpperCase();
+            if (!req.relayer.allowedAssets.includes(normalizedCurrency)) {
+                return res.status(403).json({
+                    success: false,
+                    error: `Relayer not authorized for asset: ${normalizedCurrency}`,
+                });
+            }
         }
         const signatureRequest = await multiSigService.createMultiSigRequest(priceReviewId, currency, rate, source, memoId);
         res.json({
@@ -30,15 +38,15 @@ router.post("/multi-sig/request", async (req, res) => {
     }
 });
 /**
- * POST /api/price-updates/sign
+ * POST /api/v1/price-updates/sign
  * Endpoint for remote servers to request a signature.
  * This is called by peer servers in the multi-sig setup.
  *
  * Requires:
  * - Authorization header with token (if MULTI_SIG_AUTH_TOKEN is set)
- * - Signature payload in body
+ * - Signature payload in body (validated by sanitizeSignatureRequest middleware)
  */
-router.post("/sign", async (req, res) => {
+router.post("/sign", sanitizeSignatureRequest, async (req, res) => {
     try {
         // Validate authorization if token is configured
         const authToken = process.env.MULTI_SIG_AUTH_TOKEN;
@@ -55,12 +63,6 @@ router.post("/sign", async (req, res) => {
             }
         }
         const { multiSigPriceId } = req.body;
-        if (!multiSigPriceId) {
-            return res.status(400).json({
-                success: false,
-                error: "Missing multiSigPriceId",
-            });
-        }
         // Sign the price update locally
         const { signature, signerPublicKey } = await multiSigService.signMultiSigPrice(multiSigPriceId);
         const signerInfo = multiSigService.getLocalSignerInfo();
@@ -76,22 +78,24 @@ router.post("/sign", async (req, res) => {
     }
     catch (error) {
         console.error("[API] Signature creation failed:", error);
-        res.status(400).json({
+        res.status(isLockdownError(error) ? error.statusCode : 400).json({
             success: false,
-            error: String(error),
+            error: error instanceof Error ? error.message : String(error),
         });
     }
 });
 /**
- * POST /api/price-updates/multi-sig/:multiSigPriceId/request-signature
+ * POST /api/v1/price-updates/multi-sig/:multiSigPriceId/request-signature
  * Request a signature from a remote server.
  * The body should contain the remote server URL.
  */
 router.post("/multi-sig/:multiSigPriceId/request-signature", async (req, res) => {
     try {
-        const { multiSigPriceId } = req.params;
+        const multiSigPriceId = req.params.multiSigPriceId;
         const { remoteServerUrl } = req.body;
-        if (!multiSigPriceId || !remoteServerUrl) {
+        if (!multiSigPriceId ||
+            typeof multiSigPriceId !== "string" ||
+            !remoteServerUrl) {
             return res.status(400).json({
                 success: false,
                 error: "Missing multiSigPriceId (in URL) or remoteServerUrl (in body)",
@@ -115,13 +119,13 @@ router.post("/multi-sig/:multiSigPriceId/request-signature", async (req, res) =>
     }
 });
 /**
- * GET /api/price-updates/multi-sig/:multiSigPriceId/status
+ * GET /api/v1/price-updates/multi-sig/:multiSigPriceId/status
  * Get the status of a multi-sig price update.
  */
 router.get("/multi-sig/:multiSigPriceId/status", async (req, res) => {
     try {
-        const { multiSigPriceId } = req.params;
-        if (!multiSigPriceId) {
+        const multiSigPriceId = req.params.multiSigPriceId;
+        if (!multiSigPriceId || typeof multiSigPriceId !== "string") {
             return res.status(400).json({
                 success: false,
                 error: "Missing multiSigPriceId in URL",
@@ -161,7 +165,7 @@ router.get("/multi-sig/:multiSigPriceId/status", async (req, res) => {
     }
 });
 /**
- * GET /api/price-updates/multi-sig/pending
+ * GET /api/v1/price-updates/multi-sig/pending
  * Get all pending multi-sig price updates.
  * Useful for monitoring and coordination between servers.
  */
@@ -191,14 +195,14 @@ router.get("/multi-sig/pending", async (req, res) => {
     }
 });
 /**
- * GET /api/price-updates/multi-sig/:multiSigPriceId/signatures
+ * GET /api/v1/price-updates/multi-sig/:multiSigPriceId/signatures
  * Get all signatures for a multi-sig price update.
  * Only returns once all signatures are collected and approved.
  */
 router.get("/multi-sig/:multiSigPriceId/signatures", async (req, res) => {
     try {
-        const { multiSigPriceId } = req.params;
-        if (!multiSigPriceId) {
+        const multiSigPriceId = req.params.multiSigPriceId;
+        if (!multiSigPriceId || typeof multiSigPriceId !== "string") {
             return res.status(400).json({
                 success: false,
                 error: "Missing multiSigPriceId in URL",
@@ -241,14 +245,17 @@ router.get("/multi-sig/:multiSigPriceId/signatures", async (req, res) => {
     }
 });
 /**
- * POST /api/price-updates/multi-sig/:multiSigPriceId/record-submission
+ * POST /api/v1/price-updates/multi-sig/:multiSigPriceId/record-submission
  * Record that a multi-sig price has been submitted to Stellar.
  */
 router.post("/multi-sig/:multiSigPriceId/record-submission", async (req, res) => {
     try {
-        const { multiSigPriceId } = req.params;
+        const multiSigPriceId = req.params.multiSigPriceId;
         const { memoId, stellarTxHash } = req.body;
-        if (!multiSigPriceId || !memoId || !stellarTxHash) {
+        if (!multiSigPriceId ||
+            typeof multiSigPriceId !== "string" ||
+            !memoId ||
+            !stellarTxHash) {
             return res.status(400).json({
                 success: false,
                 error: "Missing required fields: multiSigPriceId (in URL), memoId, stellarTxHash (in body)",
@@ -266,7 +273,7 @@ router.post("/multi-sig/:multiSigPriceId/record-submission", async (req, res) =>
     }
 });
 /**
- * GET /api/price-updates/multi-sig/signer-info
+ * GET /api/v1/price-updates/multi-sig/signer-info
  * Get this server's signer information.
  * Useful for remote servers to identify who is signing.
  */

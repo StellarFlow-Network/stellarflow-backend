@@ -15,9 +15,9 @@ export interface SignaturePayload {
     signerPublicKey: string;
 }
 export declare class MultiSigService {
-    private localSignerPublicKey;
-    private localSignerSecret;
-    private signerName;
+    private readonly localSignerPublicKey;
+    private readonly localSignerSecret;
+    private readonly signerName;
     private readonly SIGNATURE_EXPIRY_MS;
     private readonly REQUIRED_SIGNATURES;
     constructor();
@@ -58,11 +58,6 @@ export declare class MultiSigService {
      */
     cleanupExpiredRequests(): Promise<number>;
     /**
-     * Mark a multi-sig price as approved (all signatures collected).
-     * This happens automatically when all required signatures are collected.
-     */
-    private approveMultiSigPrice;
-    /**
      * Get all signatures for a multi-sig price.
      * Returns the signatures needed for submitting to Stellar.
      */
@@ -73,17 +68,22 @@ export declare class MultiSigService {
      */
     recordSubmission(multiSigPriceId: number, memoId: string, stellarTxHash: string): Promise<void>;
     /**
-     * Create a deterministic message for signing.
-     * Must be consistent across all servers to ensure valid multi-sig.
-     */
-    private createSignatureMessage;
-    /**
      * Get this server's signer identity.
      */
     getLocalSignerInfo(): {
         publicKey: string;
         name: string;
     };
+    /**
+     * Mark a multi-sig price as approved (all signatures collected).
+     * This happens automatically when all required signatures are collected.
+     */
+    private approveMultiSigPrice;
+    /**
+     * Create a deterministic message for signing.
+     * Must be consistent across all servers to ensure valid multi-sig.
+     */
+    private createSignatureMessage;
 }
 export declare const multiSigService: MultiSigService;
 //# sourceMappingURL=multiSigService.d.ts.map

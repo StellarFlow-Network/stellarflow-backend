@@ -7,12 +7,12 @@ export interface MarketRate {
     rate: number;
     timestamp: Date;
     source: string;
-    manualReviewRequired?: boolean;
-    reviewId?: number;
-    reviewReason?: string;
-    reviewChangePercent?: number;
-    comparisonRate?: number;
-    comparisonTimestamp?: Date;
+    manualReviewRequired?: boolean | undefined;
+    reviewId?: number | undefined;
+    reviewReason?: string | undefined;
+    reviewChangePercent?: number | undefined;
+    comparisonRate?: number | undefined;
+    comparisonTimestamp?: Date | undefined;
     contractSubmissionSkipped?: boolean;
     pendingMultiSig?: boolean;
     multiSigPriceId?: number;
@@ -125,7 +125,7 @@ export declare function calculateWeightedAverage(values: WeightedPriceInput[]): 
  * Rate Fetch Statistics
  * Performance and reliability metrics
  */
-export { filterOutliers, isOutlier, percentDeviation } from '../../logic/outlierFilter';
+export { filterOutliers, isOutlier, percentDeviation, } from "../../logic/outlierFilter";
 export interface RateFetchStats {
     totalRequests: number;
     successfulRequests: number;

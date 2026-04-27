@@ -1,55 +1,26 @@
 import { Router } from "express";
+import { getRate, getAllRates } from "../controllers/marketRatesController";
 import { MarketRateService } from "../services/marketRate";
-const router = Router();
+import { cacheMiddleware, invalidateCache } from "../cache/CacheMiddleware";
+import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
+import { isLockdownError } from "../state/appState";
 const marketRateService = new MarketRateService();
+const router = Router();
 // Get rate for specific currency
-router.get("/rate/:currency", async (req, res) => {
-    try {
-        const { currency } = req.params;
-        const result = await marketRateService.getRate(currency);
-        if (result.success) {
-            res.json({
-                success: true,
-                data: result.data,
-            });
-        }
-        else {
-            res.status(404).json({
-                success: false,
-                error: result.error,
-            });
-        }
-    }
-    catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
-    }
-});
+router.get("/rate/:currency", cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.marketRates,
+    keyGenerator: (req) => CACHE_KEYS.marketRates.single(req.params.currency),
+}), getRate);
 // Get all available rates
-router.get("/rates", async (req, res) => {
-    try {
-        const results = await marketRateService.getAllRates();
-        const rates = results
-            .filter((result) => result.success)
-            .map((result) => result.data);
-        const errors = results.filter((result) => !result.success);
-        res.json({
-            success: true,
-            data: rates,
-            errors: errors.length > 0 ? errors.map((e) => e.error) : undefined,
-        });
-    }
-    catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
-    }
-});
-// GET /api/market-rates/latest
-router.get("/latest", async (req, res) => {
+router.get("/rates", cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.marketRates,
+    keyGenerator: () => CACHE_KEYS.marketRates.all(),
+}), getAllRates);
+// GET /api/v1/market-rates/latest
+router.get("/latest", cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.marketRates,
+    keyGenerator: () => CACHE_KEYS.marketRates.latest(),
+}), async (req, res) => {
     try {
         const result = await marketRateService.getLatestPrices();
         if (result.success) {
@@ -76,7 +47,11 @@ router.get("/latest", async (req, res) => {
         });
     }
 });
-router.get("/reviews/pending", async (req, res) => {
+// Pending reviews
+router.get("/reviews/pending", cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.marketRates,
+    keyGenerator: () => CACHE_KEYS.marketRates.pendingReviews(),
+}), async (req, res) => {
     try {
         const reviews = await marketRateService.getPendingReviews();
         res.json({
@@ -93,7 +68,8 @@ router.get("/reviews/pending", async (req, res) => {
         });
     }
 });
-router.post("/reviews/:id/approve", async (req, res) => {
+// Approve review
+router.post("/reviews/:id/approve", invalidateCache("market-rates:*"), async (req, res) => {
     try {
         const reviewId = Number.parseInt(req.params.id, 10);
         if (!Number.isFinite(reviewId)) {
@@ -111,7 +87,7 @@ router.post("/reviews/:id/approve", async (req, res) => {
         });
     }
     catch (error) {
-        res.status(500).json({
+        res.status(isLockdownError(error) ? error.statusCode : 500).json({
             success: false,
             error: error instanceof Error
                 ? error.message
@@ -119,7 +95,8 @@ router.post("/reviews/:id/approve", async (req, res) => {
         });
     }
 });
-router.post("/reviews/:id/reject", async (req, res) => {
+// Reject review
+router.post("/reviews/:id/reject", invalidateCache("market-rates:*"), async (req, res) => {
     try {
         const reviewId = Number.parseInt(req.params.id, 10);
         if (!Number.isFinite(reviewId)) {
@@ -145,8 +122,11 @@ router.post("/reviews/:id/reject", async (req, res) => {
         });
     }
 });
-// Health check for all fetchers
-router.get("/health", async (req, res) => {
+// Health check
+router.get("/health", cacheMiddleware({
+    ttl: 60,
+    keyGenerator: () => CACHE_KEYS.marketRates.health(),
+}), async (req, res) => {
     try {
         const health = await marketRateService.healthCheck();
         res.json({
@@ -162,8 +142,11 @@ router.get("/health", async (req, res) => {
         });
     }
 });
-// Get supported currencies
-router.get("/currencies", (req, res) => {
+// Supported currencies
+router.get("/currencies", cacheMiddleware({
+    ttl: CACHE_CONFIG.ttl.marketRates,
+    keyGenerator: () => CACHE_KEYS.marketRates.currencies(),
+}), (req, res) => {
     try {
         const currencies = marketRateService.getSupportedCurrencies();
         res.json({
@@ -178,7 +161,7 @@ router.get("/currencies", (req, res) => {
         });
     }
 });
-// Get cache status
+// Cache status
 router.get("/cache", (req, res) => {
     try {
         const cacheStatus = marketRateService.getCacheStatus();

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src"],
+  "entryPointStrategy": "expand",
+  "out": "docs",
+  "tsconfig": "tsconfig.json",
+  "skipErrorChecking": true,
+  "name": "StellarFlow Backend",
+  "readme": "none",
+  "exclude": ["**/node_modules/**", "**/dist/**", "**/test/**"],
+  "excludePrivate": false,
+  "excludeInternal": false,
+  "includeVersion": true,
+  "categorizeByGroup": true,
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true
+  },
+  "sort": ["kind", "alphabetical"],
+  "kindSortOrder": [
+    "Module",
+    "Class",
+    "Interface",
+    "TypeAlias",
+    "Function",
+    "Variable",
+    "Enum"
+  ],
+  "visibilityFilters": {
+    "protected": true,
+    "private": true
+  },
+  "blockTags": [
+    "@defaultValue",
+    "@deprecated",
+    "@example",
+    "@param",
+    "@remarks",
+    "@returns",
+    "@see",
+    "@throws",
+    "@swagger"
+  ]
+}
