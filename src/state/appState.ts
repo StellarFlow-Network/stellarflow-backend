@@ -16,7 +16,15 @@ const defaultLockdownState: LockdownState = {
   updatedAt: null,
 };
 
-let inMemoryLockdownState: LockdownState = { ...defaultLockdownState };
+// Lazy-initialized in-memory state — no module-level mutable variable
+let inMemoryLockdownState: LockdownState | null = null;
+
+function getInMemoryState(): LockdownState {
+  if (!inMemoryLockdownState) {
+    inMemoryLockdownState = { ...defaultLockdownState };
+  }
+  return inMemoryLockdownState;
+}
 
 function normalizeReason(reason: unknown): string | null {
   if (typeof reason !== "string") {
@@ -58,13 +66,13 @@ async function persistLockdownState(state: LockdownState): Promise<void> {
 export async function getLockdownState(): Promise<LockdownState> {
   const redisClient = getRedisClient();
   if (!redisClient || !redisClient.isReady) {
-    return inMemoryLockdownState;
+    return getInMemoryState();
   }
 
   try {
     const cachedState = await redisClient.get(LOCKDOWN_REDIS_KEY);
     if (!cachedState) {
-      return inMemoryLockdownState;
+      return getInMemoryState();
     }
 
     const parsedState = normalizeLockdownState(JSON.parse(cachedState));
@@ -75,7 +83,7 @@ export async function getLockdownState(): Promise<LockdownState> {
       "[AppState] Failed to read lockdown state from Redis. Falling back to in-memory state:",
       error,
     );
-    return inMemoryLockdownState;
+    return getInMemoryState();
   }
 }
 

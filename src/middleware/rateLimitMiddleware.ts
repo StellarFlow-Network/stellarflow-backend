@@ -37,7 +37,7 @@ function normaliseIp(ip: string): string {
  * never blocks on a DB query in the hot path.
  */
 const WHITELIST_REFRESH_MS = 60_000; // 1 minute
-let whitelistedIpCache: Set<string> = new Set();
+let whitelistedIpCache: Set<string> | null = null;
 let lastWhitelistRefresh = 0;
 
 async function refreshWhitelistCache(): Promise<void> {
@@ -68,22 +68,22 @@ async function refreshWhitelistCache(): Promise<void> {
   }
 }
 
-// Kick off the first load immediately (non-blocking)
-void refreshWhitelistCache();
-
 /**
  * Returns true when the request IP is in the whitelist.
- * Triggers a background refresh if the cache is stale.
+ * Triggers a background refresh if the cache is stale or not yet loaded.
  */
 function isWhitelisted(req: Request): boolean {
   const now = Date.now();
-  if (now - lastWhitelistRefresh > WHITELIST_REFRESH_MS) {
+  if (
+    whitelistedIpCache === null ||
+    now - lastWhitelistRefresh > WHITELIST_REFRESH_MS
+  ) {
     // Refresh in background — don't await so the hot path stays synchronous
     void refreshWhitelistCache();
   }
 
   const clientIp = normaliseIp(resolveClientIp(req));
-  return whitelistedIpCache.has(clientIp);
+  return (whitelistedIpCache ?? new Set()).has(clientIp);
 }
 
 /**

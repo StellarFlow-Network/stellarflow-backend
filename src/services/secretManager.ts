@@ -1,11 +1,10 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import { logger } from "../utils/logger";
-import { signer } from "../signer";
 
 export type ReloadTrigger = "admin-endpoint" | "file-watcher" | "startup";
 
-// Module-level private state (singleton pattern matching appState.ts)
-let activeKey: string;
+// Module-level private state — lazily initialized on first use
+let activeKey: string | null = null;
 let reloadCount: number = 0;
 
 /**
@@ -24,21 +23,24 @@ function validateKey(candidate: string): void {
   }
 }
 
-// Initialize from environment at module load time
-const isKms = process.env.SIGNER_BACKEND === "kms";
-const initialKey =
-  process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
+function ensureKeyInitialized(): void {
+  if (activeKey !== null) return;
 
-if (!isKms) {
+  const isKms = process.env.SIGNER_BACKEND === "kms";
+  if (isKms) {
+    activeKey = "KMS_MANAGED";
+    return;
+  }
+
+  const initialKey =
+    process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
+
   if (!initialKey) {
     throw new Error("Stellar secret key not found in environment variables");
   }
 
-  // Validate the initial key before storing
   validateKey(initialKey);
   activeKey = initialKey;
-} else {
-  activeKey = "KMS_MANAGED";
 }
 
 /**
@@ -46,25 +48,23 @@ if (!isKms) {
  * Throws in KMS mode as the secret is not available.
  */
 export function getSecretKey(): string {
+  ensureKeyInitialized();
   if (process.env.SIGNER_BACKEND === "kms") {
     throw new Error("Secret key is not available in KMS mode");
   }
-  return activeKey;
+  return activeKey!;
 }
 
 /**
  * Returns the public key derived from the currently active signer.
  * Safe to log — never exposes the secret.
- * This is now synchronous for compatibility, but might be empty initially in KMS mode.
  */
 export function getPublicKey(): string {
-  // If in KMS mode, we return the public key from environment/config if available
-  // In a real scenario, this might need to be async, but for the current sync callers
-  // we use the process.env.STELLAR_PUBLIC_KEY
+  ensureKeyInitialized();
   if (process.env.SIGNER_BACKEND === "kms") {
     return process.env.STELLAR_PUBLIC_KEY || "KMS_MANAGED_KEY";
   }
-  return Keypair.fromSecret(activeKey).publicKey();
+  return Keypair.fromSecret(activeKey!).publicKey();
 }
 
 /**
@@ -86,7 +86,7 @@ export function updateSecretKey(
   if (process.env.SIGNER_BACKEND === "kms") {
     throw new Error("Secret key updates are disabled in KMS mode");
   }
-  
+
   try {
     validateKey(newKey);
 

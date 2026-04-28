@@ -14,7 +14,10 @@ import { disconnectRedis } from "./lib/redis";
 import { initSocket } from "./lib/socket";
 import { SorobanEventListener } from "./services/sorobanEventListener";
 import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
-import { GasBalanceMonitorService, getGasBalanceMonitorService } from "./services/gasBalanceMonitorService";
+import {
+  GasBalanceMonitorService,
+  getGasBalanceMonitorService,
+} from "./services/gasBalanceMonitorService";
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
@@ -27,6 +30,10 @@ import { initializeTracing } from "./config/tracingConfig";
 import { setupAxiosTracing } from "./lib/tracing";
 import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
 import { providerSecretRotationService } from "./services/providerSecretRotationService";
+import {
+  startMemoryMonitor,
+  stopMemoryMonitor,
+} from "./services/memoryMonitor";
 
 // Load environment variables
 dotenv.config();
@@ -220,16 +227,6 @@ app.get("/", (req, res) => {
       },
       stats: {
         volume: "/api/v1/stats/volume?date=YYYY-MM-DD",
-      },
-      history: {
-        assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
-      },
-      intelligence: {
-        hourlyVolatility: "/api/v1/intelligence/hourly-volatility",
-        priceChange: "/api/v1/intelligence/price-change/:currency",
-        staleCurrencies: "/api/v1/intelligence/stale",
-      },
-      stats: {
         relayers: "/api/stats/relayers",
       },
     },
@@ -292,6 +289,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     gasBalanceMonitorService?.stop();
     hourlyAverageService.stop();
     providerSecretRotationService.stop();
+    stopMemoryMonitor();
     stopConfigWatcher();
     stopEnvFileWatcher?.();
 
@@ -335,6 +333,9 @@ httpServer.listen(PORT, () => {
   );
   console.log(`🏥 Health check at http://localhost:${PORT}/health`);
   console.log(`🔌 Socket.io ready for dashboard connections`);
+
+  // Start memory monitor to trigger graceful restart at 85% heap usage
+  startMemoryMonitor();
 
   // Start Soroban event listener to track confirmed on-chain prices
   try {
