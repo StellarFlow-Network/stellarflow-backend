@@ -1,8 +1,8 @@
 import axios from "axios";
-import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout";
-import { withRetry } from "../../utils/retryUtil";
-import { createFetcherLogger } from "../../utils/logger";
-import { webhookReporter } from "../../utils/webhookReporter";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../utils/httpTimeout";
+import { withRetry } from "../utils/retryUtil";
+import { createFetcherLogger } from "../utils/logger";
+import { sendPriceAnomalyAlert } from "./notificationService";
 
 interface SanityCheckResult {
   currency: string;
@@ -225,28 +225,13 @@ export class SanityCheckService {
    */
   private async sendAlert(result: SanityCheckResult): Promise<void> {
     try {
-      const message = `🚨 **Price Sanity Check Alert**
-
-**Currency:** ${result.currency}
-**Oracle Price:** ${result.oraclePrice.toFixed(4)}
-**External Price (${result.source}):** ${result.externalPrice.toFixed(4)}
-**Deviation:** ${result.deviationPercent}% (Threshold: ${this.DEVIATION_THRESHOLD}%)
-**Difference:** ${result.deviation.toFixed(4)}
-
-The Oracle price differs significantly from the external source. Please review.`;
-
-      await webhookReporter.sendAlert({
-        title: `Price Sanity Check Failed - ${result.currency}`,
-        message,
-        severity: "warning",
-        metadata: {
-          currency: result.currency,
-          oraclePrice: result.oraclePrice,
-          externalPrice: result.externalPrice,
-          deviationPercent: result.deviationPercent,
-          source: result.source,
-          timestamp: result.timestamp.toISOString(),
-        },
+      await sendPriceAnomalyAlert({
+        currency: result.currency,
+        rate: result.oraclePrice,
+        expectedRate: result.externalPrice,
+        deviationPercent: result.deviationPercent,
+        source: result.source,
+        correlationId: `sanity_${result.currency}_${Date.now()}`
       });
     } catch (error) {
       this.logger.error(

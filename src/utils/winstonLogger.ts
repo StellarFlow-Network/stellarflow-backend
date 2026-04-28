@@ -34,4 +34,9 @@ const logger = createLogger({
   exitOnError: false,
 });
 
+// Add custom methods for fetcher-specific logging
+(logger as any).fetcherError = (message: string, meta?: any) => {
+  logger.error(`[FETCHER_ERROR] ${message}`, meta);
+};
+
 export default logger;

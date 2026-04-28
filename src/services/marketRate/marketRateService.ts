@@ -166,6 +166,20 @@ export class MarketRateService {
         }),
       };
 
+      // Perform Anomaly Detection
+      const anomalyCheck = await anomalyDetectionService.checkAnomaly(normalizedCurrency, rate.rate);
+      if (anomalyCheck.isAnomalous) {
+        console.warn(`[MarketRateService] Anomaly detected for ${normalizedCurrency}: Z-Score ${anomalyCheck.zScore.toFixed(2)}σ`);
+        await webhookService.sendPriorityAlert({
+          currency: normalizedCurrency,
+          rate: rate.rate,
+          zScore: anomalyCheck.zScore,
+          mean: anomalyCheck.mean,
+          stdDev: anomalyCheck.stdDev,
+          timestamp: rate.timestamp,
+        });
+      }
+
       if (!reviewAssessment.manualReviewRequired) {
         try {
           const memoId = this.stellarService.generateMemoId(normalizedCurrency);

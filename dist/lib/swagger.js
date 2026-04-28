@@ -79,6 +79,66 @@ const options = {
                         },
                     },
                 },
+                HourlyVolatilitySnapshotItem: {
+                    type: "object",
+                    properties: {
+                        currency: {
+                            type: "string",
+                            example: "NGN",
+                        },
+                        standardDeviation: {
+                            type: "number",
+                            example: 12.3456,
+                            description: "Population standard deviation of rates recorded in the last 60 minutes",
+                        },
+                        sampleCount: {
+                            type: "integer",
+                            example: 8,
+                        },
+                        meanRate: {
+                            type: "number",
+                            nullable: true,
+                            example: 1825.42,
+                        },
+                        latestRate: {
+                            type: "number",
+                            nullable: true,
+                            example: 1830.1,
+                        },
+                        latestTimestamp: {
+                            type: "string",
+                            format: "date-time",
+                            nullable: true,
+                        },
+                    },
+                },
+                HourlyVolatilitySnapshot: {
+                    type: "object",
+                    properties: {
+                        windowMinutes: {
+                            type: "integer",
+                            example: 60,
+                        },
+                        windowStart: {
+                            type: "string",
+                            format: "date-time",
+                        },
+                        windowEnd: {
+                            type: "string",
+                            format: "date-time",
+                        },
+                        generatedAt: {
+                            type: "string",
+                            format: "date-time",
+                        },
+                        currencies: {
+                            type: "array",
+                            items: {
+                                $ref: "#/components/schemas/HourlyVolatilitySnapshotItem",
+                            },
+                        },
+                    },
+                },
             },
         },
         tags: [
@@ -93,6 +153,10 @@ const options = {
             {
                 name: "History",
                 description: "Price history endpoints",
+            },
+            {
+                name: "Intelligence",
+                description: "Derived market intelligence endpoints",
             },
         ],
     },

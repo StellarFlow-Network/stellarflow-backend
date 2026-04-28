@@ -3,6 +3,7 @@ import { StellarService } from "./stellarService";
 import { priceReviewService } from "./priceReviewService";
 import prisma from "../lib/prisma";
 import dotenv from "dotenv";
+import { isLockdownEnabled } from "../state/appState";
 dotenv.config();
 /**
  * MultiSigSubmissionService
@@ -49,12 +50,31 @@ export class MultiSigSubmissionService {
         this.isRunning = false;
         console.info("[MultiSigSubmissionService] Stopped");
     }
+    restart(newIntervalMs) {
+        if (!this.isRunning)
+            return;
+        if (newIntervalMs === this.pollIntervalMs)
+            return;
+        this.pollIntervalMs = newIntervalMs;
+        if (this.pollTimer) {
+            clearInterval(this.pollTimer);
+        }
+        this.pollTimer = setInterval(() => {
+            this.checkAndSubmitApprovedPrices().catch((err) => {
+                console.error("[MultiSigSubmissionService] Polling error:", err);
+            });
+        }, this.pollIntervalMs);
+        console.info(`[MultiSigSubmissionService] Poll interval updated to ${this.pollIntervalMs}ms`);
+    }
     /**
      * Check for approved multi-sig prices and submit them to Stellar.
      * This is the main polling function.
      */
     async checkAndSubmitApprovedPrices() {
         try {
+            if (await isLockdownEnabled()) {
+                return;
+            }
             // Find all approved multi-sig prices that haven't been submitted yet
             const approvedPrices = await prisma.multiSigPrice.findMany({
                 where: {

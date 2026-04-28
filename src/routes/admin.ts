@@ -1,10 +1,15 @@
 import { Router } from "express";
+import fs from "fs";
+import path from "path";
+import Joi from "joi";
 import {
   buildMonthlySummary,
   renderHTML,
   renderPDF,
 } from "../services/reportService";
 import { updateSecretKey } from "../services/secretManager";
+import { appConfig } from "../config/configWatcher";
+import { refreshWhitelistCache } from "../middleware/rateLimitMiddleware";
 
 const router = Router();
 
@@ -164,6 +169,170 @@ router.post("/reload-secret", async (req, res) => {
     return res.status(500).json({
       success: false,
       error: "Failed to reload secret key",
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/admin/relayer-registry:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get all relayer registry entries
+ *     description: Retrieve all KYC information for authorized data providers (Admin only)
+ *     responses:
+ *       '200':
+ *         description: Registry entries retrieved successfully
+ *       '500':
+ *         description: Internal server error
+ */
+router.get("/relayer-registry", getRelayerRegistry);
+
+/**
+ * @swagger
+ * /api/admin/relayer-registry/{relayerId}:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get relayer registry entry by relayer ID
+ *     description: Retrieve KYC information for a specific relayer (Admin only)
+ *     parameters:
+ *       - in: path
+ *         name: relayerId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The relayer ID
+ *     responses:
+ *       '200':
+ *         description: Registry entry retrieved successfully
+ *       '400':
+ *         description: Invalid relayer ID
+ *       '404':
+ *         description: Registry entry not found
+ *       '500':
+ *         description: Internal server error
+ */
+router.get("/relayer-registry/:relayerId", getRelayerRegistryById);
+
+/**
+ * @swagger
+ * /api/admin/relayer-registry:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Create or update relayer registry entry
+ *     description: Create or update KYC information for a relayer (Admin only)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               windowMs:
+ *                 type: integer
+ *                 description: Rolling window in milliseconds (1000–86400000)
+ *                 example: 900000
+ *               maxRequests:
+ *                 type: integer
+ *                 description: Max requests per IP per window (1–100000)
+ *                 example: 100
+ *               enabled:
+ *                 type: boolean
+ *                 description: Toggle global throttling on/off
+ *                 example: true
+ *     responses:
+ *       '200':
+ *         description: Config updated successfully
+ *       '400':
+ *         description: Validation error
+ *       '500':
+ *         description: Failed to persist config
+ */
+router.put("/rate-limit", async (req, res) => {
+  const { error, value } = rateLimitUpdateSchema.validate(req.body, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
+
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: "Validation failed",
+      details: error.details.map((d) => d.message),
+    });
+  }
+
+  // Apply to in-memory config immediately (takes effect on next request)
+  Object.assign(appConfig.rateLimit, value);
+
+  // Persist to config.json so the change survives a restart
+  try {
+    let fileConfig: Record<string, unknown> = {};
+    try {
+      fileConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Record<
+        string,
+        unknown
+      >;
+    } catch {
+      // file may not exist yet — start fresh
+    }
+
+    const existing = (fileConfig.rateLimit as Record<string, unknown>) ?? {};
+    fileConfig.rateLimit = { ...existing, ...value };
+    fs.writeFileSync(
+      CONFIG_PATH,
+      JSON.stringify(fileConfig, null, 2) + "\n",
+      "utf-8",
+    );
+  } catch (err) {
+    console.error("[AdminRateLimit] Failed to persist config.json:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Rate-limit updated in memory but failed to persist to disk",
+    });
+  }
+
+  console.info(
+    "[AdminRateLimit] Rate-limit config updated:",
+    appConfig.rateLimit,
+  );
+
+  return res.json({
+    success: true,
+    message: "Rate-limit configuration updated",
+    rateLimit: appConfig.rateLimit,
+  });
+});
+
+/**
+ * @swagger
+ * /api/admin/rate-limit/whitelist/refresh:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Force-refresh the IP whitelist cache
+ *     description: >
+ *       Immediately reloads whitelisted IPs from the Relayer table.
+ *       Useful after adding or removing IPs from a relayer record.
+ *     responses:
+ *       '200':
+ *         description: Whitelist refreshed
+ */
+router.post("/rate-limit/whitelist/refresh", async (_req, res) => {
+  try {
+    await refreshWhitelistCache();
+    return res.json({
+      success: true,
+      message: "IP whitelist cache refreshed",
+    });
+  } catch (err) {
+    console.error("[AdminRateLimit] Whitelist refresh failed:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to refresh whitelist cache",
     });
   }
 });

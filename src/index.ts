@@ -4,6 +4,10 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import { Horizon } from "@stellar/stellar-sdk";
+import marketRatesRouter from "./routes/marketRates";
+import historyRouter from "./routes/history";
+import priceUpdatesRouter from "./routes/priceUpdates";
+import statsRouter from "./routes/stats";
 import app from "./app";
 import prisma from "./lib/prisma";
 import { disconnectRedis } from "./lib/redis";
@@ -12,18 +16,37 @@ import { SorobanEventListener } from "./services/sorobanEventListener";
 import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 import logger from "./utils/logger";
+import { GasBalanceMonitorService, getGasBalanceMonitorService } from "./services/gasBalanceMonitorService";
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
+import { getRegionalHealthService } from "./services/regionalHealthService";
 import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
 import { watchConfig } from "./config/configWatcher";
+import { startEnvFileWatcher } from "./config/envFileWatcher";
 import { validateDatabaseSchema } from "./utils/dbValidator";
+import { initializeTracing } from "./config/tracingConfig";
+import { setupAxiosTracing } from "./lib/tracing";
+import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
+import { providerSecretRotationService } from "./services/providerSecretRotationService";
 
 // Load environment variables
 dotenv.config();
 
+// Initialize tracing before other services
+initializeTracing();
+
+// Setup axios tracing for HTTP requests
+setupAxiosTracing();
+
+// Register tracing shutdown handlers
+registerTracingShutdownHandlers();
+
 // Enable log masking to prevent sensitive data leaks
 enableGlobalLogMasking();
+
+// Start regional health monitoring before we accept requests.
+await getRegionalHealthService().startMonitoring();
 
 // [OPS] Implement "Environment Variable" Check on Start
 validateEnv();
@@ -250,6 +273,14 @@ app.get("/", (req, res) => {
       history: {
         assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
       },
+      intelligence: {
+        hourlyVolatility: "/api/v1/intelligence/hourly-volatility",
+        priceChange: "/api/v1/intelligence/price-change/:currency",
+        staleCurrencies: "/api/v1/intelligence/stale",
+      },
+      stats: {
+        relayers: "/api/stats/relayers",
+      },
     },
   });
 });
@@ -270,6 +301,11 @@ app.use(
 const httpServer = createServer(app);
 initSocket(httpServer);
 let sorobanEventListener: SorobanEventListener | null = null;
+
+// FIX 1: Typed as nullable — constructor is not called at module level,
+// so a missing secret env var won't crash the process before the server starts.
+let gasBalanceMonitorService: GasBalanceMonitorService | null = null;
+
 let isShuttingDown = false;
 let stopEnvFileWatcher: (() => void) | undefined;
 const stopConfigWatcher = watchConfig((cfg) => {
@@ -313,7 +349,10 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
   try {
     sorobanEventListener?.stop();
     multiSigSubmissionService.stop();
+    // FIX 2: Optional chaining — safe to call even if service never started
+    gasBalanceMonitorService?.stop();
     hourlyAverageService.stop();
+    providerSecretRotationService.stop();
     stopConfigWatcher();
     stopEnvFileWatcher?.();
 
@@ -397,6 +436,22 @@ httpServer.listen(PORT, () => {
   } catch (err) {
     console.warn(
       "Hourly average service not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // FIX 3: getGasBalanceMonitorService() moved inside the listen callback so
+  // the constructor (and Keypair.fromSecret) only runs after the server is up.
+  // A missing secret env var now warns gracefully instead of crashing the process.
+  try {
+    gasBalanceMonitorService = getGasBalanceMonitorService();
+    gasBalanceMonitorService.start().catch((err: Error) => {
+      console.error("Failed to start gas balance monitor service:", err);
+    });
+    console.log(`⛽ Gas balance monitor service started`);
+  } catch (err) {
+    console.warn(
+      "Gas balance monitor service not started:",
       err instanceof Error ? err.message : err,
     );
   }

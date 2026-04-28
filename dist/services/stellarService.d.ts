@@ -1,12 +1,16 @@
 import { Transaction, Horizon } from "@stellar/stellar-sdk";
 export declare class StellarService {
     private server;
-    private keypair;
     private network;
     private readonly MAX_RETRIES;
     private readonly FEE_INCREMENT_PERCENTAGE;
     private readonly RETRY_DELAY_MS;
     constructor();
+    /**
+     * Returns a Keypair derived from the currently active secret key.
+     * Called at sign time so key rotations are reflected immediately.
+     */
+    private getKeypair;
     /**
      * Fetches the recommended transaction fee from Horizon fee_stats.
      * Uses p50 (median) of recent fees to avoid overpaying while ensuring inclusion.

@@ -1,10 +1,9 @@
 import prisma from "../lib/prisma";
-import { Keypair } from "@stellar/stellar-sdk";
+import { signer } from "../signer";
 import dotenv from "dotenv";
 import logger from "../utils/logger";
+import axios from "axios";
 import { assertSigningAllowed } from "../state/appState";
-
-/* global fetch */
 
 dotenv.config();
 
@@ -41,25 +40,14 @@ type RemoteSignatureResponse = {
 };
 
 export class MultiSigService {
-  private readonly localSignerPublicKey: string;
-  private readonly localSignerSecret: string;
+  private localSignerPublicKey: string = "";
   private readonly signerName: string;
   private readonly SIGNATURE_EXPIRY_MS = 60 * 60 * 1000;
   private readonly REQUIRED_SIGNATURES: number;
 
   constructor() {
-    const secret =
-      process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
-    if (!secret) {
-      throw new Error(
-        "ORACLE_SECRET_KEY or SOROBAN_ADMIN_SECRET not found in environment variables",
-      );
-    }
-
-    this.localSignerSecret = secret;
-    this.localSignerPublicKey = Keypair.fromSecret(secret).publicKey();
     this.signerName = process.env.ORACLE_SIGNER_NAME || "oracle-server";
-
+    
     const requiredSignatures = Number.parseInt(
       process.env.MULTI_SIG_REQUIRED_COUNT || "2",
       10,
@@ -68,6 +56,12 @@ export class MultiSigService {
       Number.isFinite(requiredSignatures) && requiredSignatures > 0
         ? requiredSignatures
         : 2;
+        
+    this.initializeSigner();
+  }
+
+  private async initializeSigner() {
+    this.localSignerPublicKey = await signer.getPublicKey();
   }
 
   /**
@@ -147,8 +141,7 @@ export class MultiSigService {
       multiSigPrice.rate.toString(),
       multiSigPrice.source,
     );
-    const signature = Keypair.fromSecret(this.localSignerSecret)
-      .sign(Buffer.from(signatureMessage, "utf-8"))
+    const signature = (await signer.sign(Buffer.from(signatureMessage, "utf-8")))
       .toString("hex");
 
     let createdSignature = true;
@@ -223,24 +216,19 @@ export class MultiSigService {
         signerPublicKey: this.localSignerPublicKey,
       };
 
-      const response = await fetch(
+      const response = await axios.post(
         `${remoteServerUrl}/api/v1/price-updates/sign`,
+        payload,
         {
-          method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${process.env.MULTI_SIG_AUTH_TOKEN || ""}`,
           },
-          body: JSON.stringify(payload),
+          timeout: 10000, // 10 second timeout
         },
       );
 
-      if (!response.ok) {
-        const error = await response.text().catch(() => response.statusText);
-        return { success: false, error: `Remote server error: ${error}` };
-      }
-
-      const result = (await response.json()) as RemoteSignatureResponse;
+      const result = response.data as RemoteSignatureResponse;
       if (result.success === false) {
         return {
           success: false,
