@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import axios from "axios";
 import { NGNRateFetcher } from "../src/services/marketRate/ngnFetcher";
-import { NGN_PROVIDER_WEIGHTS } from "../src/config/providerWeights.js";
 
 async function run() {
   const originalGet = axios.get;
@@ -67,19 +66,13 @@ async function run() {
     }) as typeof axios.get;
 
     const rate = await fetcher.fetchRate();
-    const expectedRate =
-      (300 * NGN_PROVIDER_WEIGHTS.vtpassCoinGeckoUsd +
-        300 * NGN_PROVIDER_WEIGHTS.coinGeckoDirectNgn +
-        1500 * NGN_PROVIDER_WEIGHTS.coinGeckoExchangeRateUsdNgn) /
-      (NGN_PROVIDER_WEIGHTS.vtpassCoinGeckoUsd +
-        NGN_PROVIDER_WEIGHTS.coinGeckoDirectNgn +
-        NGN_PROVIDER_WEIGHTS.coinGeckoExchangeRateUsdNgn);
+    const expectedRate = 300;
 
     assert.equal(rate.currency, "NGN");
     assert.equal(rate.rate, expectedRate);
     assert.equal(
       rate.source,
-      "Weighted average of 3 sources (outliers filtered)",
+      "Median of 3 sources",
     );
   } finally {
     axios.get = originalGet;
