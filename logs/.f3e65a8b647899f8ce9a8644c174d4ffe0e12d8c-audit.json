@@ -1,0 +1,15 @@
+{
+  "keep": {
+    "days": false,
+    "amount": 10
+  },
+  "auditLog": "/home/semicolon/Documents/Drip/stellarflow-backend/logs/.f3e65a8b647899f8ce9a8644c174d4ffe0e12d8c-audit.json",
+  "files": [
+    {
+      "date": 1777446814330,
+      "name": "/home/semicolon/Documents/Drip/stellarflow-backend/logs/application-2026-04-29.log",
+      "hash": "e82edb68faf97f191a2b9046c9c6856e9ac20f0d04b7f141c1c71a3ed7d87a1c"
+    }
+  ],
+  "hashType": "sha256"
+}
