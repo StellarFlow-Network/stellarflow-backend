@@ -296,3 +296,10 @@ See [ROADMAP.md](./ROADMAP.md) for the full product roadmap and milestone struct
 - **v1.0** — Mainnet Launch (Q4 2026)
 
 All open issues are triaged and assigned to a milestone. Contributors can see what is planned, in progress, or blocked.
+
+## 🤝 Contributing
+Fork the repository and clone it to your local machine
+Create a new branch for your changes
+Make and test your updates following the project guidelines
+Commit and push your changes to your fork
+Open a Pull Request with a clear description
