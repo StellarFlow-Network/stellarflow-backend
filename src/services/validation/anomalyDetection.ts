@@ -1,4 +1,4 @@
-import prisma from "../lib/prisma";
+import prisma from "../../lib/prisma";
 
 export interface AnomalyCheckResult {
   isAnomalous: boolean;
@@ -71,3 +71,4 @@ export class AnomalyDetectionService {
 }
 
 export const anomalyDetectionService = new AnomalyDetectionService();
+

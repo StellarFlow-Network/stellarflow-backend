@@ -1,6 +1,6 @@
 import axios from "axios";
-import { OUTGOING_HTTP_TIMEOUT_MS } from "../utils/httpTimeout.js";
-import { withRetry } from "../utils/retryUtil.js";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout.js";
+import { withRetry } from "../../utils/retryUtil.js";
 
 type MarkdownText = {
   type: "mrkdwn";
@@ -498,3 +498,4 @@ export function getWebhookService(): WebhookService {
 }
 
 export const webhookService = getWebhookService();
+

@@ -1,9 +1,9 @@
 import { multiSigService } from "./multiSigService";
-import { StellarService } from "./stellarService";
-import { priceReviewService } from "./priceReviewService";
-import prisma from "../lib/prisma";
+import { StellarService } from "../data-ingestion/stellarService";
+import { priceReviewService } from "../validation/priceReviewService";
+import prisma from "../../lib/prisma";
 import dotenv from "dotenv";
-import { isLockdownEnabled } from "../state/appState";
+import { isLockdownEnabled } from "../../state/appState";
 
 dotenv.config();
 
@@ -218,3 +218,5 @@ export class MultiSigSubmissionService {
 
 // Export singleton instance
 export const multiSigSubmissionService = new MultiSigSubmissionService();
+
+

@@ -13,7 +13,7 @@ import {
   listPendingApplications,
   listAllApplications,
   processAdminDecision,
-} from "../services/issuerOnboardingService.js";
+} from "../services/broadcast/issuerOnboardingService.js";
 
 const router = express.Router();
 
@@ -111,3 +111,4 @@ router.post("/:id/decision", async (req: Request, res: Response): Promise<void> 
 });
 
 export default router;
+

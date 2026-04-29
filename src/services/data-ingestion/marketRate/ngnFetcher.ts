@@ -1,5 +1,5 @@
 import axios from "axios";
-import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout.js";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../../utils/httpTimeout.js";
 import {
   MarketRateFetcher,
   MarketRate,
@@ -7,8 +7,8 @@ import {
   calculateWeightedAverage,
   filterOutliers,
 } from "./types";
-import { withRetry } from "../../utils/retryUtil.js";
-import { createFetcherLogger } from "../../utils/logger.js";
+import { withRetry } from "../../../utils/retryUtil.js";
+import { createFetcherLogger } from "../../../utils/logger.js";
 import { MedianPriceService } from "./medianPriceService.js";
 
 type CoinGeckoPriceResponse = {
@@ -361,3 +361,5 @@ export class NGNRateFetcher implements MarketRateFetcher {
     }
   }
 }
+
+

@@ -1,8 +1,8 @@
 import { Request, Response } from "express";
-import { signatureValidationService, AdminSignature, ConsensusRequest } from "../services/signatureValidationService";
+import { signatureValidationService, AdminSignature, ConsensusRequest } from "../services/validation/signatureValidationService";
 import { Keypair } from "@stellar/stellar-sdk";
 import { TracingService } from "../services/tracingService";
-import { sendKillSwitchAlert, sendSystemFailureAlert } from "../services/notificationService";
+import { sendKillSwitchAlert, sendSystemFailureAlert } from "../services/broadcast/notificationService";
 
 export interface HaltActionData {
   reason: string;
@@ -498,3 +498,4 @@ export class SystemControlController {
 
 // Export singleton instance
 export const systemControlController = new SystemControlController();
+

@@ -12,16 +12,16 @@ import app from "./app";
 import prisma from "./lib/prisma";
 import { disconnectRedis } from "./lib/redis";
 import { initSocket } from "./lib/socket";
-import { SorobanEventListener } from "./services/sorobanEventListener";
-import { multiSigSubmissionService } from "./services/multiSigSubmissionService";
+import { SorobanEventListener } from "./services/data-ingestion/sorobanEventListener";
+import { multiSigSubmissionService } from "./services/broadcast/multiSigSubmissionService";
 import {
   GasBalanceMonitorService,
   getGasBalanceMonitorService,
-} from "./services/gasBalanceMonitorService";
+} from "./services/data-ingestion/gasBalanceMonitorService";
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
-import { hourlyAverageService } from "./services/hourlyAverageService";
-import { getRegionalHealthService } from "./services/regionalHealthService";
+import { hourlyAverageService } from "./services/data-ingestion/hourlyAverageService";
+import { getRegionalHealthService } from "./services/broadcast/regionalHealthService";
 import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
 import { watchConfig } from "./config/configWatcher";
 import { startEnvFileWatcher } from "./config/envFileWatcher";
@@ -29,8 +29,8 @@ import { validateDatabaseSchema } from "./utils/dbValidator";
 import { initializeTracing } from "./config/tracingConfig";
 import { setupAxiosTracing } from "./lib/tracing";
 import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
-import { providerSecretRotationService } from "./services/providerSecretRotationService";
-import { priceAggregatorService } from "./services/priceAggregatorService";
+import { providerSecretRotationService } from "./services/data-ingestion/providerSecretRotationService";
+import { priceAggregatorService } from "./services/data-ingestion/priceAggregatorService";
 
 // Load environment variables
 dotenv.config();
@@ -413,3 +413,4 @@ httpServer.listen(PORT, () => {
 });
 
 export default app;
+

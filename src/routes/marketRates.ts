@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { getRate, getAllRates } from "../controllers/marketRatesController";
-import { MarketRateService } from "../services/marketRate";
+import { MarketRateService } from "../services/data-ingestion/marketRate";
 import { cacheMiddleware, invalidateCache } from "../cache/CacheMiddleware";
 import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 import { isLockdownError } from "../state/appState";
@@ -254,3 +254,4 @@ router.post("/cache/clear", (req, res) => {
 });
 
 export default router;
+

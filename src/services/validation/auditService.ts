@@ -5,8 +5,8 @@
 
 import { Keypair } from "@stellar/stellar-sdk";
 import * as crypto from "crypto";
-import { generateAuditExportCSV, ExportOptions, AuditRecord, ExportMetadata } from "../utils/exportUtils";
-import { signer } from "../signer";
+import { generateAuditExportCSV, ExportOptions, AuditRecord, ExportMetadata } from "../../utils/exportUtils";
+import { signer } from "../../signer";
 
 export interface CertifiedAuditData {
   records: AuditRecord[];
@@ -301,3 +301,4 @@ export class AuditService {
     return this.signerPublicKey;
   }
 }
+

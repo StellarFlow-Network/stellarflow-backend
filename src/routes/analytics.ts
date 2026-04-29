@@ -10,7 +10,7 @@
 
 import { Router, Request, Response } from "express";
 import { getOhlcCandles } from "../controllers/analyticsController.js";
-import { priceAggregatorService } from "../services/priceAggregatorService.js";
+import { priceAggregatorService } from "../services/data-ingestion/priceAggregatorService.js";
 
 const router = Router();
 
@@ -79,3 +79,4 @@ router.get("/status", (_req: Request, res: Response) => {
 });
 
 export default router;
+

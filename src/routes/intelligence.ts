@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { cacheMiddleware } from "../cache/CacheMiddleware";
 import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
-import { intelligenceService } from "../services/intelligenceService";
+import { intelligenceService } from "../services/data-ingestion/intelligenceService";
 
 const router = Router();
 
@@ -147,3 +147,4 @@ router.get("/stale", async (req, res) => {
 });
 
 export default router;
+

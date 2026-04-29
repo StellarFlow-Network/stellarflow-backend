@@ -9,22 +9,22 @@ import { KESRateFetcher } from "./kesFetcher";
 import { GHSRateFetcher } from "./ghsFetcher";
 import { NGNRateFetcher } from "./ngnFetcher";
 import { StellarService } from "../stellarService";
-import { multiSigService } from "../multiSigService";
-import { getIO, broadcastToSessions } from "../../lib/socket";
-import prisma from "../../lib/prisma";
-import { getRedisClient } from "../../lib/redis";
+import { multiSigService } from "../../broadcast/multiSigService";
+import { getIO, broadcastToSessions } from "../../../lib/socket";
+import prisma from "../../../lib/prisma";
+import { getRedisClient } from "../../../lib/redis";
 import type { RedisClientType } from "redis";
 import dotenv from "dotenv";
-import { normalizeDateToUTC } from "../../utils/timeUtils";
-import { sanityCheckService } from "../sanityCheckService";
-import { appConfig } from "../../config/configWatcher";
-import { isLockdownEnabled } from "../../state/appState";
+import { normalizeDateToUTC } from "../../../utils/timeUtils";
+import { sanityCheckService } from "../../validation/sanityCheckService";
+import { appConfig } from "../../../config/configWatcher";
+import { isLockdownEnabled } from "../../../state/appState";
 
 dotenv.config();
 
-import { priceReviewService } from "../priceReviewService";
-import { webhookService } from "../webhook";
-import { anomalyDetectionService } from "../anomalyDetection";
+import { priceReviewService } from "../../validation/priceReviewService";
+import { webhookService } from "../../broadcast/webhook";
+import { anomalyDetectionService } from "../../validation/anomalyDetection";
 
 export class MarketRateService {
   private fetchers: Map<string, MarketRateFetcher> = new Map();
@@ -697,3 +697,7 @@ export class MarketRateService {
     });
   }
 }
+
+
+
+

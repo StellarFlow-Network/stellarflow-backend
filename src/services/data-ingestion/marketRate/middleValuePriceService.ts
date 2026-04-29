@@ -1,8 +1,8 @@
 import axios from "axios";
-import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout.js";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../../utils/httpTimeout.js";
 import { MarketRate } from "./types.js";
-import { withRetry } from "../../utils/retryUtil.js";
-import { createFetcherLogger } from "../../utils/logger.js";
+import { withRetry } from "../../../utils/retryUtil.js";
+import { createFetcherLogger } from "../../../utils/logger.js";
 
 /**
  * PriceSourceResult
@@ -271,3 +271,5 @@ export class MiddleValuePriceService {
     };
   }
 }
+
+

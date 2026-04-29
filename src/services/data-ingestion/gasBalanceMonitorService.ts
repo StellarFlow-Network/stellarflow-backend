@@ -1,7 +1,7 @@
 import { Keypair, Horizon } from "@stellar/stellar-sdk";
 import { promises as fs } from "fs";
 import dotenv from "dotenv";
-import { WebhookService } from "./webhook";
+import { WebhookService } from "../broadcast/webhook";
 
 dotenv.config();
 
@@ -256,3 +256,4 @@ export function getGasBalanceMonitorService(): GasBalanceMonitorService {
     }
     return _instance;
 }
+

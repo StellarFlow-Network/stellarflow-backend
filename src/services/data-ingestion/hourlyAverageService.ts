@@ -1,4 +1,4 @@
-import prisma from "../lib/prisma";
+import prisma from "../../lib/prisma";
 
 /**
  * HourlyAverageService
@@ -166,3 +166,4 @@ export class HourlyAverageService {
 
 // Export singleton instance
 export const hourlyAverageService = new HourlyAverageService();
+

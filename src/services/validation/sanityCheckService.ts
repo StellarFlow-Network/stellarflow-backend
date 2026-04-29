@@ -1,8 +1,8 @@
 import axios from "axios";
-import { OUTGOING_HTTP_TIMEOUT_MS } from "../utils/httpTimeout";
-import { withRetry } from "../utils/retryUtil";
-import { createFetcherLogger } from "../utils/logger";
-import { sendPriceAnomalyAlert } from "./notificationService";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout";
+import { withRetry } from "../../utils/retryUtil";
+import { createFetcherLogger } from "../../utils/logger";
+import { sendPriceAnomalyAlert } from "../broadcast/notificationService";
 
 interface SanityCheckResult {
   currency: string;
@@ -269,3 +269,5 @@ export class SanityCheckService {
 }
 
 export const sanityCheckService = new SanityCheckService();
+
+

@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
-import { MarketRateService } from "../services/marketRate/marketRateService";
-import { DerivedAssetService } from "../services/derivedAssetService";
+import { MarketRateService } from "../services/data-ingestion/marketRate/marketRateService";
+import { DerivedAssetService } from "../services/data-ingestion/derivedAssetService";
 
 const marketRateService = new MarketRateService();
 const derivedAssetService = new DerivedAssetService(marketRateService);
@@ -64,3 +64,4 @@ export const getNGNGHSRate = async (req: Request, res: Response) => {
     });
   }
 };
+

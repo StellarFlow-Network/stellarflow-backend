@@ -1,6 +1,6 @@
 import { MarketRateService } from "./marketRate/marketRateService";
 import { FetcherResponse, MarketRate } from "./marketRate/types";
-import { normalizeDateToUTC } from "../utils/timeUtils";
+import { normalizeDateToUTC } from "../../utils/timeUtils";
 
 export interface DerivedRate extends MarketRate {
   baseCurrency: string;
@@ -111,3 +111,4 @@ export const createDerivedAssetService = (
 ) => {
   return new DerivedAssetService(marketRateService);
 };
+

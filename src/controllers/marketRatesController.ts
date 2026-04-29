@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { MarketRateService } from "../services/marketRate";
+import { MarketRateService } from "../services/data-ingestion/marketRate";
 
 const marketRateService = new MarketRateService();
 
@@ -49,3 +49,4 @@ export const getAllRates = async (req: Request, res: Response) => {
     });
   }
 };
+

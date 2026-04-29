@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express";
-import { multiSigService, SignaturePayload } from "../services/multiSigService";
+import { multiSigService, SignaturePayload } from "../services/broadcast/multiSigService";
 import { isLockdownError } from "../state/appState";
 import {
   sanitizeMultiSigRequest,
@@ -371,3 +371,4 @@ router.get("/multi-sig/signer-info", async (req: Request, res: Response) => {
 });
 
 export default router;
+

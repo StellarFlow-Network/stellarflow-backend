@@ -1,4 +1,4 @@
-import prisma from "../lib/prisma";
+import prisma from "../../lib/prisma";
 
 export class ReputationService {
   async recordSuccess(
@@ -180,3 +180,4 @@ export class ReputationService {
 }
 
 export const reputationService = new ReputationService();
+

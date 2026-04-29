@@ -9,7 +9,7 @@ import {
   logLoginSuccess,
   logLoginFailed,
   logLogout,
-} from "../services/userAuditService.js";
+} from "../services/validation/userAuditService.js";
 import {
   bruteForceGuard,
   recordFailedAttempt,

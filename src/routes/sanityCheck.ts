@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { sanityCheckService } from "../services/sanityCheckService";
+import { sanityCheckService } from "../services/validation/sanityCheckService";
 import prisma from "../lib/prisma";
 
 const router = Router();
@@ -157,3 +157,4 @@ router.get("/threshold", (req, res) => {
 });
 
 export default router;
+

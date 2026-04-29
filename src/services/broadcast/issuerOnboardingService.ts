@@ -9,8 +9,8 @@
  *   4. Applicant is notified of the decision
  */
 
-import prisma from "../lib/prisma.js";
-import { logger } from "../utils/logger.js";
+import prisma from "../../lib/prisma.js";
+import { logger } from "../../utils/logger.js";
 
 export interface IssuerApplicationInput {
   name: string;
@@ -150,3 +150,4 @@ async function addToContractAllowlist(requestId: number, walletAddress: string):
     });
   }
 }
+

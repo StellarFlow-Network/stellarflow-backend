@@ -1,11 +1,11 @@
-import prisma from "../lib/prisma";
-import type { MarketRate } from "./marketRate/types";
-import { normalizeDateToUTC } from "../utils/timeUtils";
+import prisma from "../../lib/prisma";
+import type { MarketRate } from "../data-ingestion/marketRate/types";
+import { normalizeDateToUTC } from "../../utils/timeUtils";
 import {
   evaluatePriceMovement,
   PRICE_REVIEW_WINDOW_MS,
 } from "./priceProtection";
-import { webhookService } from "./webhook";
+import { webhookService } from "../broadcast/webhook";
 
 export const REVIEWABLE_CURRENCIES = new Set(["NGN", "KES", "GHS"]);
 
@@ -387,3 +387,5 @@ SELECT *
 }
 
 export const priceReviewService = new PriceReviewService();
+
+

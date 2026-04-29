@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { getRegionalHealthService } from "../services/regionalHealthService";
+import { getRegionalHealthService } from "../services/broadcast/regionalHealthService";
 
 type FailoverRegion = "PRIMARY" | "SECONDARY";
 
@@ -72,3 +72,4 @@ export class SystemFailoverController {
 }
 
 export const systemFailoverController = new SystemFailoverController();
+

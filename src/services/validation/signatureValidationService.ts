@@ -1,4 +1,4 @@
-import prisma from "../lib/prisma";
+import prisma from "../../lib/prisma";
 import { Keypair } from "@stellar/stellar-sdk";
 import * as crypto from "crypto";
 import { Request } from "express";
@@ -565,3 +565,4 @@ export class SignatureValidationService {
 
 // Export singleton instance
 export const signatureValidationService = new SignatureValidationService();
+

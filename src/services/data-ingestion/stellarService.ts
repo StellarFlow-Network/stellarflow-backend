@@ -10,10 +10,10 @@ import {
   xdr,
   Account,
 } from "@stellar/stellar-sdk";
-import stellarProvider from "../lib/stellarProvider";
-import { sequenceManager } from "./sequence-manager";
-import { assertSigningAllowed } from "../state/appState";
-import { signer } from "../signer";
+import stellarProvider from "../../lib/stellarProvider";
+import { sequenceManager } from "../sequence-manager";
+import { assertSigningAllowed } from "../../state/appState";
+import { signer } from "../../signer";
 
 dotenv.config();
 
@@ -334,3 +334,4 @@ export class StellarService {
     return id.substring(0, 28);
   }
 }
+

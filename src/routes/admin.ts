@@ -6,7 +6,7 @@ import {
   buildMonthlySummary,
   renderHTML,
   renderPDF,
-} from "../services/reportService";
+} from "../services/broadcast/reportService";
 import { updateSecretKey } from "../services/secretManager";
 import { appConfig } from "../config/configWatcher";
 import { refreshWhitelistCache } from "../middleware/rateLimitMiddleware";
@@ -338,3 +338,4 @@ router.post("/rate-limit/whitelist/refresh", async (_req, res) => {
 });
 
 export default router;
+

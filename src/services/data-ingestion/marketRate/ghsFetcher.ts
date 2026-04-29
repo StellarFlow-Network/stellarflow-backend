@@ -1,19 +1,19 @@
 import axios from "axios";
-import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../../utils/httpTimeout";
 import { MarketRateFetcher, MarketRate, RawApiResponse } from "./types";
-import { withRetry } from "../../utils/retryUtil";
-import { createFetcherLogger } from "../../utils/logger";
+import { withRetry } from "../../../utils/retryUtil";
+import { createFetcherLogger } from "../../../utils/logger";
 
 /**
- * KES/XLM rate fetcher using CoinGecko as primary source.
+ * GHS/XLM rate fetcher using CoinGecko as primary source.
  */
-export class KESRateFetcher implements MarketRateFetcher {
+export class GHSRateFetcher implements MarketRateFetcher {
   private readonly coinGeckoUrl =
-    "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=kes&include_last_updated_at=true";
-  private logger = createFetcherLogger("KESRate");
+    "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=ghs&include_last_updated_at=true";
+  private logger = createFetcherLogger("GHSRate");
 
   getCurrency(): string {
-    return "KES";
+    return "GHS";
   }
 
   async fetchRate(): Promise<MarketRate> {
@@ -32,8 +32,8 @@ export class KESRateFetcher implements MarketRateFetcher {
       const stellarPrice = response.data.stellar;
       if (
         stellarPrice &&
-        typeof stellarPrice.kes === "number" &&
-        stellarPrice.kes > 0
+        typeof stellarPrice.ghs === "number" &&
+        stellarPrice.ghs > 0
       ) {
         const rawResponses: RawApiResponse[] = [
           {
@@ -49,18 +49,18 @@ export class KESRateFetcher implements MarketRateFetcher {
           : new Date();
 
         return {
-          currency: "KES",
-          rate: stellarPrice.kes,
+          currency: "GHS",
+          rate: stellarPrice.ghs,
           timestamp: lastUpdatedAt,
-          source: "CoinGecko (KES)",
+          source: "CoinGecko (GHS)",
           rawResponses,
         };
       }
 
-      throw new Error("Invalid response from CoinGecko for KES");
+      throw new Error("Invalid response from CoinGecko for GHS");
     } catch (error) {
       this.logger.error(
-        "Failed to fetch KES rate",
+        "Failed to fetch GHS rate",
         undefined,
         error instanceof Error ? error : new Error(String(error)),
       );
@@ -77,3 +77,5 @@ export class KESRateFetcher implements MarketRateFetcher {
     }
   }
 }
+
+

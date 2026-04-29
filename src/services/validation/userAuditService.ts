@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma.js";
+import { prisma } from "../../lib/prisma.js";
 
 export enum UserAuditEventType {
   USER_LOGIN_SUCCESS = "USER_LOGIN_SUCCESS",

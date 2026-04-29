@@ -16,7 +16,7 @@
  * (currency, granularity, openTime) so replaying a run is always safe.
  */
 
-import prisma from "../lib/prisma.js";
+import prisma from "../../lib/prisma.js";
 
 // ---------------------------------------------------------------------------
 // Constants & Types
@@ -286,3 +286,4 @@ export class PriceAggregatorService {
 
 // Singleton instance exported for use in index.ts
 export const priceAggregatorService = new PriceAggregatorService();
+

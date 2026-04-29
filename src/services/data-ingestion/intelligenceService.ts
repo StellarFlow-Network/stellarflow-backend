@@ -1,4 +1,4 @@
-import prisma from "../lib/prisma";
+import prisma from "../../lib/prisma";
 
 const HOURLY_VOLATILITY_WINDOW_MINUTES = 60;
 
@@ -239,3 +239,4 @@ export class IntelligenceService {
 }
 
 export const intelligenceService = new IntelligenceService();
+

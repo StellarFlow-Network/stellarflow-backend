@@ -1,8 +1,8 @@
-import prisma from "../lib/prisma";
-import { signer } from "../signer";
+import prisma from "../../lib/prisma";
+import { signer } from "../../signer";
 import dotenv from "dotenv";
 import axios from "axios";
-import { assertSigningAllowed } from "../state/appState";
+import { assertSigningAllowed } from "../../state/appState";
 import {
   successfulSubmissions,
   failedSubmissions,
@@ -433,3 +433,4 @@ export class MultiSigService {
 }
 
 export const multiSigService = new MultiSigService();
+

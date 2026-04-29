@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit";
-import prisma from "../lib/prisma";
+import prisma from "../../lib/prisma";
 
 export interface MonthlySummary {
   month: string; // "YYYY-MM"
@@ -289,3 +289,4 @@ export function renderPDF(summary: MonthlySummary): Promise<Buffer> {
     doc.end();
   });
 }
+

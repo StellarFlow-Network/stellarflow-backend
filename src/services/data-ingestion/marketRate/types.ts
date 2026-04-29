@@ -201,7 +201,7 @@ export {
   filterOutliers,
   isOutlier,
   percentDeviation,
-} from "../../logic/outlierFilter";
+} from "../../../logic/outlierFilter";
 
 export interface RateFetchStats {
   totalRequests: number;
@@ -211,3 +211,5 @@ export interface RateFetchStats {
   lastSuccessfulFetch?: Date;
   lastFailedFetch?: Date;
 }
+
+
