@@ -1,6 +1,6 @@
 import axios from "axios";
 import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout";
-import { MarketRateFetcher, MarketRate } from "./types";
+import { MarketRateFetcher, MarketRate, RawApiResponse } from "./types";
 import { withRetry } from "../../utils/retryUtil";
 import { createFetcherLogger } from "../../utils/logger";
 
@@ -35,6 +35,15 @@ export class GHSRateFetcher implements MarketRateFetcher {
         typeof stellarPrice.ghs === "number" &&
         stellarPrice.ghs > 0
       ) {
+        const rawResponses: RawApiResponse[] = [
+          {
+            provider: "CoinGecko",
+            endpoint: this.coinGeckoUrl,
+            payload: response.data,
+            receivedAt: new Date(),
+          },
+        ];
+
         const lastUpdatedAt = stellarPrice.last_updated_at
           ? new Date(stellarPrice.last_updated_at * 1000)
           : new Date();
@@ -44,6 +53,7 @@ export class GHSRateFetcher implements MarketRateFetcher {
           rate: stellarPrice.ghs,
           timestamp: lastUpdatedAt,
           source: "CoinGecko (GHS)",
+          rawResponses,
         };
       }
 

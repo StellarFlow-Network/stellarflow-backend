@@ -3,6 +3,7 @@ import {
   MarketRate,
   FetcherResponse,
   AggregatedFetcherResponse,
+  RawApiResponse,
 } from "./types";
 import { KESRateFetcher } from "./kesFetcher";
 import { GHSRateFetcher } from "./ghsFetcher";
@@ -75,6 +76,41 @@ export class MarketRateService {
     this.fetchers.set("NGN", new NGNRateFetcher());
   }
 
+  private serializeRawPayload(payload: unknown): string {
+    try {
+      return JSON.stringify(payload);
+    } catch {
+      return String(payload);
+    }
+  }
+
+  private async persistRawResponses(
+    currency: string,
+    rawResponses?: RawApiResponse[],
+  ): Promise<void> {
+    if (!Array.isArray(rawResponses) || rawResponses.length === 0) {
+      return;
+    }
+
+    const clientAny = prisma as any;
+    if (
+      !clientAny?.rawData ||
+      typeof clientAny.rawData.createMany !== "function"
+    ) {
+      return;
+    }
+
+    await clientAny.rawData.createMany({
+      data: rawResponses.map((rawResponse) => ({
+        currency,
+        provider: rawResponse.provider,
+        endpoint: rawResponse.endpoint ?? null,
+        payload: this.serializeRawPayload(rawResponse.payload),
+        fetchedAt: normalizeDateToUTC(rawResponse.receivedAt),
+      })),
+    });
+  }
+
   async getRate(currency: string): Promise<FetcherResponse> {
     try {
       const normalizedCurrency = currency.toUpperCase();
@@ -135,6 +171,15 @@ export class MarketRateService {
               ? fetchError.message
               : "Unknown fetcher error",
         };
+      }
+
+      try {
+        await this.persistRawResponses(normalizedCurrency, rate.rawResponses);
+      } catch (rawDataError) {
+        console.error(
+          "Failed to persist raw provider responses:",
+          rawDataError,
+        );
       }
 
       const normalizedRate: MarketRate = {
