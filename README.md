@@ -296,3 +296,28 @@ See [ROADMAP.md](./ROADMAP.md) for the full product roadmap and milestone struct
 - **v1.0** — Mainnet Launch (Q4 2026)
 
 All open issues are triaged and assigned to a milestone. Contributors can see what is planned, in progress, or blocked.
+
+## Contributing Guide
+
+
+How to Contribute 
+
+• Fork the repository. 
+
+• Clone your fork to your local machine. 
+
+• Create a new branch for your task. 
+
+git checkout -b feature/your-task-name 
+
+• Make your changes. 
+
+• Commit clearly. 
+
+git commit -m "Add: short description" 
+
+• Push your branch. 
+
+git push origin feature/your-task-name 
+
+• Open a Pull Request.
