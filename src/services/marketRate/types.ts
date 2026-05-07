@@ -1,3 +1,10 @@
+export interface RawApiResponse {
+  provider: string;
+  endpoint?: string;
+  payload: unknown;
+  receivedAt: Date;
+}
+
 /**
  * Market Rate Interface
  * Represents the fetched exchange rate data
@@ -14,6 +21,7 @@ export interface MarketRate {
   comparisonRate?: number | undefined;
   comparisonTimestamp?: Date | undefined;
   contractSubmissionSkipped?: boolean;
+  rawResponses?: RawApiResponse[];
   // Multi-sig fields
   pendingMultiSig?: boolean;
   multiSigPriceId?: number;

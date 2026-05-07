@@ -1,5 +1,6 @@
 import axios, { AxiosError } from "axios";
 import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout";
+import { MarketRateFetcher, MarketRate, RawApiResponse } from "./types";
 import { withRetry } from "../../utils/retryUtil";
 import {
   MarketRateFetcher,
@@ -537,6 +538,15 @@ export class KESRateFetcher implements MarketRateFetcher {
         typeof stellarPrice.kes === "number" &&
         stellarPrice.kes > 0
       ) {
+        const rawResponses: RawApiResponse[] = [
+          {
+            provider: "CoinGecko",
+            endpoint: this.coinGeckoUrl,
+            payload: response.data,
+            receivedAt: new Date(),
+          },
+        ];
+
         const lastUpdatedAt = stellarPrice.last_updated_at
           ? new Date(stellarPrice.last_updated_at * 1000)
           : new Date();
@@ -546,6 +556,7 @@ export class KESRateFetcher implements MarketRateFetcher {
           rate: stellarPrice.kes,
           timestamp: lastUpdatedAt,
           source: "CoinGecko (KES)",
+          rawResponses,
         };
       }
 

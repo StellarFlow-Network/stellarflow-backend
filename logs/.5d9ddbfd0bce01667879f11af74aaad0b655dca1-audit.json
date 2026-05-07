@@ -1,0 +1,15 @@
+{
+  "keep": {
+    "days": false,
+    "amount": 10
+  },
+  "auditLog": "C:\\BACKUP\\former\\Hackathon\\stellarfow-backend-2\\logs\\.5d9ddbfd0bce01667879f11af74aaad0b655dca1-audit.json",
+  "files": [
+    {
+      "date": 1777425093578,
+      "name": "C:\\BACKUP\\former\\Hackathon\\stellarfow-backend-2\\logs\\application-2026-04-29.log",
+      "hash": "509d2810c0362b4defa9b4e63a2051ac88e66f2712d7a99d4aca84bbd3bd0014"
+    }
+  ],
+  "hashType": "sha256"
+}

@@ -2,7 +2,7 @@ generator client {
   provider = "prisma-client-js"
 }
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model PriceHistory {
@@ -149,14 +149,88 @@ model ErrorLog {
   @@index([occurredAt])
 }
 
+model RawData {
+  id        Int      @id @default(autoincrement())
+  currency  String
+  provider  String
+  endpoint  String?
+  payload   String
+  fetchedAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([currency, fetchedAt])
+  @@index([provider, fetchedAt])
+  @@index([createdAt])
+}
+
 model Relayer {
   id            Int      @id @default(autoincrement())
   name          String
   apiKey        String   @unique
   isActive      Boolean  @default(true)
   allowedAssets String
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  email         String?  @unique
+  passwordHash String?
+  role         String?  @default("VIEWER")
+  lastLoginAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  permissionChanges PermissionChange[]
+  sessions          UserSession[]
+}
+
+model UserSession {
+  id           Int       @id @default(autoincrement())
+  relayerId   Int
+  relayer     Relayer   @relation(fields: [relayerId], references: [id])
+  token       String    @unique
+  ipAddress   String
+  userAgent   String
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  isActive    Boolean   @default(true)
+}
+
+model PermissionChange {
+  id          Int       @id @default(autoincrement())
+  relayerId  Int
+  relayer    Relayer   @relation(fields: [relayerId], references: [id])
+  changedBy  Int
+  targetId   Int?
+  field      String
+  oldValue   String?
+  newValue   String?
+  reason     String?
+  createdAt  DateTime  @default(now())
+}
+
+// OHLC Candle Model – Issue #208: Analytics | Time-Series Data Aggregation Service
+// Stores Open/High/Low/Close aggregates produced by the PriceAggregator worker.
+// Granularity is one of "MINUTE" | "HOUR" | "DAY".
+model OhlcCandle {
+  id          Int      @id @default(autoincrement())
+  currency    String   // e.g., "NGN", "KES", "GHS"
+  granularity String   // "MINUTE" | "HOUR" | "DAY"
+  openTime    DateTime // Start of the candle window (UTC, truncated to granularity)
+  closeTime   DateTime // End of the candle window (exclusive)
+
+  open        Decimal  // First price in the window
+  high        Decimal  // Highest price in the window
+  low         Decimal  // Lowest price in the window
+  close       Decimal  // Last price in the window
+  count       Int      @default(0) // Number of raw ticks aggregated
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Composite unique – one candle per (currency, granularity, openTime)
+  @@unique([currency, granularity, openTime])
+
+  // Primary query pattern: fetch candles for a currency/granularity over a time range
+  @@index([currency, granularity, openTime])
+  // Secondary: sweep all candles in a time range (e.g. backfill checks)
+  @@index([granularity, openTime])
 }
 
 // Hourly Statistics for smoothing out price spikes
@@ -278,4 +352,35 @@ model AuditLog {
   @@index([actorPublicKey, occurredAt])
   @@index([relatedId])
   @@index([occurredAt])
+}
+
+// Issuer Onboarding Request — Issue #120
+// Healthcare providers submit an application to become an approved issuer.
+// Admins approve/reject via the admin dashboard; approved issuers are added
+// to the contract allowlist automatically.
+model IssuerOnboardingRequest {
+  id              Int       @id @default(autoincrement())
+  name            String    @db.VarChar(200)   // Healthcare provider name
+  licenseNumber   String    @db.VarChar(100)   // Professional license number
+  country         String    @db.VarChar(100)   // Country of operation
+  walletAddress   String    @db.VarChar(56)    // Stellar wallet address
+
+  // Workflow status: PENDING → APPROVED | REJECTED
+  status          String    @default("PENDING") @db.VarChar(20)
+
+  // Admin decision
+  reviewedBy      String?   @db.VarChar(100)   // Admin who reviewed the request
+  reviewedAt      DateTime?                     // When the decision was made
+  reviewNote      String?   @db.Text           // Optional note from admin
+
+  // Contract allowlist tracking
+  addedToAllowlist Boolean  @default(false)    // Whether the wallet was added on-chain
+  allowlistTxHash  String?  @db.VarChar(100)   // Stellar tx hash for the allowlist update
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@index([walletAddress])
+  @@index([createdAt])
 }

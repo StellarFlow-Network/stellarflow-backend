@@ -74,6 +74,18 @@ async function run() {
       rate.source,
       "Median of 3 sources",
     );
+    assert.equal(Array.isArray(rate.rawResponses), true);
+    assert.equal(rate.rawResponses?.length, 5);
+    assert.deepEqual(
+      rate.rawResponses?.map((entry) => entry.provider),
+      [
+        "VTpass",
+        "CoinGecko",
+        "CoinGecko",
+        "CoinGecko",
+        "ExchangeRate API",
+      ],
+    );
   } finally {
     axios.get = originalGet;
     for (const [key, val] of Object.entries(savedEnv)) {

@@ -3,6 +3,7 @@ import {
   MarketRate,
   FetcherResponse,
   AggregatedFetcherResponse,
+  RawApiResponse,
 } from "./types";
 import { KESRateFetcher } from "./kesFetcher";
 import { GHSRateFetcher } from "./ghsFetcher";
@@ -23,6 +24,8 @@ import { isLockdownEnabled } from "../../state/appState";
 dotenv.config();
 
 import { priceReviewService } from "../priceReviewService";
+import { webhookService } from "../webhook";
+import { anomalyDetectionService } from "../anomalyDetection";
 
 export class MarketRateService {
   private fetchers: Map<string, MarketRateFetcher> = new Map();
@@ -72,6 +75,41 @@ export class MarketRateService {
     this.fetchers.set("KES", new KESRateFetcher());
     this.fetchers.set("GHS", new GHSRateFetcher());
     this.fetchers.set("NGN", new NGNRateFetcher());
+  }
+
+  private serializeRawPayload(payload: unknown): string {
+    try {
+      return JSON.stringify(payload);
+    } catch {
+      return String(payload);
+    }
+  }
+
+  private async persistRawResponses(
+    currency: string,
+    rawResponses?: RawApiResponse[],
+  ): Promise<void> {
+    if (!Array.isArray(rawResponses) || rawResponses.length === 0) {
+      return;
+    }
+
+    const clientAny = prisma as any;
+    if (
+      !clientAny?.rawData ||
+      typeof clientAny.rawData.createMany !== "function"
+    ) {
+      return;
+    }
+
+    await clientAny.rawData.createMany({
+      data: rawResponses.map((rawResponse) => ({
+        currency,
+        provider: rawResponse.provider,
+        endpoint: rawResponse.endpoint ?? null,
+        payload: this.serializeRawPayload(rawResponse.payload),
+        fetchedAt: normalizeDateToUTC(rawResponse.receivedAt),
+      })),
+    });
   }
 
   async getRate(currency: string): Promise<FetcherResponse> {
@@ -136,6 +174,15 @@ export class MarketRateService {
         };
       }
 
+      try {
+        await this.persistRawResponses(normalizedCurrency, rate.rawResponses);
+      } catch (rawDataError) {
+        console.error(
+          "Failed to persist raw provider responses:",
+          rawDataError,
+        );
+      }
+
       const normalizedRate: MarketRate = {
         ...rate,
         timestamp: normalizeDateToUTC(rate.timestamp),
@@ -167,9 +214,14 @@ export class MarketRateService {
       };
 
       // Perform Anomaly Detection
-      const anomalyCheck = await anomalyDetectionService.checkAnomaly(normalizedCurrency, rate.rate);
+      const anomalyCheck = await anomalyDetectionService.checkAnomaly(
+        normalizedCurrency,
+        rate.rate,
+      );
       if (anomalyCheck.isAnomalous) {
-        console.warn(`[MarketRateService] Anomaly detected for ${normalizedCurrency}: Z-Score ${anomalyCheck.zScore.toFixed(2)}σ`);
+        console.warn(
+          `[MarketRateService] Anomaly detected for ${normalizedCurrency}: Z-Score ${anomalyCheck.zScore.toFixed(2)}σ`,
+        );
         await webhookService.sendPriorityAlert({
           currency: normalizedCurrency,
           rate: rate.rate,
@@ -257,8 +309,7 @@ export class MarketRateService {
 
               enrichedRate.contractSubmissionSkipped = false;
               enrichedRate.pendingMultiSig = true;
-              enrichedRate.multiSigPriceId =
-                signatureRequest.multiSigPriceId;
+              enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
             } else {
               const txHash = await this.stellarService.submitPriceUpdate(
                 normalizedCurrency,

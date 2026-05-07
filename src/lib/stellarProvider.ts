@@ -1,6 +1,5 @@
 import { Horizon } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
-import { Horizon } from "stellar-sdk";
 
 dotenv.config();
 
@@ -122,5 +121,4 @@ class StellarProvider {
 }
 
 const stellarProvider = new StellarProvider();
-export default stellarProvider;
 export default stellarProvider;

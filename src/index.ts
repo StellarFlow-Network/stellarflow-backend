@@ -17,6 +17,10 @@ import { multiSigSubmissionService } from "./services/multiSigSubmissionService"
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 import logger from "./utils/logger";
 import { GasBalanceMonitorService, getGasBalanceMonitorService } from "./services/gasBalanceMonitorService";
+import {
+  GasBalanceMonitorService,
+  getGasBalanceMonitorService,
+} from "./services/gasBalanceMonitorService";
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
@@ -29,6 +33,7 @@ import { initializeTracing } from "./config/tracingConfig";
 import { setupAxiosTracing } from "./lib/tracing";
 import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
 import { providerSecretRotationService } from "./services/providerSecretRotationService";
+import { priceAggregatorService } from "./services/priceAggregatorService";
 
 // Load environment variables
 dotenv.config();
@@ -269,6 +274,7 @@ app.get("/", (req, res) => {
       },
       stats: {
         volume: "/api/v1/stats/volume?date=YYYY-MM-DD",
+        relayers: "/api/stats/relayers",
       },
       history: {
         assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
@@ -277,9 +283,6 @@ app.get("/", (req, res) => {
         hourlyVolatility: "/api/v1/intelligence/hourly-volatility",
         priceChange: "/api/v1/intelligence/price-change/:currency",
         staleCurrencies: "/api/v1/intelligence/stale",
-      },
-      stats: {
-        relayers: "/api/stats/relayers",
       },
     },
   });
@@ -352,6 +355,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     // FIX 2: Optional chaining — safe to call even if service never started
     gasBalanceMonitorService?.stop();
     hourlyAverageService.stop();
+    priceAggregatorService.stop();
     providerSecretRotationService.stop();
     stopConfigWatcher();
     stopEnvFileWatcher?.();
@@ -436,6 +440,19 @@ httpServer.listen(PORT, () => {
   } catch (err) {
     console.warn(
       "Hourly average service not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // Issue #208 – Start OHLC price aggregation worker
+  try {
+    priceAggregatorService.start().catch((err: Error) => {
+      console.error("Failed to start OHLC price aggregator:", err);
+    });
+    console.log(`📈 OHLC price aggregator started (MINUTE / HOUR / DAY)`);
+  } catch (err) {
+    console.warn(
+      "OHLC price aggregator not started:",
       err instanceof Error ? err.message : err,
     );
   }

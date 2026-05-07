@@ -283,3 +283,16 @@ npm run cache:warm
 ```
 
 For detailed caching documentation, see [CACHING.md](./CACHING.md).
+
+---
+
+## 🗺️ Roadmap
+
+See [ROADMAP.md](./ROADMAP.md) for the full product roadmap and milestone structure.
+
+**Current milestones:**
+- **v0.1** — Testnet MVP (Q2 2026)
+- **v0.2** — Security Hardening (Q3 2026)
+- **v1.0** — Mainnet Launch (Q4 2026)
+
+All open issues are triaged and assigned to a milestone. Contributors can see what is planned, in progress, or blocked.

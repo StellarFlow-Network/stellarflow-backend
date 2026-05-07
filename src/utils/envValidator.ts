@@ -4,7 +4,12 @@
  */
 
 export function validateEnv() {
-  const requiredEnvVars = ["DB_URL", "STELLAR_KEY"] as const;
+  const requiredEnvVars = [
+    "DB_URL",
+    "STELLAR_KEY",
+    "JWT_SECRET",
+    "SESSION_SECRET",
+  ] as const;
   const missingEnvVars: string[] = [];
 
   for (const envVar of requiredEnvVars) {
@@ -26,7 +31,12 @@ export function validateEnv() {
   }
 
   // Log optional but recommended environment variables
-  const recommendedEnvVars = ["MAX_LATENCY_MS", "REDIS_URL", "TRUST_PROXY"];
+  const recommendedEnvVars = [
+    "MAX_LATENCY_MS",
+    "REDIS_URL",
+    "TRUST_PROXY",
+    "JWT_EXPIRY_HOURS",
+  ];
   for (const envVar of recommendedEnvVars) {
     if (!process.env[envVar]) {
       console.warn(
