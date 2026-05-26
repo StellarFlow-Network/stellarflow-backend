@@ -31,6 +31,7 @@ import { setupAxiosTracing } from "./lib/tracing";
 import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
 import { providerSecretRotationService } from "./services/providerSecretRotationService";
 import { priceAggregatorService } from "./services/priceAggregatorService";
+import { contractSanityCheckService } from "./services/contractSanityCheckService";
 
 // Load environment variables
 dotenv.config();
@@ -328,7 +329,7 @@ process.once("SIGTERM", () => {
   });
 });
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, async () => {
   console.log(`🌊 StellarFlow Backend running on port ${PORT}`);
   console.log(
     `📊 Market Rates API available at http://localhost:${PORT}/api/market-rates`,
@@ -339,19 +340,56 @@ httpServer.listen(PORT, () => {
   console.log(`🏥 Health check at http://localhost:${PORT}/health`);
   console.log(`🔌 Socket.io ready for dashboard connections`);
 
-  // Start Soroban event listener to track confirmed on-chain prices
-  try {
-    sorobanEventListener = new SorobanEventListener();
-    sorobanEventListener.start().catch((err) => {
-      console.error("Failed to start event listener:", err);
-    });
-    console.log(`👂 Soroban event listener started`);
-  } catch (err) {
-    console.warn(
-      "Event listener not started:",
-      err instanceof Error ? err.message : err,
+  // Perform contract sanity check before starting ingestion loop
+  let contractSanityPassed = true;
+  if (contractSanityCheckService.isConfigured()) {
+    try {
+      const sanityResult = await contractSanityCheckService.performSanityCheck();
+      if (!sanityResult.success) {
+        console.error(
+          `❌ Contract sanity check failed: ${sanityResult.error}`,
+        );
+        console.error(
+          "⛔ Preventing ingestion loop from starting due to contract failure",
+        );
+        contractSanityPassed = false;
+      }
+    } catch (err) {
+      console.error(
+        "❌ Contract sanity check error:",
+        err instanceof Error ? err.message : err,
+      );
+      console.error(
+        "⛔ Preventing ingestion loop from starting due to contract check error",
+      );
+      contractSanityPassed = false;
+    }
+  } else {
+    console.log(
+      "ℹ️ CONTRACT_ID not configured - skipping contract sanity check (ingestion loop will start)",
     );
-    sorobanEventListener = null;
+  }
+
+  // Start Soroban event listener to track confirmed on-chain prices
+  // Only start if contract sanity check passed or if check is not configured
+  if (contractSanityPassed) {
+    try {
+      sorobanEventListener = new SorobanEventListener();
+      sorobanEventListener.start().catch((err) => {
+        console.error("Failed to start event listener:", err);
+      });
+      console.log(`👂 Soroban event listener started`);
+    } catch (err) {
+      console.warn(
+        "Event listener not started:",
+        err instanceof Error ? err.message : err,
+      );
+      sorobanEventListener = null;
+    }
+  } else {
+    console.warn(
+      "⚠️ Soroban event listener NOT started due to failed contract sanity check",
+    );
   }
 
   // Start multi-sig submission service if enabled
