@@ -27,6 +27,7 @@ import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
 
 import { tracingMiddleware, axiosTracingMiddleware } from "./middleware/tracingMiddleware";
 import { jwtMiddleware } from "./middleware/jwtMiddleware";
+import { jsonKeySorter } from "./middleware/jsonKeySorter";
 import adminRouter from "./routes/admin";
 
 import authRouter from "./routes/auth";
@@ -120,6 +121,9 @@ app.use(
 );
 
 app.use(express.json());
+
+// Add JSON key sorting middleware for consistent response formatting
+app.use(jsonKeySorter);
 
 // Add tracing middleware early in the stack
 app.use(tracingMiddleware);
