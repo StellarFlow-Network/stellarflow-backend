@@ -25,7 +25,10 @@ import { maintenanceMiddleware } from "./middleware/maintenanceMiddleware";
 
 import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
 
-import { tracingMiddleware, axiosTracingMiddleware } from "./middleware/tracingMiddleware";
+import {
+  tracingMiddleware,
+  axiosTracingMiddleware,
+} from "./middleware/tracingMiddleware";
 import { jwtMiddleware } from "./middleware/jwtMiddleware";
 import { jsonKeySorter } from "./middleware/jsonKeySorter";
 import adminRouter from "./routes/admin";
@@ -61,6 +64,16 @@ const dashboardUrl =
   process.env.DASHBOARD_URL ||
   process.env.FRONTEND_URL ||
   "http://localhost:3000";
+
+// Determine Stellar network and configure trusted RPC endpoints
+const stellarNetwork = process.env.STELLAR_NETWORK || "TESTNET";
+const trustedStellarEndpoints =
+  stellarNetwork === "PUBLIC"
+    ? ["https://horizon.stellar.org", "https://soroban-api.stellar.org"]
+    : [
+        "https://horizon-testnet.stellar.org",
+        "https://soroban-testnet.stellar.org",
+      ];
 
 app.use(morgan("dev"));
 
@@ -100,7 +113,7 @@ app.use(
 
         fontSrc: ["'self'", "https:"],
 
-        connectSrc: ["'self'"],
+        connectSrc: ["'self'", ...trustedStellarEndpoints],
 
         frameAncestors: ["'none'"],
       },
@@ -150,8 +163,6 @@ app.get(
     customSiteTitle: "StellarFlow API Documentation",
   }),
 );
-
-
 
 app.use("/api/v1/auth", authRouter);
 
