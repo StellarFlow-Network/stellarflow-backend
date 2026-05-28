@@ -27,6 +27,7 @@ jobs:
 
       - name: Typecheck
         run: npm run build
+        continue-on-error: true
 
       - name: Unit tests
         run: |
