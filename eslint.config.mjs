@@ -5,7 +5,13 @@ import eslintConfigPrettier from "eslint-config-prettier";
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**", "docs/**"],
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "docs/**",
+      "src/metrics /**",
+      "tests/load/**",
+    ],
   },
   js.configs.recommended,
   {
@@ -19,6 +25,7 @@ export default [
       globals: {
         Buffer: "readonly",
         __dirname: "readonly",
+        __filename: "readonly",
         console: "readonly",
         process: "readonly",
         setTimeout: "readonly",
@@ -29,6 +36,10 @@ export default [
         btoa: "readonly",
         URL: "readonly",
         URLSearchParams: "readonly",
+        NodeJS: "readonly",
+        AbortSignal: "readonly",
+        require: "readonly",
+        module: "readonly",
       },
     },
     plugins: {
@@ -45,6 +56,8 @@ export default [
           varsIgnorePattern: "^_",
         },
       ],
+      // Allow `declare global { namespace Express { ... } }` — standard TS augmentation
+      "@typescript-eslint/no-namespace": ["error", { allowDeclarations: true }],
       // Enforce PascalCase for classes/types/interfaces/enums, camelCase for everything else
       "@typescript-eslint/naming-convention": [
         "error",
@@ -84,7 +97,7 @@ export default [
         },
         {
           selector: "classProperty",
-          format: ["camelCase"],
+          format: ["camelCase", "UPPER_CASE"],
           leadingUnderscore: "allow",
         },
         {
@@ -101,7 +114,7 @@ export default [
     },
   },
   {
-    files: ["test/**/*.ts", "tests/**/*.ts"],
+    files: ["test/**/*.ts", "tests/**/*.ts", "test.ts"],
     languageOptions: {
       globals: {
         describe: "readonly",

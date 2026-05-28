@@ -46,7 +46,7 @@ const mockPrisma = {
 // For this test, I'll create a subclass that overrides the prisma dependency.
 
 class TestableIntelligenceService extends IntelligenceService {
-  // @ts-ignore
+  // @ts-expect-error — overriding private prisma for testing
   private prisma = mockPrisma;
 
   // Override method to use mock prisma
@@ -56,7 +56,7 @@ class TestableIntelligenceService extends IntelligenceService {
     const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
     try {
-      // @ts-ignore
+      // @ts-expect-error — overriding private prisma for testing
       const latestRecord = await this.prisma.priceHistory.findFirst({
         where: { currency: asset },
         orderBy: { timestamp: "desc" },
@@ -64,7 +64,7 @@ class TestableIntelligenceService extends IntelligenceService {
 
       if (!latestRecord) return "0.0%";
 
-      // @ts-ignore
+      // @ts-expect-error — overriding private prisma for testing
       const historicalRecord = await this.prisma.priceHistory.findFirst({
         where: { currency: asset, timestamp: { lte: oneDayAgo } },
         orderBy: { timestamp: "desc" },

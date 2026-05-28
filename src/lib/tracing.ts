@@ -1,13 +1,23 @@
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { JaegerExporter as OTelJaegerExporter } from '@opentelemetry/exporter-jaeger';
-import { ConsoleSpanExporter, BatchSpanProcessor, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { trace, context, Span as OTelSpan, SpanStatusCode, Context, propagation } from '@opentelemetry/api';
-import { resourceFromAttributes } from '@opentelemetry/resources';
-import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
-import { W3CTraceContextPropagator } from '@opentelemetry/core';
-import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
+import { NodeSDK } from "@opentelemetry/sdk-node";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { JaegerExporter as OTelJaegerExporter } from "@opentelemetry/exporter-jaeger";
+import {
+  ConsoleSpanExporter,
+  BatchSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import {
+  trace,
+  context,
+  Span as OTelSpan,
+  SpanStatusCode,
+  Context,
+  propagation,
+} from "@opentelemetry/api";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
+import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import axios from "axios";
 
 /**
  * Trace context interface for W3C trace context (backward compatible)
@@ -37,7 +47,7 @@ export interface Span {
     message: string;
     fields?: Record<string, any>;
   }>;
-  status: 'ok' | 'error';
+  status: "ok" | "error";
   error?: Error;
   // Internal OpenTelemetry span reference
   _otelSpan?: OTelSpan;
@@ -55,7 +65,9 @@ export interface TraceExporter {
  */
 export class JaegerExporter implements TraceExporter {
   async export(_spans: Span[]): Promise<void> {
-    console.log('[Tracing] JaegerExporter is deprecated. Use initializeTracing() with Jaeger configuration instead.');
+    console.log(
+      "[Tracing] JaegerExporter is deprecated. Use initializeTracing() with Jaeger configuration instead.",
+    );
   }
 }
 
@@ -64,7 +76,9 @@ export class JaegerExporter implements TraceExporter {
  */
 export class HoneycombExporter implements TraceExporter {
   async export(_spans: Span[]): Promise<void> {
-    console.log('[Tracing] HoneycombExporter is deprecated. Use initializeTracing() with OTLP/Honeycomb configuration instead.');
+    console.log(
+      "[Tracing] HoneycombExporter is deprecated. Use initializeTracing() with OTLP/Honeycomb configuration instead.",
+    );
   }
 }
 
@@ -73,14 +87,18 @@ export class HoneycombExporter implements TraceExporter {
  */
 export class ConsoleExporter implements TraceExporter {
   async export(spans: Span[]): Promise<void> {
-    spans.forEach(span => {
-      const duration = span.endTime ? span.endTime - span.startTime : Date.now() - span.startTime;
-      console.log(`[Trace] ${span.operationName} - ${duration}ms - ${span.traceId}:${span.spanId}`);
+    spans.forEach((span) => {
+      const duration = span.endTime
+        ? span.endTime - span.startTime
+        : Date.now() - span.startTime;
+      console.log(
+        `[Trace] ${span.operationName} - ${duration}ms - ${span.traceId}:${span.spanId}`,
+      );
       if (span.tags && Object.keys(span.tags).length > 0) {
-        console.log('[Trace] Tags:', span.tags);
+        console.log("[Trace] Tags:", span.tags);
       }
       if (span.logs.length > 0) {
-        console.log('[Trace] Logs:', span.logs);
+        console.log("[Trace] Logs:", span.logs);
       }
     });
   }
@@ -88,7 +106,7 @@ export class ConsoleExporter implements TraceExporter {
 
 // OpenTelemetry SDK instance
 let otelSDK: NodeSDK | null = null;
-let tracer = trace.getTracer('stellarflow-backend');
+let tracer = trace.getTracer("stellarflow-backend");
 
 /**
  * Initialize OpenTelemetry SDK with proper configuration
@@ -102,32 +120,42 @@ export function initializeOpenTelemetry(config: {
   honeycombDataset?: string | undefined;
   consoleExporter?: boolean | undefined;
 }): void {
-  const exporters: (ConsoleSpanExporter | OTLPTraceExporter | OTelJaegerExporter)[] = [];
+  const exporters: (
+    | ConsoleSpanExporter
+    | OTLPTraceExporter
+    | OTelJaegerExporter
+  )[] = [];
 
   if (config.consoleExporter) {
     exporters.push(new ConsoleSpanExporter());
   }
 
   if (config.otlpEndpoint) {
-    exporters.push(new OTLPTraceExporter({
-      url: config.otlpEndpoint,
-    }));
+    exporters.push(
+      new OTLPTraceExporter({
+        url: config.otlpEndpoint,
+      }),
+    );
   }
 
   if (config.honeycombEndpoint && config.honeycombApiKey) {
-    exporters.push(new OTLPTraceExporter({
-      url: config.honeycombEndpoint,
-      headers: {
-        'x-honeycomb-team': config.honeycombApiKey,
-        'x-honeycomb-dataset': config.honeycombDataset || 'stellarflow'
-      }
-    }));
+    exporters.push(
+      new OTLPTraceExporter({
+        url: config.honeycombEndpoint,
+        headers: {
+          "x-honeycomb-team": config.honeycombApiKey,
+          "x-honeycomb-dataset": config.honeycombDataset || "stellarflow",
+        },
+      }),
+    );
   }
 
   if (config.jaegerEndpoint) {
-    exporters.push(new OTelJaegerExporter({
-      endpoint: config.jaegerEndpoint,
-    }));
+    exporters.push(
+      new OTelJaegerExporter({
+        endpoint: config.jaegerEndpoint,
+      }),
+    );
   }
 
   // Default to console if no exporters configured
@@ -138,39 +166,52 @@ export function initializeOpenTelemetry(config: {
   otelSDK = new NodeSDK({
     resource: resourceFromAttributes({
       [SemanticResourceAttributes.SERVICE_NAME]: config.serviceName,
-      [SemanticResourceAttributes.SERVICE_VERSION]: '1.0.0',
+      [SemanticResourceAttributes.SERVICE_VERSION]: "1.0.0",
     }),
-    traceExporter: exporters.length === 1 ? exporters[0]! : new MultiExporter(exporters),
-    instrumentations: [getNodeAutoInstrumentations({
-      '@opentelemetry/instrumentation-http': { enabled: true },
-      '@opentelemetry/instrumentation-express': { enabled: true },
-    })],
-    spanProcessor: new BatchSpanProcessor(exporters.length === 1 ? exporters[0]! : new MultiExporter(exporters)),
+    traceExporter:
+      exporters.length === 1 ? exporters[0]! : new MultiExporter(exporters),
+    instrumentations: [
+      getNodeAutoInstrumentations({
+        "@opentelemetry/instrumentation-http": { enabled: true },
+        "@opentelemetry/instrumentation-express": { enabled: true },
+      }),
+    ],
+    spanProcessor: new BatchSpanProcessor(
+      exporters.length === 1 ? exporters[0]! : new MultiExporter(exporters),
+    ),
     textMapPropagator: new W3CTraceContextPropagator(),
   });
 
   otelSDK.start();
   tracer = trace.getTracer(config.serviceName);
-  console.log(`[OpenTelemetry] SDK initialized for service: ${config.serviceName}`);
+  console.log(
+    `[OpenTelemetry] SDK initialized for service: ${config.serviceName}`,
+  );
 }
 
 /**
  * Multi-exporter for sending spans to multiple destinations
  */
 class MultiExporter extends ConsoleSpanExporter {
-  private exporters: (ConsoleSpanExporter | OTLPTraceExporter | OTelJaegerExporter)[];
+  private exporters: (
+    | ConsoleSpanExporter
+    | OTLPTraceExporter
+    | OTelJaegerExporter
+  )[];
 
-  constructor(exporters: (ConsoleSpanExporter | OTLPTraceExporter | OTelJaegerExporter)[]) {
+  constructor(
+    exporters: (ConsoleSpanExporter | OTLPTraceExporter | OTelJaegerExporter)[],
+  ) {
     super();
     this.exporters = exporters;
   }
 
   export(spans: any, resultCallback: any): void {
-    this.exporters.forEach(exporter => {
+    this.exporters.forEach((exporter) => {
       try {
         (exporter as any).export(spans, resultCallback);
       } catch (error) {
-        console.error('[Tracing] Exporter error:', error);
+        console.error("[Tracing] Exporter error:", error);
       }
     });
   }
@@ -200,7 +241,9 @@ export class Tracing {
     exporters?: TraceExporter[];
     exportIntervalMs?: number;
   }): void {
-    console.log('[Tracing] Legacy initialize() called. Use initializeOpenTelemetry() for proper OTel SDK setup.');
+    console.log(
+      "[Tracing] Legacy initialize() called. Use initializeOpenTelemetry() for proper OTel SDK setup.",
+    );
   }
 
   /**
@@ -209,10 +252,14 @@ export class Tracing {
   extractTraceContext(headers: Record<string, string>): TraceContext | null {
     const getter = {
       get: (carrier: Record<string, string>, key: string) => carrier[key],
-      keys: (carrier: Record<string, string>) => Object.keys(carrier)
+      keys: (carrier: Record<string, string>) => Object.keys(carrier),
     };
 
-    const extractedContext = propagation.extract(context.active(), headers, getter);
+    const extractedContext = propagation.extract(
+      context.active(),
+      headers,
+      getter,
+    );
     const spanContext = trace.getSpanContext(extractedContext);
 
     if (!spanContext) {
@@ -230,7 +277,10 @@ export class Tracing {
   /**
    * Inject trace context into headers (W3C format)
    */
-  injectTraceContext(headers: Record<string, any>, traceContext: TraceContext): void {
+  injectTraceContext(
+    headers: Record<string, any>,
+    traceContext: TraceContext,
+  ): void {
     const spanContext = {
       traceId: traceContext.traceId,
       spanId: traceContext.spanId,
@@ -241,7 +291,7 @@ export class Tracing {
     const setter = {
       set: (carrier: Record<string, any>, key: string, value: string) => {
         carrier[key] = value;
-      }
+      },
     };
 
     // Create a context with the span context and inject it
@@ -252,7 +302,11 @@ export class Tracing {
   /**
    * Start a new span (backward compatible API)
    */
-  startSpan(operationName: string, parentContext?: TraceContext, tags?: Record<string, any>): Span {
+  startSpan(
+    operationName: string,
+    parentContext?: TraceContext,
+    tags?: Record<string, any>,
+  ): Span {
     const startTime = Date.now();
     let otelParentContext: Context | undefined;
 
@@ -283,7 +337,7 @@ export class Tracing {
       startTime,
       tags: tags || {},
       logs: [],
-      status: 'ok',
+      status: "ok",
       _otelSpan: otelSpan,
     };
 
@@ -297,7 +351,10 @@ export class Tracing {
   finishSpan(span: Span, error?: Error): void {
     if (span._otelSpan) {
       if (error) {
-        span._otelSpan.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+        span._otelSpan.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: error.message,
+        });
         span._otelSpan.recordException(error);
       } else {
         span._otelSpan.setStatus({ code: SpanStatusCode.OK });
@@ -306,7 +363,7 @@ export class Tracing {
     }
 
     span.endTime = Date.now();
-    span.status = error ? 'error' : 'ok';
+    span.status = error ? "error" : "ok";
     if (error) {
       span.error = error;
     }
@@ -317,22 +374,30 @@ export class Tracing {
   /**
    * Add a log entry to a span (backward compatible API)
    */
-  log(span: Span, level: string, message: string, fields?: Record<string, any>): void {
+  log(
+    span: Span,
+    level: string,
+    message: string,
+    fields?: Record<string, any>,
+  ): void {
     span.logs.push({
       timestamp: Date.now(),
       level,
       message,
-      ...(fields && { fields })
+      ...(fields && { fields }),
     });
 
     if (span._otelSpan) {
-      const attributes: Record<string, any> = { 'log.level': level, 'log.message': message };
+      const attributes: Record<string, any> = {
+        "log.level": level,
+        "log.message": message,
+      };
       if (fields) {
         Object.entries(fields).forEach(([key, value]) => {
           attributes[`log.field.${key}`] = value;
         });
       }
-      span._otelSpan.addEvent('log', attributes);
+      span._otelSpan.addEvent("log", attributes);
     }
   }
 
@@ -369,44 +434,53 @@ export class Tracing {
  * Note: OpenTelemetry auto-instrumentation handles this automatically
  */
 export function setupAxiosTracing(axiosInstance = axios): void {
-  console.log('[Tracing] setupAxiosTracing() called. Setting up trace context propagation.');
-  
+  console.log(
+    "[Tracing] setupAxiosTracing() called. Setting up trace context propagation.",
+  );
+
   // Add request interceptor to inject traceparent headers
   axiosInstance.interceptors.request.use((config) => {
     const currentSpan = trace.getSpan(context.active());
     if (currentSpan) {
       const spanContext = currentSpan.spanContext();
-      
+
       // Inject W3C trace context headers for explicit propagation
       const carrier: Record<string, string> = {};
       const setter = {
         set: (carrier: Record<string, string>, key: string, value: string) => {
           carrier[key] = value;
-        }
+        },
       };
-      
+
       // Create context with current span and inject trace headers
       const ctx = trace.setSpan(context.active(), currentSpan);
       propagation.inject(ctx, carrier, setter);
-      
+
       // Merge trace headers into existing config headers
       Object.assign(config.headers || {}, carrier);
-      
+
       // Log in development
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`[Tracing] HTTP ${config.method?.toUpperCase()} ${config.url} (trace: ${spanContext.traceId})`);
-        console.log(`[Tracing] Injected trace headers:`, Object.keys(carrier).filter(k => k.startsWith('trace')));
+      if (process.env.NODE_ENV === "development") {
+        console.log(
+          `[Tracing] HTTP ${config.method?.toUpperCase()} ${config.url} (trace: ${spanContext.traceId})`,
+        );
+        console.log(
+          `[Tracing] Injected trace headers:`,
+          Object.keys(carrier).filter((k) => k.startsWith("trace")),
+        );
       }
     }
     return config;
   });
-  
+
   // Add response interceptor for tracing completion
   axiosInstance.interceptors.response.use(
     (response) => {
       const currentSpan = trace.getSpan(context.active());
-      if (currentSpan && process.env.NODE_ENV === 'development') {
-        console.log(`[Tracing] HTTP Response: ${response.status} ${response.config.url}`);
+      if (currentSpan && process.env.NODE_ENV === "development") {
+        console.log(
+          `[Tracing] HTTP Response: ${response.status} ${response.config.url}`,
+        );
       }
       return response;
     },
@@ -414,10 +488,13 @@ export function setupAxiosTracing(axiosInstance = axios): void {
       const currentSpan = trace.getSpan(context.active());
       if (currentSpan) {
         currentSpan.recordException(error);
-        currentSpan.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+        currentSpan.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: error.message,
+        });
       }
       return Promise.reject(error);
-    }
+    },
   );
 }
 

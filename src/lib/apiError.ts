@@ -28,8 +28,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   RATE_LIMITED: "Too many requests. Please try again later.",
   INTERNAL_SERVER_ERROR: "An unexpected error occurred.",
   SERVICE_UNAVAILABLE: "The service is temporarily unavailable.",
-  MAINTENANCE_MODE:
-    "Service is under maintenance. Please try again later.",
+  MAINTENANCE_MODE: "Service is under maintenance. Please try again later.",
   MISSING_API_KEY: "Request must include a valid X-API-Key header.",
   INVALID_API_KEY: "The provided API key is invalid or inactive.",
   INSUFFICIENT_SCOPE: "This API key does not have the required scope.",
@@ -49,7 +48,6 @@ export const ERROR_MESSAGES: Record<string, string> = {
   CORS_DENIED: "Cross-origin request denied by CORS policy.",
   PAYLOAD_TOO_LARGE: "Request body exceeds the allowed size.",
   INVALID_JSON: "Request body must be valid JSON.",
-  METHOD_NOT_ALLOWED: "This HTTP method is not supported.",
   API_KEY_INACTIVE: "This API key has been revoked.",
   API_KEY_EXPIRED: "This API key has expired.",
   UNAUTHENTICATED: "Authentication middleware must run before this handler.",
