@@ -16,7 +16,7 @@ router.get(
   "/rate/:currency",
   cacheMiddleware({
     ttl: CACHE_CONFIG.ttl.marketRates,
-    keyGenerator: (req) => CACHE_KEYS.marketRates.single(req.params.currency),
+    keyGenerator: (req) => CACHE_KEYS.marketRates.single(req.params.currency as string),
   }),
   getRate,
 );
@@ -96,7 +96,7 @@ router.post(
   invalidateCache("market-rates:*"),
   async (req, res) => {
     try {
-      const reviewId = Number.parseInt(req.params.id, 10);
+      const reviewId = Number.parseInt(req.params.id as string, 10);
       if (!Number.isFinite(reviewId)) {
         sendApiError(res, 400, "BAD_REQUEST", "Review ID must be a valid number");
         return;
@@ -118,7 +118,7 @@ router.post(
       sendApiError(
         res,
         status,
-        status === 403 ? "LOCKDOWN_ACTIVE" : "INTERNAL_SERVER_ERROR",
+        status === 500 ? "INTERNAL_SERVER_ERROR" : "LOCKDOWN_ACTIVE",
         error instanceof Error ? error.message : "Failed to approve price review",
       );
     }
@@ -131,7 +131,7 @@ router.post(
   invalidateCache("market-rates:*"),
   async (req, res) => {
     try {
-      const reviewId = Number.parseInt(req.params.id, 10);
+      const reviewId = Number.parseInt(req.params.id as string, 10);
       if (!Number.isFinite(reviewId)) {
         sendApiError(res, 400, "BAD_REQUEST", "Review ID must be a valid number");
         return;

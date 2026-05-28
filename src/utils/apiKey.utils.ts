@@ -52,7 +52,7 @@ export async function createApiKey(
       key: hashed,
       label: opts.label ?? null,
       scopes: opts.scopes,
-      ownerId: opts.ownerId ?? null,
+      ownerId: opts.ownerId ? Number(opts.ownerId) : null,
       isActive: true,
       expiresAt,
     },

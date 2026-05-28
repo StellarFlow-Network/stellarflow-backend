@@ -4,4 +4,5 @@ export * from "./ghsFetcher";
 export * from "./ngnFetcher";
 export * from "./marketRateService";
 export * from "./middleValuePriceService";
+export * from "./medianPriceService";
 //# sourceMappingURL=index.js.map

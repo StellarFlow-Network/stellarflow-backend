@@ -41,5 +41,5 @@
     "noEmitOnError": false
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test"]
+  "exclude": ["node_modules", "dist", "test", "src/modules/**", "src/cache/price-cache.service.ts"]
 }

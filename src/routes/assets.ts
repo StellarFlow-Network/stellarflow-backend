@@ -3,7 +3,6 @@ import { sendApiError } from "../lib/apiError.js";
 import prisma from "../lib/prisma";
 import { cacheMiddleware } from "../cache/CacheMiddleware";
 import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
-import prisma from "../lib/prisma";
 
 const router = Router();
 

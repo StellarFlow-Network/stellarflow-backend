@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { apiKeyAuth } from "../middleware/apiKeyAuth.middleware";
+import { apiKeyAuth } from "../middleware/apiKeyMiddleware";
  
 const router = Router();
  

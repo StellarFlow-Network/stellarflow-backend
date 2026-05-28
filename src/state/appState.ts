@@ -67,7 +67,7 @@ export async function getLockdownState(): Promise<LockdownState> {
       return inMemoryLockdownState;
     }
 
-    const parsedState = normalizeLockdownState(JSON.parse(cachedState));
+    const parsedState = normalizeLockdownState(JSON.parse(cachedState as string));
     inMemoryLockdownState = parsedState;
     return parsedState;
   } catch (error) {

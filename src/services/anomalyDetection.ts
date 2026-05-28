@@ -9,8 +9,11 @@ export interface AnomalyCheckResult {
 }
 
 export class AnomalyDetectionService {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly HISTORY_LIMIT = 50;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly MIN_SAMPLE_SIZE = 10;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly Z_SCORE_THRESHOLD = 3;
 
   /**

@@ -15,7 +15,7 @@ export interface HourlyVolatilitySnapshot {
 }
 export declare class IntelligenceService {
     private readonly db;
-    constructor(db?: PrismaClient);
+    constructor(db?: import(".prisma/client").PrismaClient<import(".prisma/client").Prisma.PrismaClientOptions, import(".prisma/client").Prisma.LogLevel, import("@prisma/client/runtime/client").DefaultArgs>);
     /**
      * Calculates the 24-hour price change for a given currency.
      * Compares the latest rate with the rate from approximately 24 hours ago.

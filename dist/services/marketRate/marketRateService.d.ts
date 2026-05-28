@@ -14,6 +14,8 @@ export declare class MarketRateService {
     private get BATCH_WINDOW_MS();
     constructor();
     private initializeFetchers;
+    private serializeRawPayload;
+    private persistRawResponses;
     getRate(currency: string): Promise<FetcherResponse>;
     getAllRates(): Promise<FetcherResponse[]>;
     private flushBatchSubmissions;

@@ -47,7 +47,9 @@ type RemoteSignatureResponse = {
 export class MultiSigService {
   private localSignerPublicKey: string = "";
   private readonly signerName: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly SIGNATURE_EXPIRY_MS = 60 * 60 * 1000;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly REQUIRED_SIGNATURES: number;
 
   constructor() {

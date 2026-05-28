@@ -29,8 +29,11 @@ export interface ValidationResult {
 }
 
 export class SignatureValidationService {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly CONSENSUS_EXPIRY_HOURS = 24;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly MIN_REQUIRED_SIGNATURES = 2;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly MAX_REQUIRED_SIGNATURES = 5;
 
   /**

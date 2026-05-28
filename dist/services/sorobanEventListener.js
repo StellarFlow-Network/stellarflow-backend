@@ -1,8 +1,8 @@
-import { Keypair } from "@stellar/stellar-sdk";
 import prisma from "../lib/prisma";
 import { broadcastToSessions } from "../lib/socket";
 import stellarProvider from "../lib/stellarProvider";
 import dotenv from "dotenv";
+import { signer } from "../signer";
 dotenv.config();
 export class SorobanEventListener {
     server;
@@ -12,11 +12,7 @@ export class SorobanEventListener {
     lastProcessedLedger = 0;
     pollTimer = null;
     constructor(pollIntervalMs = 15000) {
-        const secret = process.env.ORACLE_SECRET_KEY || process.env.SOROBAN_ADMIN_SECRET;
-        if (!secret) {
-            throw new Error("ORACLE_SECRET_KEY or SOROBAN_ADMIN_SECRET not found in environment variables");
-        }
-        this.oraclePublicKey = Keypair.fromSecret(secret).publicKey();
+        this.oraclePublicKey = ""; // Initialized in start()
         this.pollIntervalMs = pollIntervalMs;
         // Use the shared StellarProvider so failover state is shared across all
         // services rather than each managing its own Horizon URL.
@@ -28,6 +24,7 @@ export class SorobanEventListener {
             return;
         }
         this.isRunning = true;
+        this.oraclePublicKey = await signer.getPublicKey();
         console.log(`[EventListener] Starting listener for account ${this.oraclePublicKey}`);
         // Initialize last processed ledger from the most recent on-chain record
         const lastRecord = await prisma.onChainPrice.findFirst({

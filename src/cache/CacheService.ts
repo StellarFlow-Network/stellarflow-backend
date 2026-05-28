@@ -91,7 +91,7 @@ export class CacheService {
     try {
       const cached = await redis.get(prefixedKey);
       if (cached) {
-        const data = JSON.parse(cached) as T;
+        const data = JSON.parse(cached as string) as T;
 
         // Populate L1 cache
         if (CACHE_CONFIG.l1.enabled) {

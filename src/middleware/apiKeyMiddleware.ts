@@ -79,7 +79,7 @@ export function apiKeyAuth() {
       id: string;
       label: string | null;
       scopes: ApiScope[];
-      ownerId: string | null;
+      ownerId: number | null;
       isActive: boolean;
       expiresAt: Date | null;
       lastUsedAt: Date | null;

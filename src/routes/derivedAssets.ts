@@ -40,7 +40,7 @@ router.get(
   cacheMiddleware({
     ttl: CACHE_CONFIG.ttl.derivedAssets,
     keyGenerator: (req) =>
-      CACHE_KEYS.derivedAssets.crossRate(req.params.base, req.params.quote),
+        CACHE_KEYS.derivedAssets.crossRate(req.params.base as string, req.params.quote as string),
   }),
   getDerivedRate,
 );

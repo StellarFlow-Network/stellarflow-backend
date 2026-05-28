@@ -11,6 +11,16 @@ import {
 import { updateSecretKey } from "../services/secretManager";
 import { appConfig } from "../config/configWatcher";
 import { refreshWhitelistCache } from "../middleware/rateLimitMiddleware";
+import { getRelayerRegistry, getRelayerRegistryById } from "../controllers/adminController";
+
+const CONFIG_PATH = path.resolve(process.cwd(), "config.json");
+
+// Joi schema for rate limit updates
+const rateLimitUpdateSchema = Joi.object().keys({
+  windowMs: Joi.number().min(1000).max(86400000).required(),
+  maxRequests: Joi.number().min(1).max(100000).required(),
+  enabled: Joi.boolean().required(),
+});
 
 const router = Router();
 

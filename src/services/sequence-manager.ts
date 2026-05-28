@@ -34,7 +34,7 @@ export class SequenceManager {
       try {
         if (this.currentSequence === null) {
           console.info(`[SequenceManager] Fetching sequence from Horizon for ${address}...`);
-          const account = await stellarProvider.loadAccount(address);
+          const account = await stellarProvider.getServer().loadAccount(address);
           this.currentSequence = BigInt(account.sequenceNumber());
         } else {
           this.currentSequence += 1n;

@@ -19,6 +19,7 @@ export default [
       globals: {
         Buffer: "readonly",
         __dirname: "readonly",
+        __filename: "readonly",
         console: "readonly",
         process: "readonly",
         setTimeout: "readonly",
@@ -29,6 +30,10 @@ export default [
         btoa: "readonly",
         URL: "readonly",
         URLSearchParams: "readonly",
+        AbortSignal: "readonly",
+        NodeJS: "readonly",
+        require: "readonly",
+        module: "readonly",
       },
     },
     plugins: {
@@ -101,7 +106,7 @@ export default [
     },
   },
   {
-    files: ["test/**/*.ts", "tests/**/*.ts"],
+    files: ["test/**/*.ts", "tests/**/*.ts", "tests/**/*.js"],
     languageOptions: {
       globals: {
         describe: "readonly",
@@ -113,6 +118,7 @@ export default [
         beforeEach: "readonly",
         afterEach: "readonly",
         jest: "readonly",
+        __ENV: "readonly",
       },
     },
   },

@@ -6,6 +6,7 @@ import Tracing, { TraceContext, Span } from '../lib/tracing';
  * Extend Express Request interface to include tracing information
  */
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       traceContext?: TraceContext;

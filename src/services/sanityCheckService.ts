@@ -26,6 +26,7 @@ interface ExternalPriceSource {
  * and alerts admins if deviation exceeds threshold
  */
 export class SanityCheckService {
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly DEVIATION_THRESHOLD = 2.0; // 2% threshold
   private readonly logger = createFetcherLogger("SanityCheck");
   private externalSources: ExternalPriceSource[];

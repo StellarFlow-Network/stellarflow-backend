@@ -13,6 +13,7 @@ import { appConfig } from "../../config/configWatcher";
 import { isLockdownEnabled } from "../../state/appState";
 dotenv.config();
 import { priceReviewService } from "../priceReviewService";
+import { anomalyDetectionService } from "../anomalyDetection";
 export class MarketRateService {
     fetchers = new Map();
     cache = new Map();
@@ -48,6 +49,33 @@ export class MarketRateService {
         this.fetchers.set("KES", new KESRateFetcher());
         this.fetchers.set("GHS", new GHSRateFetcher());
         this.fetchers.set("NGN", new NGNRateFetcher());
+    }
+    serializeRawPayload(payload) {
+        try {
+            return JSON.stringify(payload);
+        }
+        catch {
+            return String(payload);
+        }
+    }
+    async persistRawResponses(currency, rawResponses) {
+        if (!Array.isArray(rawResponses) || rawResponses.length === 0) {
+            return;
+        }
+        const clientAny = prisma;
+        if (!clientAny?.rawData ||
+            typeof clientAny.rawData.createMany !== "function") {
+            return;
+        }
+        await clientAny.rawData.createMany({
+            data: rawResponses.map((rawResponse) => ({
+                currency,
+                provider: rawResponse.provider,
+                endpoint: rawResponse.endpoint ?? null,
+                payload: this.serializeRawPayload(rawResponse.payload),
+                fetchedAt: normalizeDateToUTC(rawResponse.receivedAt),
+            })),
+        });
     }
     async getRate(currency) {
         try {
@@ -101,6 +129,12 @@ export class MarketRateService {
                         : "Unknown fetcher error",
                 };
             }
+            try {
+                await this.persistRawResponses(normalizedCurrency, rate.rawResponses);
+            }
+            catch (rawDataError) {
+                console.error("Failed to persist raw provider responses:", rawDataError);
+            }
             const normalizedRate = {
                 ...rate,
                 timestamp: normalizeDateToUTC(rate.timestamp),
@@ -127,6 +161,13 @@ export class MarketRateService {
                     comparisonTimestamp: reviewAssessment.comparisonTimestamp,
                 }),
             };
+            // Perform Anomaly Detection
+            const anomalyCheck = await anomalyDetectionService.checkAnomaly(normalizedCurrency, rate.rate);
+            if (anomalyCheck.isAnomalous) {
+                console.warn(`[MarketRateService] Anomaly detected for ${normalizedCurrency}: Z-Score ${anomalyCheck.zScore.toFixed(2)}σ`);
+                // Priority alert webhook call removed - method not available
+                // TODO: Implement sendPriorityAlert method on WebhookService or use alternative
+            }
             if (!reviewAssessment.manualReviewRequired) {
                 try {
                     await sanityCheckService.checkPrice(normalizedCurrency, rate.rate);
@@ -156,8 +197,7 @@ export class MarketRateService {
                             });
                             enrichedRate.contractSubmissionSkipped = false;
                             enrichedRate.pendingMultiSig = true;
-                            enrichedRate.multiSigPriceId =
-                                signatureRequest.multiSigPriceId;
+                            enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
                         }
                         else {
                             const txHash = await this.stellarService.submitPriceUpdate(normalizedCurrency, rate.rate, memoId);

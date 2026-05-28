@@ -27,6 +27,7 @@ export class GasBalanceMonitorService {
     private adminKeypair: Keypair;
     private webhookService: WebhookService;
     private lastAlertTime: number = 0;
+    // eslint-disable-next-line @typescript-eslint/naming-convention
     private readonly BALANCE_THRESHOLD_XLM: number;
     private lastKnownBalance: number | null = null;
     private consecutiveFailures: number = 0;

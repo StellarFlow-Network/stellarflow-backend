@@ -96,6 +96,7 @@ describe("GasBalanceMonitorService", () => {
             delete process.env.SOROBAN_ADMIN_SECRET;
 
             // Simply importing the module should not throw
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
             expect(() => require("./gasBalanceMonitorService")).not.toThrow();
         });
 

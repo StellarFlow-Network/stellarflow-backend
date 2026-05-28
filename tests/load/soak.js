@@ -25,9 +25,8 @@ export const options = {
   },
   thresholds: {
     http_req_failed: ["rate<0.01"],
-    http_req_duration: ["p(95)<500"],
     // latency must not degrade over time — keep p99 under 1s throughout
-    http_req_duration: ["p(99)<1000"],
+    http_req_duration: ["p(95)<500", "p(99)<1000"],
     error_rate: ["rate<0.01"],
   },
 };

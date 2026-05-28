@@ -79,13 +79,13 @@ router.get(
   cacheMiddleware({
     ttl: CACHE_CONFIG.ttl.history,
     keyGenerator: (req) => {
-      const asset = req.params.asset.toUpperCase();
+      const asset = (req.params.asset as string).toUpperCase();
       const range = (req.query.range as string) || "7d";
       return CACHE_KEYS.history.asset(asset, range);
     },
   }),
   async (req, res) => {
-  const asset = req.params.asset.toUpperCase();
+  const asset = (req.params.asset as string).toUpperCase();
   const rangeParam = req.query.range as string;
   const fromParam = req.query.from as string;
   const toParam = req.query.to as string;

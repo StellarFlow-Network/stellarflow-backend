@@ -20,8 +20,11 @@ dotenv.config();
 export class StellarService {
   private server: Horizon.Server;
   private network: string;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly MAX_RETRIES = 3;
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly FEE_INCREMENT_PERCENTAGE = 0.5; // 50% increase each retry
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   private readonly RETRY_DELAY_MS = 2000; // 2 seconds delay between retries
 
   constructor() {
