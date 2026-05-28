@@ -1,2 +1,4 @@
 #!/usr/bin/env sh
-npm run style:check
+set -e
+npm run lint
+npx lint-staged
