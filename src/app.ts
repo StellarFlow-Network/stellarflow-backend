@@ -18,6 +18,8 @@ import { adminMiddleware } from "./middleware/adminMiddleware";
 
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 
+import { relayerMiddleware } from "./middleware/relayerMiddleware";
+
 import { latencyValidationMiddleware } from "./middleware/latencyGuardMiddleware";
 
 import { signatureVerificationMiddleware } from "./middleware/signatureVerificationMiddleware";
@@ -154,6 +156,8 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api", rateLimitMiddleware);
 
 app.use("/api", apiKeyMiddleware);
+
+app.use("/api", relayerMiddleware);
 
 app.use("/api", jwtMiddleware);
 

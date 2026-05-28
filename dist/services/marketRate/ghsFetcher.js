@@ -23,6 +23,14 @@ export class GHSRateFetcher {
             if (stellarPrice &&
                 typeof stellarPrice.ghs === "number" &&
                 stellarPrice.ghs > 0) {
+                const rawResponses = [
+                    {
+                        provider: "CoinGecko",
+                        endpoint: this.coinGeckoUrl,
+                        payload: response.data,
+                        receivedAt: new Date(),
+                    },
+                ];
                 const lastUpdatedAt = stellarPrice.last_updated_at
                     ? new Date(stellarPrice.last_updated_at * 1000)
                     : new Date();
@@ -31,6 +39,7 @@ export class GHSRateFetcher {
                     rate: stellarPrice.ghs,
                     timestamp: lastUpdatedAt,
                     source: "CoinGecko (GHS)",
+                    rawResponses,
                 };
             }
             throw new Error("Invalid response from CoinGecko for GHS");

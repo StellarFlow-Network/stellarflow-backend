@@ -3,7 +3,12 @@
  * Prevents the server from crashing mysteriously if a setting is missing.
  */
 export function validateEnv() {
-    const requiredEnvVars = ["DB_URL", "STELLAR_KEY"];
+    const requiredEnvVars = [
+        "DB_URL",
+        "STELLAR_KEY",
+        "JWT_SECRET",
+        "SESSION_SECRET",
+    ];
     const missingEnvVars = [];
     for (const envVar of requiredEnvVars) {
         if (!process.env[envVar]) {
@@ -20,13 +25,18 @@ export function validateEnv() {
         process.exit(1);
     }
     // Log optional but recommended environment variables
-    const recommendedEnvVars = ["MAX_LATENCY_MS"];
+    const recommendedEnvVars = [
+        "MAX_LATENCY_MS",
+        "REDIS_URL",
+        "TRUST_PROXY",
+        "JWT_EXPIRY_HOURS",
+    ];
     for (const envVar of recommendedEnvVars) {
         if (!process.env[envVar]) {
             console.warn(`⚠️ [OPS] Recommended environment variable not set: ${envVar}`);
         }
         else {
-            console.info(`✅ [OPS] ${envVar} = ${process.env[envVar]}ms`);
+            console.info(`✅ [OPS] ${envVar} = ${process.env[envVar]}`);
         }
     }
 }

@@ -24,7 +24,8 @@ export const signatureVerificationMiddleware = async (
   next: NextFunction,
 ): Promise<void> => {
   // Only applies to authenticated relayer requests
-  if (!req.relayer) {
+  // Skip if relayer is a no-op (not authenticated)
+  if (req.relayer?.is_noop?.()) {
     next();
     return;
   }

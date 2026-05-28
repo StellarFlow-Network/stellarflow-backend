@@ -19,8 +19,8 @@ export const latencyValidationMiddleware = async (
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  // Skip validation if not a relayer request
-  if (!req.relayer) {
+  // Skip validation if not a relayer request (no-op relayer)
+  if (req.relayer?.is_noop()) {
     next();
     return;
   }

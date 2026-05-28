@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { sendApiError } from "../lib/apiError.js";
 import prisma from "../lib/prisma";
 import { cacheMiddleware } from "../cache/CacheMiddleware";
 import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
@@ -88,14 +89,14 @@ router.get("/:asset", cacheMiddleware({
         if (fromParam) {
             since = new Date(fromParam);
             if (isNaN(since.getTime())) {
-                res.status(400).json({ success: false, error: "Invalid 'from' date" });
+                sendApiError(res, 400, "BAD_REQUEST", "Invalid 'from' date");
                 return;
             }
         }
         if (toParam) {
             until = new Date(toParam);
             if (isNaN(until.getTime())) {
-                res.status(400).json({ success: false, error: "Invalid 'to' date" });
+                sendApiError(res, 400, "BAD_REQUEST", "Invalid 'to' date");
                 return;
             }
         }
@@ -145,10 +146,7 @@ router.get("/:asset", cacheMiddleware({
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
     }
 });
 export default router;

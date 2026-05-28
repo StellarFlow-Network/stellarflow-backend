@@ -10,10 +10,13 @@ export declare class MarketRateService {
     private remoteOracleServers;
     private pendingSubmissions;
     private batchTimeout;
+    private readonly crossPairLogger;
     private get CACHE_DURATION_MS();
     private get BATCH_WINDOW_MS();
     constructor();
     private initializeFetchers;
+    private serializeRawPayload;
+    private persistRawResponses;
     getRate(currency: string): Promise<FetcherResponse>;
     getAllRates(): Promise<FetcherResponse[]>;
     private flushBatchSubmissions;
@@ -32,5 +35,6 @@ export declare class MarketRateService {
         expiry?: Date;
     }>;
     private requestRemoteSignaturesAsync;
+    private runCrossPairCheck;
 }
 //# sourceMappingURL=marketRateService.d.ts.map

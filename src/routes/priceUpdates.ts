@@ -24,7 +24,7 @@ router.post(
       const { priceReviewId, currency, rate, source, memoId } = req.body;
 
       // Enforce relayer asset authorization
-      if (req.relayer) {
+      if (!req.relayer?.is_noop()) {
         const normalizedCurrency = currency.toUpperCase();
         if (!req.relayer.allowedAssets.includes(normalizedCurrency)) {
           return res.status(403).json({
