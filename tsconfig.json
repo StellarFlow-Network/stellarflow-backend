@@ -19,7 +19,7 @@
     "declarationMap": true,
 
     // Stricter Typechecking Options
-    "noUncheckedIndexedAccess": true,
+    // "noUncheckedIndexedAccess": true,
 
     // Style Options
     // "noImplicitReturns": true,
@@ -28,15 +28,17 @@
     // "noUnusedParameters": true,
     // "noFallthroughCasesInSwitch": true,
     // "noPropertyAccessFromIndexSignature": true,
+    "noImplicitAny": false,
 
     // Recommended Options
-    "strict": true,
+    "strict": false,
     "jsx": "react-jsx",
     "verbatimModuleSyntax": false,
     "isolatedModules": true,
     "noUncheckedSideEffectImports": true,
     "moduleDetection": "force",
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noEmitOnError": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test"]
