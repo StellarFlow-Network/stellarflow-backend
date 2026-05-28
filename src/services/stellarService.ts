@@ -10,6 +10,7 @@ import {
   xdr,
   Account,
 } from "@stellar/stellar-sdk";
+import logger from "../utils/logger";
 import stellarProvider from "../lib/stellarProvider";
 import { sequenceManager } from "./sequence-manager";
 import { assertSigningAllowed } from "../state/appState";
@@ -81,7 +82,7 @@ export class StellarService {
       baseFee,
     );
 
-    console.info(`✅ Price update for ${currency} confirmed. Hash: ${result.hash}`);
+    logger.info(`✅ Price update for ${currency} confirmed. Hash: ${result.hash}`);
     return result.hash;
   }
 
@@ -123,7 +124,7 @@ export class StellarService {
     );
 
     const currencies = updates.map((u) => u.currency).join(", ");
-    console.info(`✅ Batched price update for [${currencies}] confirmed. Hash: ${result.hash}`);
+    logger.info(`✅ Batched price update for [${currencies}] confirmed. Hash: ${result.hash}`);
     return result.hash;
   }
 
@@ -161,7 +162,7 @@ export class StellarService {
       baseFee,
     );
 
-    console.info(`✅ Multi-signed price update for ${currency} confirmed. Hash: ${result.hash}`);
+    logger.info(`✅ Multi-signed price update for ${currency} confirmed. Hash: ${result.hash}`);
     return result.hash;
   }
 
@@ -207,12 +208,17 @@ export class StellarService {
           })
         );
 
-        return await this.server.submitTransaction(transaction);
+        const result = await this.server.submitTransaction(transaction);
+
+        // Telemetry Sink: Clean point-and-click StellarExpert URL for Testnet
+        logger.info(`[StellarService] Transaction Broadcast Successful. View on StellarExpert: https://testnet.stellarexpert.org/tx/${result.hash}`);
+
+        return result;
       } catch (error: any) {
         const resultCode = error.response?.data?.extras?.result_codes?.transaction;
 
         if (resultCode === "tx_bad_seq") {
-          console.warn("⚠️ SequenceManager: tx_bad_seq detected. Invalidating sequence and retrying...");
+          logger.warn("⚠️ SequenceManager: tx_bad_seq detected. Invalidating sequence and retrying...");
           sequenceManager.invalidate(await this.getPublicKey());
         }
 
@@ -220,7 +226,7 @@ export class StellarService {
         stellarProvider.reportFailure(error);
 
         if (this.isStuckError(error) && attempt <= maxRetries) {
-          console.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying...`);
+          logger.warn(`⚠️ Transaction stuck or fee too low (Attempt ${attempt}). Bumping fee and retrying...`);
           await new Promise((resolve) => setTimeout(resolve, this.RETRY_DELAY_MS));
           continue;
         }
@@ -288,16 +294,21 @@ export class StellarService {
 
             transaction.signatures.push(decoratedSignature);
           } catch (error) {
-            console.error(`[StellarService] Failed to add signature for ${sig.signerPublicKey}:`, error);
+            logger.error(`[StellarService] Failed to add signature for ${sig.signerPublicKey}:`, error);
           }
         }
 
-        return await this.server.submitTransaction(transaction);
+        const result = await this.server.submitTransaction(transaction);
+
+        // Telemetry Sink: Clean point-and-click StellarExpert URL for Testnet
+        logger.info(`[StellarService] Transaction Broadcast Successful. View on StellarExpert: https://testnet.stellarexpert.org/tx/${result.hash}`);
+
+        return result;
       } catch (error: any) {
         const resultCode = error.response?.data?.extras?.result_codes?.transaction;
 
         if (resultCode === "tx_bad_seq") {
-          console.warn("⚠️ SequenceManager: tx_bad_seq detected in multi-sig. Invalidating sequence...");
+          logger.warn("⚠️ SequenceManager: tx_bad_seq detected in multi-sig. Invalidating sequence...");
           sequenceManager.invalidate(await this.getPublicKey());
         }
 
