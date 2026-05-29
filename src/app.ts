@@ -69,6 +69,22 @@ if (process.env.DASHBOARD_URL && process.env.DASHBOARD_URL !== process.env.FRONT
   allowedOrigins.push(process.env.DASHBOARD_URL);
 }
 
+// Validate CORS origin configuration
+const isProduction = process.env.NODE_ENV === "production";
+if (allowedOrigins.length === 0 && isProduction) {
+  throw new Error(
+    "❌ CORS security error: FRONTEND_URL must be explicitly configured in production environment. " +
+    "Please set the FRONTEND_URL environment variable."
+  );
+}
+
+if (allowedOrigins.length === 0) {
+  console.warn(
+    "⚠️ CORS origin configuration: No explicit FRONTEND_URL or DASHBOARD_URL set. " +
+    "In non-production environments, localhost origins will be allowed for testing."
+  );
+}
+
 // Allow localhost only for staging/testing environments
 const isLocalhost = (origin: string) => {
   return origin && (origin.includes("localhost") || origin.includes("127.0.0.1"));

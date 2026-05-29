@@ -1,6 +1,5 @@
 import { createServer } from "http";
 import compression from "compression";
-import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
 import { Horizon } from "@stellar/stellar-sdk";
@@ -76,16 +75,6 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-const dashboardUrl =
-  process.env.DASHBOARD_URL ||
-  process.env.FRONTEND_URL ||
-  "http://localhost:3000";
-
-if (!dashboardUrl) {
-  console.error("❌ Missing required environment variable: DASHBOARD_URL");
-  process.exit(1);
-}
-
 const PORT = process.env.PORT || 3000;
 
 // Horizon server for health checks
@@ -96,9 +85,7 @@ const horizonUrl =
     : "https://horizon-testnet.stellar.org";
 const horizonServer = new Horizon.Server(horizonUrl);
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Note: CORS and express.json middleware are configured in app.ts
 
 // Routes
 app.use("/api/market-rates", marketRatesRouter);
