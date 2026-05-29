@@ -56,10 +56,27 @@ dotenv.config();
 
 const app = express();
 
-const dashboardUrl =
-  process.env.DASHBOARD_URL ||
-  process.env.FRONTEND_URL ||
-  "http://localhost:3000";
+// Build list of allowed CORS origins
+const allowedOrigins: string[] = [];
+
+// Add explicitly configured frontend URL (primary source)
+if (process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.FRONTEND_URL);
+}
+
+// Add dashboard URL if different from FRONTEND_URL
+if (process.env.DASHBOARD_URL && process.env.DASHBOARD_URL !== process.env.FRONTEND_URL) {
+  allowedOrigins.push(process.env.DASHBOARD_URL);
+}
+
+// Allow localhost only for staging/testing environments
+const isLocalhost = (origin: string) => {
+  return origin && (origin.includes("localhost") || origin.includes("127.0.0.1"));
+};
+
+const isNonProductionEnv = () => {
+  return process.env.NODE_ENV !== "production";
+};
 
 app.use(morgan("dev"));
 
@@ -70,13 +87,22 @@ app.use(maintenanceMiddleware);
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Allow requests without origin header (same-origin requests)
       if (!origin) return callback(null, true);
 
-      if (origin === dashboardUrl) return callback(null, true);
+      // Check if origin is in the allowed list
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+
+      // Allow localhost for staging/testing environments only
+      if (isNonProductionEnv() && isLocalhost(origin)) {
+        return callback(null, true);
+      }
 
       return callback(
         new Error(
-          `CORS policy: Access denied from origin ${origin}. Allowed origin: ${dashboardUrl}`,
+          `CORS policy: Access denied from origin ${origin}. Allowed origins: ${allowedOrigins.join(", ")}${
+            isNonProductionEnv() ? " (+ localhost for testing)" : ""
+          }`,
         ),
       );
     },
