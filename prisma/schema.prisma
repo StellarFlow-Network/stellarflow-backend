@@ -194,3 +194,28 @@ model ComplianceMetadata {
   @@index([createdAt])
   @@index([relayerName, createdAt])
 }
+
+// High-Fidelity Event Log for nanosecond-precision tracking
+// Used for high-frequency data pipelines requiring quantum-level timing accuracy
+model EventLog {
+  id              Int     @id @default(autoincrement())
+  eventType       String  @db.VarChar(100)    // e.g., "API_CALL", "CACHE_HIT", "PRICE_UPDATE"
+  source          String  @db.VarChar(200)    // Service or component that logged the event
+  level           String  @db.VarChar(20)     // "debug", "info", "warn", "error"
+  message         String  @db.Text            // Event description
+  metadata        String? @db.Text            // JSON metadata about the event
+  
+  // Nanosecond-precision timestamps for high-frequency logging
+  // Using BIGINT to store nanoseconds since process start or Unix epoch
+  timestampNs     BigInt                      // Nanoseconds since some reference point (process.hrtime.bigint())
+  createdAt       DateTime @default(now())   // Regular timestamp for DB indexing
+  
+  // Indexes for efficient querying
+  @@index([eventType])
+  @@index([source])
+  @@index([level])
+  @@index([createdAt])
+  @@index([timestampNs])
+  @@index([eventType, createdAt])
+  @@index([source, createdAt])
+}
