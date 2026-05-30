@@ -105,15 +105,12 @@ function handleDisconnect(socket) {
     if (!sessionId)
         return;
     const session = sessions.get(sessionId);
-    if (session && session.status === "connected") {
-        console.log(`⏳ Entering grace period for session: ${sessionId}`);
-        session.status = "disconnected-pending";
-        session.socketId = null;
-        session.lastSeen = Date.now();
-        session.disconnectTimer = setTimeout(() => {
-            console.log(`🗑️ Grace period expired for session: ${sessionId}`);
-            sessions.delete(sessionId);
-        }, GRACE_PERIOD);
+    if (session) {
+        if (session.disconnectTimer) {
+            clearTimeout(session.disconnectTimer);
+        }
+        sessions.delete(sessionId);
+        console.log(`🗑️ Session force-cleared on disconnect: ${sessionId}`);
     }
 }
 function cleanupSessions() {

@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma";
+import { generateKsuid } from "../utils/ksuid.js";
 export class ErrorTracker {
     failureCounters = new Map();
     threshold = 3;
@@ -34,6 +35,7 @@ export class ErrorTracker {
                 typeof clientAny.errorLog.create === "function") {
                 await clientAny.errorLog.create({
                     data: {
+                        id: generateKsuid(),
                         providerName: serviceKey,
                         errorMessage: errorDetails instanceof Error
                             ? errorDetails.message

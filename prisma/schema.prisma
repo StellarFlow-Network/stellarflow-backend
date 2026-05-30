@@ -19,6 +19,7 @@ model PriceHistory {
 
   @@index([currency, timestamp])
   @@index([timestamp])
+  @@index([updatedAt])
   @@unique([currency, source, timestamp])
 }
 
@@ -33,6 +34,9 @@ model Currency {
   updatedAt   DateTime  @updatedAt
 
   priceHistory PriceHistory[]
+  
+  @@index([symbol])
+  @@index([updatedAt])
 }
 
 // On-Chain Confirmed Price Model
@@ -111,6 +115,7 @@ model MultiSigPrice {
   @@index([currency, status, requestedAt])
   @@index([status, expiresAt])
   @@index([priceReviewId])
+  @@index([updatedAt])
 
   multiSigSignatures MultiSigSignature[]
 }
@@ -176,6 +181,8 @@ model Relayer {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  @@index([updatedAt])
+
   permissionChanges PermissionChange[]
   sessions          UserSession[]
 }
@@ -229,6 +236,7 @@ model OhlcCandle {
 
   // Primary query pattern: fetch candles for a currency/granularity over a time range
   @@index([currency, granularity, openTime])
+  @@index([updatedAt])
   // Secondary: sweep all candles in a time range (e.g. backfill checks)
   @@index([granularity, openTime])
 }
@@ -265,6 +273,7 @@ model ComplianceMetadata {
   @@index([eventType])
   @@index([createdAt])
   @@index([relayerName, createdAt])
+  @@index([updatedAt])
 }
 
 // Pending Consensus Actions Table
@@ -292,6 +301,7 @@ model PendingConsensus {
   @@index([actionType, status])
   @@index([status, expiresAt])
   @@index([requestedBy, requestedAt])
+  @@index([updatedAt])
 
   pendingSignatures PendingSignature[]
 }

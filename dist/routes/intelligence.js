@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { sendApiError } from "../lib/apiError.js";
 import { cacheMiddleware } from "../cache/CacheMiddleware";
 import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config";
 import { intelligenceService } from "../services/intelligenceService";
@@ -39,10 +40,7 @@ router.get("/hourly-volatility", cacheMiddleware({
     }
     catch (error) {
         console.error("Error fetching hourly volatility snapshot:", error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
     }
 });
 /**
@@ -90,10 +88,7 @@ router.get("/price-change/:currency", async (req, res) => {
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
     }
 });
 /**
@@ -130,10 +125,7 @@ router.get("/stale", async (req, res) => {
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
     }
 });
 export default router;

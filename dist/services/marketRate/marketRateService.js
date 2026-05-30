@@ -11,8 +11,14 @@ import { normalizeDateToUTC } from "../../utils/timeUtils";
 import { sanityCheckService } from "../sanityCheckService";
 import { appConfig } from "../../config/configWatcher";
 import { isLockdownEnabled } from "../../state/appState";
+import axios from "axios";
+import { createFetcherLogger } from "../../utils/logger";
+import { OUTGOING_HTTP_TIMEOUT_MS } from "../../utils/httpTimeout";
+import { checkCrossPairConsistency } from "../../logic/crossPairArbitrageDetection";
 dotenv.config();
 import { priceReviewService } from "../priceReviewService";
+import { webhookService } from "../webhook";
+import { anomalyDetectionService } from "../anomalyDetection";
 export class MarketRateService {
     fetchers = new Map();
     cache = new Map();
@@ -23,6 +29,7 @@ export class MarketRateService {
     remoteOracleServers = [];
     pendingSubmissions = [];
     batchTimeout = null;
+    crossPairLogger = createFetcherLogger('CrossPairArbitrage');
     get CACHE_DURATION_MS() {
         return appConfig.cacheDurationMs;
     }
@@ -48,6 +55,33 @@ export class MarketRateService {
         this.fetchers.set("KES", new KESRateFetcher());
         this.fetchers.set("GHS", new GHSRateFetcher());
         this.fetchers.set("NGN", new NGNRateFetcher());
+    }
+    serializeRawPayload(payload) {
+        try {
+            return JSON.stringify(payload);
+        }
+        catch {
+            return String(payload);
+        }
+    }
+    async persistRawResponses(currency, rawResponses) {
+        if (!Array.isArray(rawResponses) || rawResponses.length === 0) {
+            return;
+        }
+        const clientAny = prisma;
+        if (!clientAny?.rawData ||
+            typeof clientAny.rawData.createMany !== "function") {
+            return;
+        }
+        await clientAny.rawData.createMany({
+            data: rawResponses.map((rawResponse) => ({
+                currency,
+                provider: rawResponse.provider,
+                endpoint: rawResponse.endpoint ?? null,
+                payload: this.serializeRawPayload(rawResponse.payload),
+                fetchedAt: normalizeDateToUTC(rawResponse.receivedAt),
+            })),
+        });
     }
     async getRate(currency) {
         try {
@@ -101,6 +135,12 @@ export class MarketRateService {
                         : "Unknown fetcher error",
                 };
             }
+            try {
+                await this.persistRawResponses(normalizedCurrency, rate.rawResponses);
+            }
+            catch (rawDataError) {
+                console.error("Failed to persist raw provider responses:", rawDataError);
+            }
             const normalizedRate = {
                 ...rate,
                 timestamp: normalizeDateToUTC(rate.timestamp),
@@ -127,6 +167,23 @@ export class MarketRateService {
                     comparisonTimestamp: reviewAssessment.comparisonTimestamp,
                 }),
             };
+            // Perform Anomaly Detection
+            const anomalyCheck = await anomalyDetectionService.checkAnomaly(normalizedCurrency, rate.rate);
+            if (anomalyCheck.isAnomalous) {
+                console.warn(`[MarketRateService] Anomaly detected for ${normalizedCurrency}: Z-Score ${anomalyCheck.zScore.toFixed(2)}σ`);
+                await webhookService.sendPriorityAlert({
+                    currency: normalizedCurrency,
+                    rate: rate.rate,
+                    zScore: anomalyCheck.zScore,
+                    mean: anomalyCheck.mean,
+                    stdDev: anomalyCheck.stdDev,
+                    timestamp: rate.timestamp,
+                });
+            }
+            // Cross-pair arbitrage detection (NGN only)
+            if (normalizedCurrency === 'NGN') {
+                void this.runCrossPairCheck(rate.rate);
+            }
             if (!reviewAssessment.manualReviewRequired) {
                 try {
                     await sanityCheckService.checkPrice(normalizedCurrency, rate.rate);
@@ -156,8 +213,7 @@ export class MarketRateService {
                             });
                             enrichedRate.contractSubmissionSkipped = false;
                             enrichedRate.pendingMultiSig = true;
-                            enrichedRate.multiSigPriceId =
-                                signatureRequest.multiSigPriceId;
+                            enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
                         }
                         else {
                             const txHash = await this.stellarService.submitPriceUpdate(normalizedCurrency, rate.rate, memoId);
@@ -455,6 +511,42 @@ export class MarketRateService {
                 console.error(`[MarketRateService] ❌ Error requesting signature from ${this.remoteOracleServers[index]}:`, result.reason);
             }
         });
+    }
+    async runCrossPairCheck(ngnXlmRate) {
+        try {
+            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd', {
+                timeout: OUTGOING_HTTP_TIMEOUT_MS,
+                headers: { 'User-Agent': 'StellarFlow-Oracle/1.0' },
+            });
+            const xlmUsd = response.data?.stellar?.usd;
+            if (typeof xlmUsd !== 'number' || xlmUsd <= 0)
+                return;
+            // Derive NGN/USD reference from the same CoinGecko data
+            const ngnUsdReference = ngnXlmRate / xlmUsd;
+            const result = checkCrossPairConsistency(ngnXlmRate, xlmUsd, ngnUsdReference);
+            if (result.flagged) {
+                this.crossPairLogger.warn(`⚠️ CROSS-PAIR ARBITRAGE DETECTED: NGN deviation ${result.deviationPercent.toFixed(2)}% exceeds threshold`, {
+                    ngnXlmRate,
+                    xlmUsdRate: xlmUsd,
+                    impliedRate: result.impliedRate,
+                    directRate: result.directRate,
+                    deviationPercent: result.deviationPercent,
+                });
+            }
+            else {
+                this.crossPairLogger.debug('✅ Cross-pair consistency check passed for NGN', {
+                    ngnXlmRate,
+                    xlmUsdRate: xlmUsd,
+                    impliedRate: result.impliedRate,
+                    deviationPercent: result.deviationPercent,
+                });
+            }
+        }
+        catch (error) {
+            this.crossPairLogger.warn('Cross-pair check failed, skipping', {
+                error: error instanceof Error ? error.message : error,
+            });
+        }
     }
 }
 //# sourceMappingURL=marketRateService.js.map

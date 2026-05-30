@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { sendApiError } from "../lib/apiError.js";
 import { getRate, getAllRates } from "../controllers/marketRatesController";
 import { MarketRateService } from "../services/marketRate";
 import { cacheMiddleware, invalidateCache } from "../cache/CacheMiddleware";
@@ -31,20 +32,12 @@ router.get("/latest", cacheMiddleware({
             });
         }
         else {
-            res.status(500).json({
-                success: false,
-                error: result.error,
-            });
+            sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (result.error) === "string" ? String(result.error) : undefined);
         }
     }
     catch (error) {
         console.error("Error fetching latest prices:", error);
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error
-                ? error.message
-                : "Failed to fetch latest prices",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", error instanceof Error ? error.message : "Failed to fetch latest prices");
     }
 });
 // Pending reviews
@@ -60,12 +53,7 @@ router.get("/reviews/pending", cacheMiddleware({
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error
-                ? error.message
-                : "Failed to fetch pending price reviews",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", error instanceof Error ? error.message : "Failed to fetch pending price reviews");
     }
 });
 // Approve review
@@ -73,10 +61,7 @@ router.post("/reviews/:id/approve", invalidateCache("market-rates:*"), async (re
     try {
         const reviewId = Number.parseInt(req.params.id, 10);
         if (!Number.isFinite(reviewId)) {
-            res.status(400).json({
-                success: false,
-                error: "Review ID must be a valid number",
-            });
+            sendApiError(res, 400, "BAD_REQUEST", "Review ID must be a valid number");
             return;
         }
         const { reviewedBy, note } = req.body ?? {};
@@ -87,12 +72,8 @@ router.post("/reviews/:id/approve", invalidateCache("market-rates:*"), async (re
         });
     }
     catch (error) {
-        res.status(isLockdownError(error) ? error.statusCode : 500).json({
-            success: false,
-            error: error instanceof Error
-                ? error.message
-                : "Failed to approve price review",
-        });
+        const status = isLockdownError(error) ? error.statusCode : 500;
+        sendApiError(res, status, status === 403 ? "LOCKDOWN_ACTIVE" : "INTERNAL_SERVER_ERROR", error instanceof Error ? error.message : "Failed to approve price review");
     }
 });
 // Reject review
@@ -100,10 +81,7 @@ router.post("/reviews/:id/reject", invalidateCache("market-rates:*"), async (req
     try {
         const reviewId = Number.parseInt(req.params.id, 10);
         if (!Number.isFinite(reviewId)) {
-            res.status(400).json({
-                success: false,
-                error: "Review ID must be a valid number",
-            });
+            sendApiError(res, 400, "BAD_REQUEST", "Review ID must be a valid number");
             return;
         }
         const { reviewedBy, note } = req.body ?? {};
@@ -114,12 +92,7 @@ router.post("/reviews/:id/reject", invalidateCache("market-rates:*"), async (req
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error
-                ? error.message
-                : "Failed to reject price review",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", error instanceof Error ? error.message : "Failed to reject price review");
     }
 });
 // Health check
@@ -136,10 +109,7 @@ router.get("/health", cacheMiddleware({
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
     }
 });
 // Supported currencies
@@ -155,10 +125,7 @@ router.get("/currencies", cacheMiddleware({
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
     }
 });
 // Cache status
@@ -171,10 +138,7 @@ router.get("/cache", (req, res) => {
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
     }
 });
 // Clear cache
@@ -187,10 +151,7 @@ router.post("/cache/clear", (req, res) => {
         });
     }
     catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
-        });
+        sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
     }
 });
 export default router;
