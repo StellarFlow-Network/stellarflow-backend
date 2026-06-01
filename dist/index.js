@@ -10,6 +10,7 @@ import { multiSigSubmissionService } from "./services/multiSigSubmissionService"
 import { validateEnv } from "./utils/envValidator";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
+import { watchConfig } from "./config/configWatcher";
 // Load environment variables
 dotenv.config();
 // Enable log masking to prevent sensitive data leaks
@@ -172,6 +173,11 @@ const httpServer = createServer(app);
 initSocket(httpServer);
 let sorobanEventListener = null;
 let isShuttingDown = false;
+const stopConfigWatcher = watchConfig((cfg) => {
+    sorobanEventListener?.restart(cfg.sorobanPollIntervalMs);
+    multiSigSubmissionService.restart(cfg.multiSigPollIntervalMs);
+    hourlyAverageService.restart(cfg.hourlyAverageCheckIntervalMs);
+});
 const closeHttpServer = () => new Promise((resolve, reject) => {
     if (!httpServer.listening) {
         resolve();
@@ -196,6 +202,7 @@ const shutdown = async (signal) => {
         sorobanEventListener?.stop();
         multiSigSubmissionService.stop();
         hourlyAverageService.stop();
+        stopConfigWatcher();
         await closeHttpServer();
         console.log("HTTP server closed.");
         await prisma.$disconnect();

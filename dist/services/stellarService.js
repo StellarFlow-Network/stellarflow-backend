@@ -1,5 +1,6 @@
 import { Keypair, TransactionBuilder, Operation, Networks, Memo, Horizon, xdr, } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
+import { assertSigningAllowed } from "../state/appState";
 dotenv.config();
 export class StellarService {
     server;
@@ -39,6 +40,7 @@ export class StellarService {
      * @param memoId - Unique ID for auditing
      */
     async submitPriceUpdate(currency, price, memoId) {
+        await assertSigningAllowed();
         const baseFee = parseInt(await this.getRecommendedFee(), 10);
         const result = await this.submitTransactionWithRetries((sourceAccount, currentFee) => {
             return new TransactionBuilder(sourceAccount, {
@@ -66,6 +68,7 @@ export class StellarService {
         if (updates.length === 0) {
             throw new Error("Cannot submit empty batch of price updates");
         }
+        await assertSigningAllowed();
         const baseFee = parseInt(await this.getRecommendedFee(), 10);
         const result = await this.submitTransactionWithRetries((sourceAccount, currentFee) => {
             const builder = new TransactionBuilder(sourceAccount, {
@@ -93,6 +96,7 @@ export class StellarService {
      * @param signatures - Array of signatures from different signers
      */
     async submitMultiSignedPriceUpdate(currency, price, memoId, signatures) {
+        await assertSigningAllowed();
         const baseFee = parseInt(await this.getRecommendedFee(), 10);
         const result = await this.submitMultiSignedTransaction((sourceAccount, currentFee) => {
             return new TransactionBuilder(sourceAccount, {
@@ -124,7 +128,9 @@ export class StellarService {
                 const sourceAccount = await this.server.loadAccount(this.keypair.publicKey());
                 const currentFee = Math.floor(baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt));
                 const transaction = builderFn(sourceAccount, currentFee);
+                await assertSigningAllowed();
                 transaction.sign(this.keypair);
+                await assertSigningAllowed();
                 return await this.server.submitTransaction(transaction);
             }
             catch (error) {
@@ -156,6 +162,7 @@ export class StellarService {
                 const currentFee = Math.floor(baseFee * (1 + this.FEE_INCREMENT_PERCENTAGE * attempt));
                 const transaction = builderFn(sourceAccount, currentFee);
                 // Sign with the local keypair first
+                await assertSigningAllowed();
                 transaction.sign(this.keypair);
                 // Add signatures from other signers
                 for (const sig of signatures) {
@@ -181,6 +188,7 @@ export class StellarService {
                         // Continue without this signature (may cause failure on Stellar side)
                     }
                 }
+                await assertSigningAllowed();
                 return await this.server.submitTransaction(transaction);
             }
             catch (error) {

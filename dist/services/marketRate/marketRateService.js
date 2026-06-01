@@ -1,6 +1,7 @@
 import { KESRateFetcher } from "./kesFetcher";
 import { GHSRateFetcher } from "./ghsFetcher";
 import { NGNRateFetcher } from "./ngnFetcher";
+import { MockRateFetcher } from "./mockFetcher";
 import { StellarService } from "../stellarService";
 import { multiSigService } from "../multiSigService";
 import { getIO } from "../../lib/socket";
@@ -8,6 +9,7 @@ import prisma from "../../lib/prisma";
 import { getRedisClient } from "../../lib/redis";
 import dotenv from "dotenv";
 import { normalizeDateToUTC } from "../../utils/timeUtils";
+import { appConfig } from "../../config/configWatcher";
 dotenv.config();
 // Global import for priceReviewService
 import { priceReviewService } from "../priceReviewService";
@@ -15,14 +17,14 @@ export class MarketRateService {
     fetchers = new Map();
     cache = new Map();
     stellarService;
-    CACHE_DURATION_MS = 30000; // 30 seconds
     LATEST_PRICES_REDIS_KEY = "market-rates:latest:v1";
     LATEST_PRICES_REDIS_TTL_SECONDS = 5;
     multiSigEnabled;
     remoteOracleServers = [];
     pendingSubmissions = [];
     batchTimeout = null;
-    BATCH_WINDOW_MS = 5000; // 5 seconds bundle window
+    get CACHE_DURATION_MS() { return appConfig.cacheDurationMs; }
+    get BATCH_WINDOW_MS() { return appConfig.batchWindowMs; }
     constructor() {
         this.stellarService = new StellarService();
         // Check if multi-sig is enabled
@@ -41,6 +43,14 @@ export class MarketRateService {
         this.initializeFetchers();
     }
     initializeFetchers() {
+        const useMocks = process.env.USE_MOCKS === "true";
+        if (useMocks) {
+            console.info("[MarketRateService] USE_MOCKS=true detected. Using mock rate fetchers for local development.");
+            this.fetchers.set("KES", new MockRateFetcher("KES"));
+            this.fetchers.set("GHS", new MockRateFetcher("GHS"));
+            this.fetchers.set("NGN", new MockRateFetcher("NGN"));
+            return;
+        }
         const kesFetcher = new KESRateFetcher();
         const ghsFetcher = new GHSRateFetcher();
         const ngnFetcher = new NGNRateFetcher();
@@ -133,48 +143,54 @@ export class MarketRateService {
                 }),
             };
             if (!reviewAssessment.manualReviewRequired) {
-                try {
-                    const memoId = this.stellarService.generateMemoId(normalizedCurrency);
-                    if (this.multiSigEnabled) {
-                        // Multi-sig workflow: create request and collect signatures
-                        console.info(`[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`);
-                        const signatureRequest = await multiSigService.createMultiSigRequest(reviewAssessment.reviewRecordId, normalizedCurrency, rate.rate, rate.source, memoId);
-                        // Sign locally first
-                        try {
-                            await multiSigService.signMultiSigPrice(signatureRequest.multiSigPriceId);
-                            console.info(`[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`);
-                        }
-                        catch (error) {
-                            console.error(`[MarketRateService] Failed to sign locally:`, error);
-                        }
-                        // Request signatures from remote servers asynchronously
-                        // (non-blocking - don't wait for completion)
-                        this.requestRemoteSignaturesAsync(signatureRequest.multiSigPriceId, memoId).catch((err) => {
-                            console.error(`[MarketRateService] Error requesting remote signatures:`, err);
-                        });
-                        // Mark as multi-sig pending (don't submit to Stellar yet)
-                        // The submission will happen via a background job once all signatures are collected
-                        enrichedRate.contractSubmissionSkipped = false;
-                        enrichedRate.pendingMultiSig = true;
-                        enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
-                    }
-                    else {
-                        // Single-sig workflow: submit directly to Stellar
-                        const txHash = await this.stellarService.submitPriceUpdate(normalizedCurrency, rate.rate, memoId);
-                        await priceReviewService.markContractSubmitted(reviewAssessment.reviewRecordId, memoId, txHash);
-                        console.info(`[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`);
-                        this.pendingSubmissions.push({
-                            currency: normalizedCurrency,
-                            rate: rate.rate,
-                            reviewId: reviewAssessment.reviewRecordId,
-                        });
-                        if (!this.batchTimeout) {
-                            this.batchTimeout = setTimeout(() => this.flushBatchSubmissions(), this.BATCH_WINDOW_MS);
-                        }
-                    }
+                if (await isLockdownEnabled()) {
+                    enrichedRate.contractSubmissionSkipped = true;
+                    console.warn(`[MarketRateService] Lockdown enabled. Skipping Stellar submission workflow for ${normalizedCurrency}.`);
                 }
-                catch (stellarError) {
-                    console.error("Failed to submit price update to Stellar network:", stellarError);
+                else {
+                    try {
+                        const memoId = this.stellarService.generateMemoId(normalizedCurrency);
+                        if (this.multiSigEnabled) {
+                            // Multi-sig workflow: create request and collect signatures
+                            console.info(`[MarketRateService] Starting multi-sig workflow for ${normalizedCurrency} rate ${rate.rate}`);
+                            const signatureRequest = await multiSigService.createMultiSigRequest(reviewAssessment.reviewRecordId, normalizedCurrency, rate.rate, rate.source, memoId);
+                            // Sign locally first
+                            try {
+                                await multiSigService.signMultiSigPrice(signatureRequest.multiSigPriceId);
+                                console.info(`[MarketRateService] Local signature added for multi-sig request ${signatureRequest.multiSigPriceId}`);
+                            }
+                            catch (error) {
+                                console.error(`[MarketRateService] Failed to sign locally:`, error);
+                            }
+                            // Request signatures from remote servers asynchronously
+                            // (non-blocking - don't wait for completion)
+                            this.requestRemoteSignaturesAsync(signatureRequest.multiSigPriceId, memoId).catch((err) => {
+                                console.error(`[MarketRateService] Error requesting remote signatures:`, err);
+                            });
+                            // Mark as multi-sig pending (don't submit to Stellar yet)
+                            // The submission will happen via a background job once all signatures are collected
+                            enrichedRate.contractSubmissionSkipped = false;
+                            enrichedRate.pendingMultiSig = true;
+                            enrichedRate.multiSigPriceId = signatureRequest.multiSigPriceId;
+                        }
+                        else {
+                            // Single-sig workflow: submit directly to Stellar
+                            const txHash = await this.stellarService.submitPriceUpdate(normalizedCurrency, rate.rate, memoId);
+                            await priceReviewService.markContractSubmitted(reviewAssessment.reviewRecordId, memoId, txHash);
+                            console.info(`[MarketRateService] Single-sig price update submitted for ${normalizedCurrency}`);
+                            this.pendingSubmissions.push({
+                                currency: normalizedCurrency,
+                                rate: rate.rate,
+                                reviewId: reviewAssessment.reviewRecordId,
+                            });
+                            if (!this.batchTimeout) {
+                                this.batchTimeout = setTimeout(() => this.flushBatchSubmissions(), this.BATCH_WINDOW_MS);
+                            }
+                        }
+                    }
+                    catch (stellarError) {
+                        console.error("Failed to submit price update to Stellar network:", stellarError);
+                    }
                 }
             }
             else {

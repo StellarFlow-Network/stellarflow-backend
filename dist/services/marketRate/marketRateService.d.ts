@@ -4,14 +4,14 @@ export declare class MarketRateService {
     private fetchers;
     private cache;
     private stellarService;
-    private readonly CACHE_DURATION_MS;
     private readonly LATEST_PRICES_REDIS_KEY;
     private readonly LATEST_PRICES_REDIS_TTL_SECONDS;
     private multiSigEnabled;
     private remoteOracleServers;
     private pendingSubmissions;
     private batchTimeout;
-    private readonly BATCH_WINDOW_MS;
+    private get CACHE_DURATION_MS();
+    private get BATCH_WINDOW_MS();
     constructor();
     private initializeFetchers;
     getRate(currency: string): Promise<FetcherResponse>;

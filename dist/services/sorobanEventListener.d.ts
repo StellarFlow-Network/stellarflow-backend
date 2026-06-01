@@ -16,6 +16,7 @@ export declare class SorobanEventListener {
     constructor(pollIntervalMs?: number);
     start(): Promise<void>;
     stop(): void;
+    restart(newIntervalMs: number): void;
     private pollTransactions;
     private extractMemoId;
     private parseOperations;

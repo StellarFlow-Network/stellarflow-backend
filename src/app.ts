@@ -13,9 +13,10 @@ import assetsRouter from "./routes/assets";
 import statusRouter from "./routes/status";
 import adminRouter from "./routes/admin";
 import derivedAssetsRouter from "./routes/derivedAssets";
-import adminRouter from "./routes/admin";
+import metricsRouter from "./routes/metrics";
 import { apiKeyMiddleware } from "./middleware/apiKeyMiddleware";
 import { rateLimitMiddleware } from "./middleware/rateLimitMiddleware";
+import { metricsMiddleware, metricsEndpoint } from "./middleware/metrics";
 import { specs } from "./lib/swagger";
 
 dotenv.config();
@@ -72,6 +73,7 @@ app.use(
 );
 
 app.use(express.json());
+app.use(metricsMiddleware);
 
 app.use("/api/v1/docs", swaggerUi.serve);
 app.get(
@@ -87,6 +89,7 @@ app.get(
     customSiteTitle: "StellarFlow API Documentation",
   }),
 );
+app.get("/metrics", metricsEndpoint);
 
 app.use("/api", rateLimitMiddleware);
 app.use("/api", apiKeyMiddleware);
@@ -101,6 +104,7 @@ app.use("/api/v1/price-updates", priceUpdatesRouter);
 app.use("/api/v1/assets", assetsRouter);
 app.use("/api/v1/status", statusRouter);
 app.use("/api/v1/derived-assets", derivedAssetsRouter);
+app.use("/api/v1/metrics", metricsRouter);
 app.use("/api/admin", adminRouter);
 
 app.get("/", (req, res) => {
@@ -118,11 +122,16 @@ app.get("/", (req, res) => {
         cache: "/api/v1/market-rates/cache",
         clearCache: "POST /api/v1/market-rates/cache/clear",
       },
+      metrics: {
+        exporter: "/api/v1/metrics/exporter",
+        prometheus: "/api/v1/metrics/prometheus",
+      },
       stats: {
         volume: "/api/v1/stats/volume?date=YYYY-MM-DD",
       },
       admin: {
         lockdown: "POST /api/admin/lockdown",
+        reportSummary: "/api/admin/reports/summary?format=html|pdf&month=YYYY-MM",
       },
       history: {
         assetHistory: "/api/v1/history/:asset?range=1d|7d|30d|90d",
@@ -130,9 +139,6 @@ app.get("/", (req, res) => {
       derivedAssets: {
         crossRate: "/api/v1/derived-assets/rate/:base/:quote",
         ngnGhs: "/api/v1/derived-assets/ngn-ghs",
-      },
-      admin: {
-        reportSummary: "/api/admin/reports/summary?format=html|pdf&month=YYYY-MM",
       },
     },
   });

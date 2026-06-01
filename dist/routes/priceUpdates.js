@@ -1,5 +1,6 @@
 import express from "express";
 import { multiSigService } from "../services/multiSigService";
+import { isLockdownError } from "../state/appState";
 const router = express.Router();
 /**
  * POST /api/v1/price-updates/multi-sig/request
@@ -18,6 +19,16 @@ router.post("/multi-sig/request", async (req, res) => {
                 success: false,
                 error: "Missing required fields: priceReviewId, currency, rate, source, memoId",
             });
+        }
+        // Enforce relayer asset authorization
+        if (req.relayer) {
+            const normalizedCurrency = currency.toUpperCase();
+            if (!req.relayer.allowedAssets.includes(normalizedCurrency)) {
+                return res.status(403).json({
+                    success: false,
+                    error: `Relayer not authorized for asset: ${normalizedCurrency}`,
+                });
+            }
         }
         const signatureRequest = await multiSigService.createMultiSigRequest(priceReviewId, currency, rate, source, memoId);
         res.json({
@@ -80,9 +91,9 @@ router.post("/sign", async (req, res) => {
     }
     catch (error) {
         console.error("[API] Signature creation failed:", error);
-        res.status(400).json({
+        res.status(isLockdownError(error) ? error.statusCode : 400).json({
             success: false,
-            error: String(error),
+            error: error instanceof Error ? error.message : String(error),
         });
     }
 });
