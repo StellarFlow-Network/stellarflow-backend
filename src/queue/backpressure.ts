@@ -37,7 +37,7 @@ export class AsyncBoundedQueue<T> {
   private waitingProducers: Array<(value: boolean) => void> = [];
   private closed: boolean = false;
 
-  constructor(private readonly maxSize: number) {}
+  constructor(private readonly maxSize: number) { }
 
   /**
    * Add an item to the queue. If queue is full, wait until space is available.
@@ -215,29 +215,42 @@ export class BackpressureManager {
     }
 
     // Try to enqueue without blocking first
+    // Fast path
     if (this.queue.tryPut(packet)) {
       return true;
     }
 
-    // If queue is full, handle based on priority
-    if (packet.priority === PacketPriority.CRITICAL) {
-      // Critical packets wait for space
-      try {
-        await this.queue.put(packet);
-        return true;
-      } catch (error) {
-        console.error(
-          "[Backpressure] Failed to enqueue critical packet:",
-          error,
-        );
-        this.metrics.droppedPackets++;
-        return false;
-      }
-    } else {
-      // Non-critical packets are dropped when queue is full
-      console.error(
-        "[Backpressure] Queue overflow. Dropping non-critical packet.",
+    // Drop metric packets when heavily saturated
+    if (
+      saturation >= this.config.dropThreshold &&
+      packet.priority === PacketPriority.METRIC
+    ) {
+      console.warn(
+        `[Backpressure] Saturation at ${Math.round(
+          saturation * 100,
+        )}%. Dropping metric packet.`,
       );
+
+      this.metrics.droppedPackets++;
+      return false;
+    }
+
+    // Queue is at capacity.
+    // Apply hard backpressure by blocking producers until space is available.
+    try {
+      await this.queue.put(packet);
+
+      console.debug(
+        `[Backpressure] Queue full. Producer blocked until capacity became available.`,
+      );
+
+      return true;
+    } catch (error) {
+      console.error(
+        "[Backpressure] Failed to enqueue packet:",
+        error,
+      );
+
       this.metrics.droppedPackets++;
       return false;
     }

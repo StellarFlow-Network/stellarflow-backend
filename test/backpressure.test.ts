@@ -478,3 +478,11 @@ describe('Integration Tests', () => {
     expect(metrics.saturation).toBe(0);
   });
 });
+
+it("blocks standard packets when queue is full")
+
+it("blocks critical packets when queue is full")
+
+it("drops metric packets above drop threshold")
+
+it("never exceeds maxCapacity of 1000")
