@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from queue.backpressure import (
+from .backpressure import (
+    # Drop-tail ingestion queue pipeline
+    BackpressureConfig,
+    BackpressureQueueManager,
+    BackpressureSnapshot,
+    BoundedIngestionQueue,
+    IngestionPacket,
+    PacketPriority,
+    backpressure_queue_manager,
+    # Token-bucket rate limiter (backward-compat)
     TokenBucket,
     TokenBucketConfig,
     TokenBucketController,
@@ -9,6 +18,15 @@ from queue.backpressure import (
 )
 
 __all__ = [
+    # Drop-tail ingestion queue pipeline
+    "PacketPriority",
+    "IngestionPacket",
+    "BackpressureConfig",
+    "BackpressureSnapshot",
+    "BoundedIngestionQueue",
+    "BackpressureQueueManager",
+    "backpressure_queue_manager",
+    # Token-bucket rate limiter (backward-compat)
     "TokenBucketConfig",
     "TokenBucketSnapshot",
     "TokenBucket",
