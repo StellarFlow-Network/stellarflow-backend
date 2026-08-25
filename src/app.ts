@@ -44,6 +44,8 @@ import intelligenceRouter from "./routes/intelligence";
 
 import marketRatesRouter from "./routes/marketRates";
 
+import multiSigEnvelopeRouter from "./routes/multiSigEnvelope";
+
 import priceUpdatesRouter from "./routes/priceUpdates";
 
 import sanityCheckRouter from "./routes/sanityCheck";
