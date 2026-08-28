@@ -20,6 +20,10 @@ import { sequenceManager } from "./sequence-manager";
 import { assertSigningAllowed } from "../state/appState";
 import { signer } from "../signer";
 import { logger } from "../utils/logger";
+import {
+  parseSorobanError,
+  isSorobanTransactionError,
+} from "../lib/sorobanError.js";
 
 dotenv.config();
 
@@ -149,7 +153,15 @@ export class StellarService {
       .build();
 
     const rpcServer = stellarProvider.getRpcServer();
-    const simulation = await rpcServer.simulateTransaction(transaction);
+
+    let simulation: any;
+    try {
+      simulation = await rpcServer.simulateTransaction(transaction);
+    } catch (raw) {
+      // Simulation failures may carry XDR — parse for rich diagnostics.
+      throw parseSorobanError(raw);
+    }
+
     const prepared = rpcServer.assembleTransaction(transaction, simulation).build();
     const signature = await signer.sign(prepared.hash());
     const keypair = Keypair.fromPublicKey(publicKey);
@@ -160,13 +172,32 @@ export class StellarService {
       }),
     );
 
-    const submitted = await rpcServer.sendTransaction(prepared);
+    let submitted: any;
+    try {
+      submitted = await rpcServer.sendTransaction(prepared);
+    } catch (raw) {
+      throw parseSorobanError(raw);
+    }
+
+    // Poll for confirmation
     for (let attempt = 0; attempt < 30; attempt++) {
-      const result = await rpcServer.getTransaction(submitted.hash);
-      if (result.status === "SUCCESS") return submitted.hash;
-      if (result.status === "FAILED") throw new Error(`Governance proposal ${proposalId} failed`);
+      let result: any;
+      try {
+        result = await rpcServer.getTransaction(submitted.hash);
+      } catch (raw) {
+        throw parseSorobanError(raw);
+      }
+
+      if (result.status === "SUCCESS") return submitted.hash as string;
+
+      if (result.status === "FAILED") {
+        // The result object itself may carry errorResultXdr — wrap it.
+        throw parseSorobanError(result);
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
+
     throw new Error(`Governance proposal ${proposalId} confirmation timed out`);
   }
 
@@ -467,7 +498,21 @@ export class StellarService {
 
     try {
       return await Promise.race([
-        this.server.submitTransaction(transaction),
+        this.server.submitTransaction(transaction).catch((raw: unknown) => {
+          // Re-wrap Soroban / contract errors with rich diagnostics.
+          // Plain Horizon errors (tx_bad_seq, tx_insufficient_fee, etc.) are
+          // left as-is so the retry logic in submitTransactionWithRetries can
+          // still inspect `error.response.data.extras.result_codes` normally.
+          const isHorizonResultError =
+            raw &&
+            typeof raw === "object" &&
+            (raw as any).response?.data?.extras?.result_codes !== undefined;
+
+          if (!isHorizonResultError && !isSorobanTransactionError(raw)) {
+            throw parseSorobanError(raw);
+          }
+          throw raw;
+        }),
         new Promise<never>((_, reject) => {
           pending.timer = setTimeout(() => {
             const activePending = this.pendingTimeBoundTransactions.get(

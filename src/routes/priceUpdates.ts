@@ -1,11 +1,12 @@
 import express, { Request, Response } from "express";
-import { sendApiError } from "../lib/apiError.js";
+import { sendApiError, sendSorobanError } from "../lib/apiError.js";
 import { multiSigService, SignaturePayload } from "../services/multiSigService";
 import { isLockdownError } from "../state/appState";
 import {
   sanitizeMultiSigRequest,
   sanitizeSignatureRequest,
 } from "../middleware/payloadSanitizer";
+import { isSorobanTransactionError } from "../lib/sorobanError.js";
 
 const router = express.Router();
 
@@ -48,6 +49,7 @@ router.post(
       });
     } catch (error) {
       console.error("[API] Multi-sig request creation failed:", error);
+      if (isSorobanTransactionError(error)) return sendSorobanError(res, error);
       sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (String(error)) === "string" ? String(String(error)) : undefined);
     }
   },
@@ -99,6 +101,7 @@ router.post(
       });
     } catch (error) {
       console.error("[API] Signature creation failed:", error);
+      if (isSorobanTransactionError(error)) return sendSorobanError(res, error);
       res.status(isLockdownError(error) ? error.statusCode : 400).json({
         success: false,
         error: error instanceof Error ? error.message : String(error),
@@ -139,6 +142,7 @@ router.post(
       res.json({ success: true });
     } catch (error) {
       console.error("[API] Remote signature request failed:", error);
+      if (isSorobanTransactionError(error)) return sendSorobanError(res, error);
       sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (String(error)) === "string" ? String(String(error)) : undefined);
     }
   },
@@ -188,6 +192,7 @@ router.get(
       });
     } catch (error) {
       console.error("[API] Multi-sig status fetch failed:", error);
+      if (isSorobanTransactionError(error)) return sendSorobanError(res, error);
       sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (String(error)) === "string" ? String(String(error)) : undefined);
     }
   },
@@ -217,6 +222,7 @@ router.get("/multi-sig/pending", async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("[API] Pending multi-sig fetch failed:", error);
+    if (isSorobanTransactionError(error)) return sendSorobanError(res, error);
     sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (String(error)) === "string" ? String(String(error)) : undefined);
   }
 });
@@ -273,6 +279,7 @@ router.get(
       });
     } catch (error) {
       console.error("[API] Signature fetch failed:", error);
+      if (isSorobanTransactionError(error)) return sendSorobanError(res, error);
       sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (String(error)) === "string" ? String(String(error)) : undefined);
     }
   },
@@ -311,6 +318,7 @@ router.post(
       res.json({ success: true });
     } catch (error) {
       console.error("[API] Submission recording failed:", error);
+      if (isSorobanTransactionError(error)) return sendSorobanError(res, error);
       sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (String(error)) === "string" ? String(String(error)) : undefined);
     }
   },
@@ -330,6 +338,7 @@ router.get("/multi-sig/signer-info", async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("[API] Signer info fetch failed:", error);
+    if (isSorobanTransactionError(error)) return sendSorobanError(res, error);
     sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (String(error)) === "string" ? String(String(error)) : undefined);
   }
 });
