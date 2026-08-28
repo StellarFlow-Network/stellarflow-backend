@@ -1,4 +1,8 @@
 import type { Response } from "express";
+import type {
+  SorobanDiagnostic,
+  SorobanTransactionError,
+} from "./sorobanError.js";
 
 /**
  * Base URL for the internal error wiki. Override with INTERNAL_WIKI_BASE_URL.
@@ -69,6 +73,58 @@ export const ERROR_MESSAGES: Record<string, string> = {
   FX_QUOTE_PENDING: "The FX quote is still pending.",
   FX_FEED_UNAVAILABLE: "Unable to fetch live FX feed rate.",
   FX_DEVIATION_EXCEEDED: "Rate deviation exceeds the allowed threshold.",
+
+  // ── Soroban / contract errors ───────────────────────────────────────────
+  SOROBAN_TRANSACTION_ERROR:      "A Soroban smart-contract transaction failed.",
+  SOROBAN_UNKNOWN_ERROR:          "An unspecified Soroban error occurred.",
+  SOROBAN_UNKNOWN_CODE:           "An unrecognized Soroban error code was returned.",
+
+  // Soroban RPC-level codes
+  SOROBAN_SUCCESS:                "Soroban transaction succeeded.",
+  SOROBAN_WASM_VM_ERROR:          "The WASM virtual machine encountered an error.",
+  SOROBAN_INVOKE_FUNCTION_FAILED: "The contract invocation failed at the RPC level.",
+  SOROBAN_CONTRACT_ERROR:         "The smart contract panicked with an application error.",
+  SOROBAN_STORAGE_ERROR:          "A ledger storage key was not found or violated the footprint.",
+  SOROBAN_RESOURCE_LIMIT_EXCEEDED:"The transaction exceeded its resource budget (instructions/memory).",
+  SOROBAN_VALUE_ERROR:            "A malformed ScVal was passed to the contract.",
+  SOROBAN_AUTH_ERROR:             "Missing or invalid authorization for the contract call.",
+  SOROBAN_CYCLE_ERROR:            "A circular or reentrant contract call was detected.",
+  SOROBAN_INTERNAL_ERROR:         "An internal Soroban host error occurred.",
+
+  // Application-level contract error codes
+  INVALID_PRICE:                  "The submitted price is invalid (zero or negative).",
+  SLIPPAGE_EXCEEDED:              "Price deviation exceeds the permitted slippage tolerance.",
+  PRICE_TOO_STALE:                "The submitted price timestamp is outside the freshness window.",
+  PRICE_TOO_NEW:                  "The submitted price timestamp is ahead of the current ledger time.",
+  DUPLICATE_SUBMISSION:           "An identical price payload has already been recorded on-chain.",
+  OVERFLOW:                       "Arithmetic overflow occurred while processing the price calculation.",
+  GAP_TOO_SMALL:                  "Insufficient ledger gap since the last submission; wait for more ledgers.",
+  SEQUENCE_MISMATCH:              "Relayer sequence number does not match the contract state.",
+  LEDGER_CLOSED:                  "The target ledger has already closed; resubmit with a fresh sequence.",
+  PROPOSAL_NOT_FOUND:             "The referenced governance proposal does not exist.",
+  PROPOSAL_EXPIRED:               "The governance proposal has passed its deadline.",
+  ALREADY_VOTED:                  "This account has already cast a vote on this proposal.",
+  VOTING_CLOSED:                  "The voting period for this proposal has ended.",
+  QUORUM_NOT_MET:                 "The proposal did not reach the required quorum to execute.",
+  TIMELOCK_ACTIVE:                "The proposal is still within its mandatory timelock period.",
+  STORAGE_ENTRY_NOT_FOUND:        "The requested ledger storage entry was not found.",
+  RENT_LEDGER_THRESHOLD:          "Storage TTL is below the bump threshold; the entry may be evicted.",
+  FOOTPRINT_VIOLATION:            "Transaction accessed a key not declared in its read/write footprint.",
+  AUTH_REVOKED:                   "The signer's on-chain authorization has been revoked.",
+  SIGNATURE_INVALID:              "One or more transaction signatures failed verification.",
+  INSUFFICIENT_WEIGHT:            "Collected signature weight does not meet the multi-sig threshold.",
+  UNKNOWN_CONTRACT_ERROR:         "An unrecognized contract error code was returned.",
+
+  // Horizon tx result codes
+  HORIZON_TX_FAILED:              "One or more operations in the transaction failed.",
+  HORIZON_TX_TOO_EARLY:           "Transaction ledger sequence is before the current network time.",
+  HORIZON_TX_TOO_LATE:            "Transaction ledger sequence is past the current network time.",
+  HORIZON_TX_BAD_SEQ:             "Transaction sequence number does not match the source account.",
+  HORIZON_TX_BAD_AUTH:            "Insufficient or incorrect authorization provided.",
+  HORIZON_TX_INSUFFICIENT_BALANCE:"Source account balance is too low to cover the transaction fee.",
+  HORIZON_TX_INSUFFICIENT_FEE:    "Transaction fee is too low to be accepted by the network.",
+  HORIZON_TX_INTERNAL_ERROR:      "An internal Stellar network error occurred.",
+  HORIZON_TX_MALFORMED:           "The transaction envelope is malformed.",
 };
 
 export function buildHelpLink(errorCode: string): string {
@@ -125,4 +181,69 @@ export function errorCodeForStatus(status: number): string {
     default:
       return "INTERNAL_SERVER_ERROR";
   }
+}
+
+// ---------------------------------------------------------------------------
+// Soroban-specific response helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Extended API payload that carries a full Soroban diagnostic alongside the
+ * standard error envelope.  Returned by `sendSorobanError`.
+ */
+export interface SorobanApiErrorPayload {
+  success: false;
+  error: {
+    code: string;
+    message: string;
+    timestamp: string;
+    soroban: SorobanDiagnostic;
+  };
+}
+
+/**
+ * Serialize a `SorobanTransactionError` into a structured HTTP response.
+ *
+ * The body shape is:
+ * ```json
+ * {
+ *   "success": false,
+ *   "error": {
+ *     "code": "SLIPPAGE_EXCEEDED",
+ *     "message": "Price deviation exceeds the permitted slippage tolerance.",
+ *     "timestamp": "2026-08-28T08:00:00.000Z",
+ *     "soroban": {
+ *       "code": "SLIPPAGE_EXCEEDED",
+ *       "message": "Price deviation exceeds the permitted slippage tolerance.",
+ *       "numericCode": 3,
+ *       "rawHex": "000000030000...",
+ *       "timestamp": "2026-08-28T08:00:00.000Z"
+ *     }
+ *   }
+ * }
+ * ```
+ *
+ * @param res     Express response object.
+ * @param error   A `SorobanTransactionError` instance.
+ * @param status  HTTP status code (defaults to 422 Unprocessable Entity).
+ */
+export function sendSorobanError(
+  res: Response,
+  error: SorobanTransactionError,
+  status = 422,
+): void {
+  const { diagnostic } = error;
+  const message = ERROR_MESSAGES[diagnostic.code] ?? diagnostic.message;
+
+  const payload: SorobanApiErrorPayload = {
+    success: false,
+    error: {
+      code: diagnostic.code,
+      message,
+      timestamp: new Date().toISOString(),
+      soroban: diagnostic,
+    },
+  };
+
+  res.status(status).json(payload);
 }
