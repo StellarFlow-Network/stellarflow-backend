@@ -549,3 +549,123 @@ model HarvestExecution {
   @@index([strategyId, evaluatedAt])
   @@index([status, evaluatedAt])
 }
+
+// Cross-Chain Bridge Models
+model BridgeChain {
+  id              Int      @id @default(autoincrement())
+  chainId         String   @unique // EVM chain ID or Stellar network identifier
+  chainName       String   // e.g., "Ethereum", "Polygon", "Stellar"
+  chainType       String   // "EVM" or "Stellar"
+  rpcUrl          String?  // RPC endpoint for EVM chains
+  explorerUrl     String?  // Block explorer URL
+  bridgeContract  String?  // Bridge contract address
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  bridgeEvents    BridgeEvent[]
+  bridgeValidators BridgeValidator[]
+}
+
+model BridgeValidator {
+  id              Int      @id @default(autoincrement())
+  chainId         String
+  chain           BridgeChain @relation(fields: [chainId], references: [id])
+  validatorAddress String   @unique // Public key or address
+  validatorName   String?
+  isActive        Boolean  @default(true)
+  weight          Int      @default(1) // Signature weight for threshold calculations
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  validatorSignatures BridgeValidatorSignature[]
+}
+
+model BridgeEvent {
+  id              Int      @id @default(autoincrement())
+  chainId         Int
+  chain           BridgeChain @relation(fields: [chainId], references: [id])
+  
+  // Event details
+  eventType       String   // "TOKEN_LOCK", "TOKEN_RELEASE", "TOKEN_BURN"
+  transactionHash String   @unique
+  blockNumber     BigInt?
+  logIndex        Int?
+  
+  // Token details
+  tokenAddress    String?
+  tokenSymbol     String?
+  tokenAmount     Decimal  @db.Decimal(38, 18)
+  
+  // Participant details
+  fromAddress     String
+  toAddress       String?
+  
+  // Destination chain info
+  destinationChainId String?
+  destinationAddress  String?
+  
+  // Processing status
+  status          String   @default("PENDING") // "PENDING", "VERIFIED", "STAGED", "COMPLETED", "FAILED"
+  errorMessage    String?
+  
+  // Timestamps
+  eventTimestamp  DateTime
+  processedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([chainId, status])
+  @@index([transactionHash])
+  @@index([status, eventTimestamp])
+}
+
+model BridgeValidatorSignature {
+  id              Int      @id @default(autoincrement())
+  bridgeEventId   Int
+  bridgeEvent     BridgeEvent @relation(fields: [bridgeEventId], references: [id], onDelete: Cascade)
+  validatorId     Int
+  validator       BridgeValidator @relation(fields: [validatorId], references: [id])
+  
+  signature       String   // Hex-encoded signature
+  signedAt        DateTime @default(now())
+  
+  createdAt       DateTime @default(now())
+
+  @@unique([bridgeEventId, validatorId])
+  @@index([bridgeEventId])
+}
+
+model BridgeOperation {
+  id              String   @id @default(uuid())
+  bridgeEventId   Int
+  bridgeEvent     BridgeEvent @relation(fields: [bridgeEventId], references: [id])
+  
+  // Soroban minting details
+  sorobanContract String?
+  mintAmount      Decimal  @db.Decimal(38, 18)
+  recipientAddress String
+  
+  // Transaction staging
+  stagedTxHash    String?  // Stellar transaction hash when staged
+  stellarTxHash   String?  // Final Stellar transaction hash when executed
+  
+  // Queue processing
+  queueStatus     String   @default("QUEUED") // "QUEUED", "PROCESSING", "COMPLETED", "FAILED"
+  priority        Int      @default(5) // 1-10, lower is higher priority
+  retryCount      Int      @default(0)
+  maxRetries      Int      @default(3)
+  
+  // Timestamps
+  queuedAt        DateTime @default(now())
+  processingStartedAt DateTime?
+  completedAt     DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([queueStatus, priority, queuedAt])
+  @@index([bridgeEventId])
+  @@index([stagedTxHash])
+  @@index([stellarTxHash])
+}
