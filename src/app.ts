@@ -61,6 +61,7 @@ import ordersRouter from "./routes/orders";
 import sorobanSimulationRouter from "./routes/sorobanSimulation";
 import remittanceRouter from "./routes/remittance";
 import { sendApiError } from "./lib/apiError.js";
+import { graphqlQueryGuard } from "./middleware/graphqlQueryGuard";
 
 dotenv.config();
 
@@ -130,6 +131,10 @@ app.use(
 );
 
 app.use(express.json());
+
+// Issue #924 – GraphQL query depth & complexity guard
+// Intercepts POST /graphql requests before they reach any downstream handler.
+app.use("/graphql", graphqlQueryGuard());
 
 // Add tracing middleware early in the stack
 app.use(tracingMiddleware);
