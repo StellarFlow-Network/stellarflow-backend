@@ -54,3 +54,36 @@ uvicorn[standard]>=0.24.0
 
 # Process pool executor for CPU-intensive ZK proof verification
 # (uses stdlib concurrent.futures, no extra package needed)
+# ---------------------------------------------------------------------------
+# Issue #760 — OpenTelemetry APM Tracing Across Microservices (app/telemetry.py)
+# ---------------------------------------------------------------------------
+
+# Core OpenTelemetry API/SDK — TracerProvider, span processors, W3C context
+# propagation (matches the propagator the Node service installs in
+# src/lib/tracing.ts, so traceparent/tracestate headers are interchangeable
+# across both halves of the stack).
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+
+# OTLP exporter — the primary export path; modern Jaeger (1.35+) and most
+# collectors accept OTLP directly.
+opentelemetry-exporter-otlp-proto-http>=1.24.0
+
+# Legacy Jaeger Thrift collector exporter, for TRACING_JAEGER_ENDPOINT
+# deployments pointed at a collector without OTLP ingestion enabled.
+opentelemetry-exporter-jaeger-thrift>=1.21.0
+
+# Auto-instrumentation: FastAPI request spans + outbound aiohttp client spans
+# (e.g. AnchorStatusPoller's SEP-24/SEP-31 polling requests) with automatic
+# W3C traceparent header injection/extraction.
+opentelemetry-instrumentation-fastapi>=0.45b0
+opentelemetry-instrumentation-aiohttp-client>=0.45b0
+
+# Auto-instrumentation for the asyncpg/redis calls made inside those
+# instrumented request paths, for full request-flow visibility.
+opentelemetry-instrumentation-asyncpg>=0.45b0
+opentelemetry-instrumentation-redis>=0.45b0
+
+# Celery task publish/run/retry spans + automatic W3C trace-context
+# propagation through task message headers across the RabbitMQ broker.
+opentelemetry-instrumentation-celery>=0.45b0

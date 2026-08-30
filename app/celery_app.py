@@ -5,6 +5,17 @@ import os
 from celery import Celery
 from celery.schedules import crontab
 
+from app.telemetry import instrument_celery, setup_tracing
+
+# The celery-worker / celery-beat processes are separate Python processes
+# from the FastAPI app, so tracing must be initialised here too (Issue
+# #760). instrument_celery() hooks Celery's before_task_publish /
+# task_prerun signals so the W3C traceparent header is propagated through
+# the RabbitMQ task message headers automatically: a span started while
+# handling an HTTP request that calls a task's .delay()/.apply_async()
+# continues, as a child span, inside whichever worker picks the task up.
+setup_tracing()
+instrument_celery()
 
 celery_app = Celery(
     "stellarflow",
