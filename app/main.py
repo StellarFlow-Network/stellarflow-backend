@@ -29,6 +29,13 @@ from app.services.proof_verification_engine import (
     verify_proof_async,
     verify_proof_batch,
 )
+from app.telemetry import (
+    instrument_datastores,
+    instrument_fastapi_app,
+    instrument_http_clients,
+    setup_tracing,
+    shutdown_tracing,
+)
 
 try:
     from app.routers import revenue as revenue_router
@@ -37,6 +44,14 @@ except ImportError:
     _HAS_REVENUE_ROUTER = False
 
 logger = logging.getLogger(__name__)
+
+# Initialise OpenTelemetry APM tracing as early as possible so every
+# instrumentation hook below attaches before the first request or
+# background task runs (Issue #760). Both calls are no-ops unless
+# TRACING_ENABLED=true, so this is safe in every environment.
+setup_tracing()
+instrument_http_clients()
+instrument_datastores()
 
 
 @asynccontextmanager
@@ -49,6 +64,7 @@ async def lifespan(app: FastAPI):
     await stop_latency_monitor()
     shutdown_process_pool()
     shutdown_pools()
+    shutdown_tracing()
 
 
 app = FastAPI(
@@ -57,6 +73,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Instrument every FastAPI endpoint with a request span (Issue #760). The
+# incoming traceparent header, if present, becomes the span's parent so a
+# request that originated in the Node service continues the same trace.
+instrument_fastapi_app(app)
 
 
 @app.get("/health")
