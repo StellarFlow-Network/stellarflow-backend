@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.models.proof import ProofVerificationRequest, ProofVerificationResponse
 from app.services.executor_pool import (
@@ -78,6 +79,42 @@ app = FastAPI(
 # incoming traceparent header, if present, becomes the span's parent so a
 # request that originated in the Node service continues the same trace.
 instrument_fastapi_app(app)
+
+
+class AuthChallengeConsumeRequest(BaseModel):
+    nonce: str
+
+
+@app.post("/api/v1/auth/challenge")
+async def auth_challenge() -> JSONResponse:
+    """Issue a one-time authentication challenge nonce."""
+    try:
+        nonce = await create_auth_challenge()
+        return JSONResponse({"success": True, "data": {"nonce": nonce}})
+    except Exception as exc:
+        logger.exception("Auth challenge creation failed: %s", exc)
+        raise HTTPException(
+            status_code=503, detail="Authentication unavailable"
+        ) from exc
+
+
+@app.post("/api/v1/auth/challenge/consume")
+async def auth_challenge_consume(
+    request: AuthChallengeConsumeRequest,
+) -> JSONResponse:
+    """Atomically consume an authentication challenge nonce exactly once."""
+    try:
+        consumed = await consume_auth_challenge(request.nonce)
+    except Exception as exc:
+        logger.exception("Auth challenge consumption failed: %s", exc)
+        raise HTTPException(
+            status_code=503, detail="Authentication unavailable"
+        ) from exc
+
+    if not consumed:
+        raise HTTPException(status_code=401, detail="Invalid or expired challenge")
+
+    return JSONResponse({"success": True, "data": {"consumed": True}})
 
 
 @app.get("/health")

@@ -34,19 +34,25 @@ TypeScript/Node.js backend for the StellarFlow oracle network. This service fetc
 
 ## Automated DB Backups (cron)
 
-This repo includes `scripts/pg_backup.sh`, which runs `pg_dump` to `backups/postgres/` and prunes backups older than 30 days.
+This repo includes `scripts/pg_backup.sh`, which creates a daily full custom-format `pg_dump`, atomically stores it in `backups/postgres/`, prunes local backups older than 30 days, and can upload an SSE-KMS encrypted copy to S3. S3 Object Lock is applied to each uploaded object; configure the destination bucket with Object Lock enabled before enabling uploads.
 
 - **Run once**: `npm run db:backup` (or `bash scripts/pg_backup.sh`)
 - **Required**: `DATABASE_URL` must be set (the script will also load it from `.env` if present)
 - **Optional**:
   - `BACKUP_DIR` (default: `backups/postgres`)
   - `BACKUP_RETENTION_DAYS` (default: `30`)
+  - `BACKUP_S3_URI` (optional; enables offsite upload)
+  - `BACKUP_S3_KMS_KEY_ID` (required with `BACKUP_S3_URI`)
+  - `BACKUP_S3_RETENTION_DAYS` and `BACKUP_S3_OBJECT_LOCK_MODE` (defaults: `30`, `COMPLIANCE`)
+  - `DRY_RUN=1` (validate backup settings without connecting to PostgreSQL or S3)
 
 Example cron (daily at 03:00 UTC):
 
 ```bash
 0 3 * * * cd /stellarflow-backend && /usr/bin/env bash scripts/pg_backup.sh >> backups/pg_backup.log 2>&1
 ```
+
+For point-in-time recovery, see [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md).
 
 ### Installation
 
@@ -251,6 +257,14 @@ After the server starts, open:
 
 ```text
 http://localhost:3000/api/v1/docs
+```
+
+The FastAPI contract is checked into `openapi.json`. After changing Python API
+routes or models, regenerate and validate it with:
+
+```bash
+python scripts/check_openapi.py --write
+python scripts/check_openapi.py --check
 ```
 
 ## 🚀 Performance & Caching

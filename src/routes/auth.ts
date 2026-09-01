@@ -1,4 +1,8 @@
 import { prisma } from "../lib/prisma.js";
+import { Keypair } from "@stellar/stellar-sdk";
+import crypto from "crypto";
+import { cryptographicNonceStore } from "../services/nonceStoreService.js";
+import { normalizeHexString } from "../middleware/signatureVerificationMiddleware.js";
 import {
   generateToken,
   verifyPassword,
@@ -287,5 +291,159 @@ router.post(
     }
   }
 );
+
+// ── Web3 Challenge Nonce Generation Route (Issue #749) ───────────────────────
+const handleNonceGeneration = async (req: express.Request, res: express.Response): Promise<void> => {
+  try {
+    const publicKey = (req.query.publicKey || req.body.publicKey || "anonymous") as string;
+    const nonce = `sf_nonce_${crypto.randomUUID()}`;
+    const ttlSeconds = 300; // 5 minutes
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
+
+    res.json({
+      success: true,
+      data: {
+        nonce,
+        publicKey,
+        expiresAt,
+      },
+    });
+  } catch (error) {
+    console.error("[AUTH] Nonce generation error:", error);
+    res.status(500).json({
+      success: false,
+      error: { code: "INTERNAL_ERROR", message: "Failed to generate challenge nonce" },
+    });
+  }
+};
+
+router.get("/nonce", handleNonceGeneration);
+router.post("/nonce", handleNonceGeneration);
+
+// ── Web3 Signature Validation & JWT Issuance Route (Issue #749) ──────────────
+const handleVerifySignature = async (req: express.Request, res: express.Response): Promise<void> => {
+  try {
+    const { publicKey, signature, nonce } = req.body as {
+      publicKey?: string;
+      signature?: string;
+      nonce?: string;
+    };
+
+    if (!publicKey || !signature || !nonce) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "MISSING_CREDENTIALS",
+          message: "publicKey, signature, and nonce are required",
+        },
+      });
+      return;
+    }
+
+    // 1. Validate Stellar public key syntax
+    let keypair: Keypair;
+    try {
+      keypair = Keypair.fromPublicKey(publicKey.trim());
+    } catch {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: "INVALID_PUBLIC_KEY",
+          message: "Provided public key is not a valid Stellar Ed25519 address",
+        },
+      });
+      return;
+    }
+
+    // 2. Anti-replay check & single-use nonce consumption
+    const isNonceValid = await cryptographicNonceStore.consume(publicKey.trim(), nonce.trim());
+    if (!isNonceValid) {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: "INVALID_NONCE",
+          message: "Nonce is invalid, expired, or has already been used",
+        },
+      });
+      return;
+    }
+
+    // 3. Verify Ed25519 signature
+    const cleanSigHex = normalizeHexString(signature);
+    let signatureBytes: Buffer;
+    try {
+      signatureBytes = Buffer.from(cleanSigHex, "hex");
+      if (signatureBytes.length !== 64) {
+        // Try base64 decoding if hex length is not 64 bytes
+        signatureBytes = Buffer.from(signature.trim(), "base64");
+      }
+    } catch {
+      signatureBytes = Buffer.from(cleanSigHex, "hex");
+    }
+
+    const messageBytes = Buffer.from(nonce.trim(), "utf-8");
+    const isSigValid = keypair.verify(messageBytes, signatureBytes);
+
+    if (!isSigValid) {
+      res.status(401).json({
+        success: false,
+        error: {
+          code: "INVALID_SIGNATURE",
+          message: "Stellar Web3 signature verification failed",
+        },
+      });
+      return;
+    }
+
+    // 4. Look up or register relayer / admin user for this public key
+    let relayer = await prisma.relayer.findFirst({
+      where: { apiKey: publicKey.trim() },
+    });
+
+    const userEmail = `${publicKey.trim().substring(0, 12)}@stellar.wallet`;
+    const userRole = relayer?.role || "ADMIN";
+    const userId = relayer?.id || 9999;
+
+    // 5. Issue short-lived JWT access token (15m expiry) and refresh token
+    const accessToken = generateToken(
+      {
+        userId,
+        email: userEmail,
+        role: userRole,
+      },
+      "15m",
+    );
+
+    const refreshTokenData = generateRefreshToken(userId);
+
+    const clientIp = req.ip || "unknown";
+    await logLoginSuccess(userId, clientIp, req.headers["user-agent"] || "unknown");
+
+    res.json({
+      success: true,
+      data: {
+        token: accessToken,
+        accessToken,
+        refreshToken: refreshTokenData.token,
+        user: {
+          id: userId,
+          publicKey: publicKey.trim(),
+          email: userEmail,
+          role: userRole,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[AUTH] Verify signature error:", error);
+    res.status(500).json({
+      success: false,
+      error: { code: "INTERNAL_ERROR", message: "Error verifying Web3 signature" },
+    });
+  }
+};
+
+router.post("/verify-signature", handleVerifySignature);
+router.post("/web3", handleVerifySignature);
+router.post("/web3-login", handleVerifySignature);
 
 export default router;

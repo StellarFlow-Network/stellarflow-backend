@@ -29,6 +29,10 @@ export default [
         btoa: "readonly",
         URL: "readonly",
         URLSearchParams: "readonly",
+        fetch: "readonly",
+        Response: "readonly",
+        Headers: "readonly",
+        Request: "readonly",
       },
     },
     plugins: {
@@ -84,7 +88,7 @@ export default [
         },
         {
           selector: "classProperty",
-          format: ["camelCase"],
+          format: ["camelCase", "UPPER_CASE"],
           leadingUnderscore: "allow",
         },
         {

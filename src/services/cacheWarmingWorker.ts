@@ -128,11 +128,11 @@ export class CacheWarmingWorker {
   /**
    * Run a complete warming cycle.
    */
-  private async runWarmingCycle(
-    trigger: "ledger" | "interval",
-  ): Promise<void> {
+  private async runWarmingCycle(trigger: "ledger" | "interval"): Promise<void> {
     if (this.isWarming) {
-      logger.debug("[CacheWarmingWorker] Warming already in progress, skipping");
+      logger.debug(
+        "[CacheWarmingWorker] Warming already in progress, skipping",
+      );
       return;
     }
 
@@ -233,7 +233,9 @@ export class CacheWarmingWorker {
         this.metrics.successfulWarmedKeys++;
         logger.debug("[CacheWarmingWorker] Warmed latest prices");
       } else {
-        logger.debug("[CacheWarmingWorker] Latest prices not available for warming");
+        logger.debug(
+          "[CacheWarmingWorker] Latest prices not available for warming",
+        );
       }
     } catch (error) {
       this.metrics.failedWarmedKeys++;

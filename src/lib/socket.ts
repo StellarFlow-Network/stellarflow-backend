@@ -1,5 +1,6 @@
 import { Server, Socket } from "socket.io";
 import { randomUUID } from "crypto";
+import { encode } from "@msgpack/msgpack";
 
 interface Session {
   id: string; // connectionSessionId
@@ -8,7 +9,8 @@ interface Session {
   lastSeen: number;
   data: any; // Store any session data here
   disconnectTimer?: NodeJS.Timeout;
-  messageQueue: { event: string; data: any }[]; // Queue for missed messages
+  messageQueue: { event: string; data: any; useMsgpack?: boolean }[]; // Queue for missed messages
+  msgpackEnabled?: boolean; // Indicates if this session prefers MessagePack
 }
 
 const sessions = new Map<string, Session>();
@@ -25,13 +27,19 @@ let io: Server | null = null;
 export function broadcastToSessions(event: string, data: any) {
   if (!io) return;
 
-  // Send to all currently connected sockets
-  io.emit(event, data);
-
-  // Queue for disconnected-pending sessions
+  // Send to all currently connected sockets individually to respect msgpack settings
   for (const session of sessions.values()) {
-    if (session.status === "disconnected-pending") {
-      session.messageQueue.push({ event, data });
+    if (session.status === "connected" && session.socketId) {
+      const socket = io.sockets.sockets.get(session.socketId);
+      if (socket) {
+        if (session.msgpackEnabled) {
+          socket.emit(event, encode(data));
+        } else {
+          socket.emit(event, data);
+        }
+      }
+    } else if (session.status === "disconnected-pending") {
+      session.messageQueue.push({ event, data, useMsgpack: session.msgpackEnabled });
     }
   }
 }
@@ -74,7 +82,11 @@ export function initSocket(server: import("http").Server): Server {
               `📨 Delivering ${session.messageQueue.length} queued messages to ${sessionId}`,
             );
             session.messageQueue.forEach((msg) => {
-              socket.emit(msg.event, msg.data);
+              if (msg.useMsgpack) {
+                socket.emit(msg.event, encode(msg.data));
+              } else {
+                socket.emit(msg.event, msg.data);
+              }
             });
             session.messageQueue = [];
           }
@@ -86,6 +98,17 @@ export function initSocket(server: import("http").Server): Server {
         }
       },
     );
+
+    socket.on("enable_msgpack", () => {
+      const sessionId = (socket as any).sessionId;
+      if (sessionId) {
+        const session = sessions.get(sessionId);
+        if (session) {
+          session.msgpackEnabled = true;
+          console.log(`📦 Msgpack enabled for session ${sessionId}`);
+        }
+      }
+    });
 
     socket.on(
       "identify",

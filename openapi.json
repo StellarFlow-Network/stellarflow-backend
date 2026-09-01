@@ -1,0 +1,530 @@
+{
+  "components": {
+    "schemas": {
+      "AuthChallengeConsumeRequest": {
+        "properties": {
+          "nonce": {
+            "title": "Nonce",
+            "type": "string"
+          }
+        },
+        "required": ["nonce"],
+        "title": "AuthChallengeConsumeRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ProofPayload": {
+        "properties": {
+          "contract_params": {
+            "additionalProperties": true,
+            "description": "Parameters for contract simulation",
+            "title": "Contract Params",
+            "type": "object"
+          },
+          "proof_hex": {
+            "description": "Hex-encoded zero-knowledge proof bytes",
+            "minLength": 1,
+            "title": "Proof Hex",
+            "type": "string"
+          },
+          "proof_scheme": {
+            "$ref": "#/components/schemas/ProofScheme",
+            "default": "groth16",
+            "description": "Proof system scheme"
+          },
+          "public_inputs": {
+            "description": "Public inputs for proof verification",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Public Inputs",
+            "type": "array"
+          },
+          "transaction_hash": {
+            "description": "Hex transaction hash (32 bytes)",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Transaction Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proof_hex",
+          "public_inputs",
+          "contract_params",
+          "transaction_hash"
+        ],
+        "title": "ProofPayload",
+        "type": "object"
+      },
+      "ProofScheme": {
+        "enum": ["groth16", "plonk", "marlin", "flonk"],
+        "title": "ProofScheme",
+        "type": "string"
+      },
+      "ProofValidationResult": {
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "contract_simulation_ready": {
+            "default": false,
+            "title": "Contract Simulation Ready",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "proof_hash": {
+            "title": "Proof Hash",
+            "type": "string"
+          },
+          "public_inputs_count": {
+            "default": 0,
+            "title": "Public Inputs Count",
+            "type": "integer"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          },
+          "verification_time_ms": {
+            "title": "Verification Time Ms",
+            "type": "number"
+          }
+        },
+        "required": ["valid", "proof_hash", "verification_time_ms", "cached"],
+        "title": "ProofValidationResult",
+        "type": "object"
+      },
+      "ProofVerificationRequest": {
+        "properties": {
+          "proof": {
+            "$ref": "#/components/schemas/ProofPayload"
+          },
+          "simulate_contract": {
+            "default": false,
+            "description": "Whether to run contract simulation",
+            "title": "Simulate Contract",
+            "type": "boolean"
+          }
+        },
+        "required": ["proof"],
+        "title": "ProofVerificationRequest",
+        "type": "object"
+      },
+      "ProofVerificationResponse": {
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProofValidationResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": ["success"],
+        "title": "ProofVerificationResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WebhookResponse": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": ["success", "message"],
+        "title": "WebhookResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Issue #824 \u2014 Offloaded ZK proof verification with async process pools",
+    "title": "StellarFlow Proof Verification Engine",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/auth/challenge": {
+      "post": {
+        "description": "Issue a one-time authentication challenge nonce.",
+        "operationId": "auth_challenge_api_v1_auth_challenge_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Auth Challenge"
+      }
+    },
+    "/api/v1/auth/challenge/consume": {
+      "post": {
+        "description": "Atomically consume an authentication challenge nonce exactly once.",
+        "operationId": "auth_challenge_consume_api_v1_auth_challenge_consume_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthChallengeConsumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Auth Challenge Consume"
+      }
+    },
+    "/graphql": {
+      "get": {
+        "operationId": "handle_http_get_graphql_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "title": "Request"
+            }
+          },
+          {
+            "in": "query",
+            "name": "response",
+            "required": true,
+            "schema": {
+              "title": "Response"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The GraphiQL integrated development environment."
+          },
+          "404": {
+            "description": "Not found if GraphiQL or query via GET are not enabled."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handle Http Get",
+        "tags": ["GraphQL"]
+      },
+      "post": {
+        "operationId": "handle_http_post_graphql_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "title": "Request"
+            }
+          },
+          {
+            "in": "query",
+            "name": "response",
+            "required": true,
+            "schema": {
+              "title": "Response"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handle Http Post",
+        "tags": ["GraphQL"]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/proof/pool-status": {
+      "get": {
+        "description": "Return process pool status for observability.",
+        "operationId": "pool_status_proof_pool_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Pool Status"
+      }
+    },
+    "/proof/verify": {
+      "post": {
+        "description": "Verify a single shielded transaction proof.\n\nOffloads CPU-intensive ZK proof checks to a background worker process pool.\nReturns cached results within the 100ms latency budget when available.",
+        "operationId": "verify_proof_proof_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProofVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProofVerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Proof"
+      }
+    },
+    "/proof/verify-batch": {
+      "post": {
+        "description": "Verify multiple shielded transaction proofs concurrently.",
+        "operationId": "verify_proof_batch_endpoint_proof_verify_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/ProofVerificationRequest"
+                },
+                "title": "Requests",
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Proof Batch Endpoint"
+      }
+    },
+    "/webhook/webhook/anchor": {
+      "post": {
+        "description": "Handle incoming webhook status updates from financial anchor partners\nregarding fiat payout completion status.",
+        "operationId": "receive_anchor_webhook_webhook_webhook_anchor_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Anchor-Signature",
+            "required": false,
+            "schema": {
+              "title": "X-Anchor-Signature",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Receive Anchor Webhook",
+        "tags": ["Webhooks", "Anchor Webhooks"]
+      }
+    }
+  }
+}

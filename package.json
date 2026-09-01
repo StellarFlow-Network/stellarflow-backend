@@ -37,9 +37,9 @@
   "author": "",
   "license": "ISC",
   "type": "module",
-  
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1037.0",
+    "@esbuild/win32-x64": "^0.28.2",
     "@msgpack/msgpack": "^2.8.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/auto-instrumentations-node": "^0.73.0",
@@ -55,12 +55,15 @@
     "@prisma/driver-adapter-utils": "^7.8.0",
     "@stellar/stellar-sdk": "^14.6.1",
     "@tanstack/react-query": "^5.100.5",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.0.0",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
+    "@types/supertest": "^7.2.1",
     "async-mutex": "^0.5.0",
     "axios": "^1.7.0",
     "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
     "color-name": "^2.1.0",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
@@ -83,6 +86,7 @@
     "raw-body": "^3.0.2",
     "redis": "^5.12.1",
     "socket.io": "^4.8.3",
+    "supertest": "^7.2.2",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "ts-node": "^10.9.2",
@@ -110,7 +114,7 @@
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
     "prisma": "^7.8.0",
-    "ts-jest": "^29.4.4",
+    "ts-jest": "^29.4.12",
     "tsx": "^4.21.0",
     "typedoc": "^0.28.18"
   }

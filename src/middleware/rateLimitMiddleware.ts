@@ -120,7 +120,15 @@ function buildRateLimitOptions(): Partial<Options> {
 
   return {
     windowMs: appConfig.rateLimit.windowMs,
-    max: appConfig.rateLimit.maxRequests,
+    max: async (req: Request) => {
+      if (req.apiKey && req.apiKey.tier) {
+        const tier = req.apiKey.tier.toLowerCase();
+        if (tier === 'institutional') return 10000;
+        if (tier === 'developer') return 1000;
+        return 100; // free tier
+      }
+      return appConfig.rateLimit.maxRequests;
+    },
     standardHeaders: true,
     legacyHeaders: false,
     ...(store ? { store } : {}),
@@ -131,11 +139,18 @@ function buildRateLimitOptions(): Partial<Options> {
       return isWhitelisted(req);
     },
     keyGenerator: (req: Request) => normaliseIp(resolveClientIp(req)),
-    handler: (_req: Request, res: Response) => {
+    handler: (req: Request, res: Response) => {
+      let maxRequests = appConfig.rateLimit.maxRequests;
+      if (req.apiKey && req.apiKey.tier) {
+        const tier = req.apiKey.tier.toLowerCase();
+        if (tier === 'institutional') maxRequests = 10000;
+        else if (tier === 'developer') maxRequests = 1000;
+        else maxRequests = 100;
+      }
       res.status(429).json({
         ...apiErrorPayload(
           "RATE_LIMITED",
-          `Too many requests. Limit: ${appConfig.rateLimit.maxRequests} per ${Math.round(appConfig.rateLimit.windowMs / 60_000)} minutes.`,
+          `Too many requests. Limit: ${maxRequests} per ${Math.round(appConfig.rateLimit.windowMs / 60_000)} minutes.`,
         ),
         retryAfter: Math.ceil(appConfig.rateLimit.windowMs / 1000),
       });

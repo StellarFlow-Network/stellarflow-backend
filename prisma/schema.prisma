@@ -375,6 +375,7 @@ model ApiKey {
   isActive   Boolean   @default(true)
   expiresAt  DateTime?
   lastUsedAt DateTime?
+  tier       String    @default("Free") // API Key tier (Free, Developer, Institutional)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 }
@@ -457,11 +458,18 @@ model RemittanceTransaction {
   outputAmount    Decimal  @db.Decimal(24, 10)  // Amount in receiver currency
   fee             Decimal  @db.Decimal(24, 10)  @default(0)
   rate            Decimal  @db.Decimal(24, 10)  // Exchange rate applied
-  status          String   @db.VarChar(20)  // PENDING | COMPLETED | FAILED | REVERSED
+  status          String   @db.VarChar(32)  // PENDING | COMPLETED | FAILED | REVERSED | pending_screening | screening | flagged_compliance | compliance_cleared | payout_relayed | payout_halted
   provider        String?  @db.VarChar(128) // Liquidity provider / rail used
   stellarTxHash   String?  // Stellar transaction hash when submitted on-chain
   reference       String?  @db.VarChar(128) // External reference / correlation ID
   errorMessage    String?  // Populated when status = FAILED
+  senderPublicKey    String?  // Stellar public key screened against OFAC (#784)
+  recipientPublicKey String?
+  screeningProvider  String?
+  screeningHits      Json?
+  payoutHalted       Boolean   @default(false)
+  payoutRelayedAt    DateTime?
+  screenedAt         DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -475,6 +483,33 @@ model RemittanceTransaction {
   @@index([status, createdAt])
   // Asset-level reporting
   @@index([asset, createdAt])
+  @@index([senderPublicKey])
+  @@index([recipientPublicKey])
+}
+
+// Remittance Dispute Model – Issue #834
+// Tracks dispute tickets opened when fiat payouts fail or time out.
+// State machine: open -> investigating -> refunded | closed.
+model RemittanceDispute {
+  id           String    @id @default(uuid())
+  remittanceId String    // RemittanceTransaction.id the dispute belongs to
+  userId       String    // Relayer / end-user identifier
+  status       String    @db.VarChar(20) @default("open") // open | investigating | refunded | closed
+  reason       String    @db.VarChar(255) // Payout failure / timeout reason captured at open
+  details      String?   // Structured JSON details captured when the dispute was opened
+  email        String?   // Contact address notified on state changes
+  webhookUrl   String?   // Endpoint notified on state changes (webhook updates)
+  refundAmount Decimal?  @db.Decimal(24, 10) // Amount refunded for manual refunds
+  refundedById String?   // Operator / admin identifier that triggered the refund
+  refundedAt   DateTime? // When the manual refund was issued
+  resolvedById String?   // Operator / admin identifier that closed the dispute
+  resolvedAt   DateTime? // When the dispute was closed
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, status, createdAt])
+  @@index([remittanceId])
+  @@index([status, createdAt])
 }
 model OhlcvCandle {
   id        String   @id @default(uuid())

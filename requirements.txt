@@ -15,6 +15,9 @@ aiohttp>=3.9.0
 # Async PostgreSQL driver for high-performance bulk inserts
 asyncpg>=0.28.0
 
+# Sync PostgreSQL driver for testcontainers / SQLAlchemy sync engine
+psycopg2-binary>=2.9.0
+
 # Distributed workers for heavy analytics jobs
 celery[rabbitmq]>=5.4.0,<6.0.0
 flower>=2.0.1
@@ -49,41 +52,33 @@ cryptography>=42.0.0
 # Async web framework for proof verification endpoints
 fastapi>=0.104.0
 
+# Validate the checked-in OpenAPI contract in CI
+openapi-spec-validator>=0.7.1
+
+# GraphQL API for pools, transactions, accounts, and governance proposals (Issue #788)
+strawberry-graphql[fastapi]>=0.262.0
+
+# Async ORM used by the Python service and GraphQL compatibility repository
+SQLAlchemy>=2.0.0
+
 # ASGI server for the Python service
 uvicorn[standard]>=0.24.0
 
 # Process pool executor for CPU-intensive ZK proof verification
 # (uses stdlib concurrent.futures, no extra package needed)
+
 # ---------------------------------------------------------------------------
-# Issue #760 — OpenTelemetry APM Tracing Across Microservices (app/telemetry.py)
+# Integration test suite (Issue #793)
 # ---------------------------------------------------------------------------
 
-# Core OpenTelemetry API/SDK — TracerProvider, span processors, W3C context
-# propagation (matches the propagator the Node service installs in
-# src/lib/tracing.ts, so traceparent/tracestate headers are interchangeable
-# across both halves of the stack).
-opentelemetry-api>=1.24.0
-opentelemetry-sdk>=1.24.0
+# Async test support for pytest
+pytest-asyncio>=0.23.0
 
-# OTLP exporter — the primary export path; modern Jaeger (1.35+) and most
-# collectors accept OTLP directly.
-opentelemetry-exporter-otlp-proto-http>=1.24.0
+# Coverage reporting with branch analysis
+pytest-cov>=5.0.0
 
-# Legacy Jaeger Thrift collector exporter, for TRACING_JAEGER_ENDPOINT
-# deployments pointed at a collector without OTLP ingestion enabled.
-opentelemetry-exporter-jaeger-thrift>=1.21.0
+# HTTP client for FastAPI TestClient integration tests
+httpx>=0.27.0
 
-# Auto-instrumentation: FastAPI request spans + outbound aiohttp client spans
-# (e.g. AnchorStatusPoller's SEP-24/SEP-31 polling requests) with automatic
-# W3C traceparent header injection/extraction.
-opentelemetry-instrumentation-fastapi>=0.45b0
-opentelemetry-instrumentation-aiohttp-client>=0.45b0
-
-# Auto-instrumentation for the asyncpg/redis calls made inside those
-# instrumented request paths, for full request-flow visibility.
-opentelemetry-instrumentation-asyncpg>=0.45b0
-opentelemetry-instrumentation-redis>=0.45b0
-
-# Celery task publish/run/retry spans + automatic W3C trace-context
-# propagation through task message headers across the RabbitMQ broker.
-opentelemetry-instrumentation-celery>=0.45b0
+# Docker test containers for PostgreSQL, Redis
+testcontainers[postgres,redis]>=4.4.0

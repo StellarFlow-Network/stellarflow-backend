@@ -13,6 +13,7 @@ export const FIVE_MINUTES_MS = 5 * 60 * 1000;
 export class LiquidityRebalancingWorker {
   private timer: NodeJS.Timeout | undefined;
   private polling = false;
+  private lastHeartbeatAt: number | null = null;
 
   constructor(
     private readonly pools: LiquidityPoolConfig[],
@@ -43,6 +44,7 @@ export class LiquidityRebalancingWorker {
   async poll(): Promise<void> {
     if (this.polling) return;
     this.polling = true;
+    this.lastHeartbeatAt = Date.now();
 
     try {
       await Promise.allSettled(
@@ -57,6 +59,14 @@ export class LiquidityRebalancingWorker {
     } finally {
       this.polling = false;
     }
+  }
+
+  getLastHeartbeatAt(): number | null {
+    return this.lastHeartbeatAt;
+  }
+
+  getHeartbeatTimeoutMs(): number {
+    return Math.max(this.intervalMs * 2, 15_000);
   }
 
   private async pollPool(pool: LiquidityPoolConfig): Promise<void> {

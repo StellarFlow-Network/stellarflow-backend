@@ -30,6 +30,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   RATE_LIMITED: "Too many requests. Please try again later.",
   INTERNAL_SERVER_ERROR: "An unexpected error occurred.",
   SERVICE_UNAVAILABLE: "The service is temporarily unavailable.",
+  DEPENDENCY_UNAVAILABLE: "A core dependency failed its readiness probe.",
   MAINTENANCE_MODE: "Service is under maintenance. Please try again later.",
   MISSING_API_KEY: "Request must include a valid X-API-Key header.",
   INVALID_API_KEY: "The provided API key is invalid or inactive.",
@@ -48,6 +49,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     "Unable to fetch an external price for comparison.",
   ENDPOINT_NOT_FOUND: "Endpoint not found",
   CORS_DENIED: "Cross-origin request denied by CORS policy.",
+  MISSING_ORIGIN:
+    "Request must include an approved Origin header or authenticate as a non-browser client.",
   PAYLOAD_TOO_LARGE: "Request body exceeds the allowed size.",
   INVALID_JSON: "Request body must be valid JSON.",
 
@@ -122,6 +125,8 @@ export function errorCodeForStatus(status: number): string {
       return "RATE_LIMITED";
     case 503:
       return "SERVICE_UNAVAILABLE";
+    case 530:
+      return "DEPENDENCY_UNAVAILABLE";
     default:
       return "INTERNAL_SERVER_ERROR";
   }
