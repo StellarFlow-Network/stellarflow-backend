@@ -486,6 +486,60 @@ model RemittanceTransaction {
   @@index([senderPublicKey])
   @@index([recipientPublicKey])
 }
+
+model PaymentRoute {
+  id               String    @id @default(uuid())
+  senderCurrency   String    @map("sender_currency") @db.VarChar(16)
+  receiverCurrency String    @map("receiver_currency") @db.VarChar(16)
+  sourceAsset      String    @map("source_asset") @db.VarChar(128)
+  targetRail       String    @map("target_rail") @db.VarChar(64)
+  provider         String    @db.VarChar(128)
+  rate             Decimal   @db.Decimal(20, 10)
+  fee              Decimal   @db.Decimal(20, 10)
+  estimatedAmount  Decimal   @map("estimated_amount") @db.Decimal(20, 10)
+  slippageBps      Int       @default(0) @map("slippage_bps")
+  liquidityPoolId  String?   @map("liquidity_pool_id") @db.VarChar(128)
+  status           String    @default("ACTIVE") @db.VarChar(16)
+  priority         Int       @default(0)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  fxQuotes         FxQuote[]
+
+  @@unique([senderCurrency, receiverCurrency, provider, targetRail], map: "uq_payment_route_route")
+  @@index([senderCurrency, receiverCurrency], map: "ix_payment_route_currencies")
+  @@index([targetRail], map: "ix_payment_route_target_rail")
+  @@index([status, priority], map: "ix_payment_route_status_priority")
+  @@map("payment_route")
+}
+
+model FxQuote {
+  id               String       @id @default(uuid())
+  paymentRouteId   String       @map("payment_route_id")
+  paymentRoute     PaymentRoute @relation(fields: [paymentRouteId], references: [id])
+  senderCurrency   String       @map("sender_currency") @db.VarChar(16)
+  receiverCurrency String       @map("receiver_currency") @db.VarChar(16)
+  inputAmount      Decimal      @map("input_amount") @db.Decimal(20, 10)
+  outputAmount     Decimal      @map("output_amount") @db.Decimal(20, 10)
+  rate             Decimal      @db.Decimal(20, 10)
+  fee              Decimal      @db.Decimal(20, 10)
+  slippageBps      Int          @default(0) @map("slippage_bps")
+  liveFeedRate     Decimal      @map("live_feed_rate") @db.Decimal(20, 10)
+  feedSource       String       @map("feed_source") @db.VarChar(128)
+  feedTimestamp    DateTime     @map("feed_timestamp") @db.Timestamptz(3)
+  rateDeviationBps Int          @default(0) @map("rate_deviation_bps")
+  status           String       @default("PENDING") @db.VarChar(16)
+  expiresAt        DateTime     @map("expires_at") @db.Timestamptz(3)
+  lockedAt         DateTime?    @map("locked_at") @db.Timestamptz(3)
+  executedAt       DateTime?    @map("executed_at") @db.Timestamptz(3)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([paymentRouteId], map: "ix_fx_quote_payment_route_id")
+  @@index([senderCurrency, receiverCurrency], map: "ix_fx_quote_currencies")
+  @@index([status], map: "ix_fx_quote_status")
+  @@index([expiresAt], map: "ix_fx_quote_expires_at")
+  @@map("fx_quote")
+}
 model OhlcvCandle {
   id        String   @id @default(uuid())
   pair      String   @db.VarChar(10)

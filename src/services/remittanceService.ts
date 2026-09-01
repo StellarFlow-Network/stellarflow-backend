@@ -255,7 +255,7 @@ export class RemittanceService {
       // Build nextCursor from the last row of the current page ----------------
       let nextCursor: string | null = null;
       if (hasMore && pageRows.length > 0) {
-        const last = pageRows[pageRows.length - 1];
+        const last = pageRows[pageRows.length - 1]!;
         nextCursor = encodeCursor({
           createdAt: last.createdAt.toISOString(),
           id: last.id,
@@ -269,10 +269,10 @@ export class RemittanceService {
         asset: string;
         senderCurrency: string;
         receiverCurrency: string;
-        amount: { valueOf(): number } | number;
-        outputAmount: { valueOf(): number } | number;
-        fee: { valueOf(): number } | number;
-        rate: { valueOf(): number } | number;
+        amount: unknown;
+        outputAmount: unknown;
+        fee: unknown;
+        rate: unknown;
         status: string;
         provider: string | null;
         stellarTxHash: string | null;
@@ -283,7 +283,7 @@ export class RemittanceService {
       };
 
       const data: RemittanceTransactionRecord[] = (
-        pageRows as SelectedRow[]
+        pageRows as unknown as SelectedRow[]
       ).map((r) => ({
         id: r.id,
         userId: r.userId,
