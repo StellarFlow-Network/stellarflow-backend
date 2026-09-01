@@ -118,6 +118,9 @@ function buildRpcUrls(network: string): string[] {
  */
 class StellarProvider {
   private readonly network: string;
+  // Last observed latencies (ms)
+  private lastHorizonLatencyMs?: number;
+  private lastRpcLatencyMs?: number;
   
   // Horizon properties
   private readonly urls: readonly string[];
@@ -134,19 +137,86 @@ class StellarProvider {
 
     // Initialize Horizon
     this.urls = buildHorizonUrls(this.network);
-    this.server = new Horizon.Server(this.urls[0]!);
+    this.server = this.wrapServer(new Horizon.Server(this.urls[0]!));
     logger.info(
       `[StellarProvider] Initialized Horizon with ${this.urls.length} node(s). Primary: ${this.urls[0]!}`,
     );
 
     // Initialize RPC
     this.rpcUrls = buildRpcUrls(this.network);
-    this.rpcServer = new SorobanRpc.Server(this.rpcUrls[0]!, {
-      allowHttp: this.network === "TESTNET",
-    });
+    this.rpcServer = this.wrapServer(
+      new SorobanRpc.Server(this.rpcUrls[0]!, {
+        allowHttp: this.network === "TESTNET",
+      }),
+      true,
+    );
     logger.info(
       `[StellarProvider] Initialized RPC with ${this.rpcUrls.length} node(s). Primary: ${this.rpcUrls[0]!}`,
     );
+  }
+
+  /**
+   * Wrap a server instance (Horizon or RPC) with a Proxy that measures latency
+   * and reports failures back into the provider so automatic failover can occur.
+   */
+  private wrapServer<T extends object>(server: T, isRpc = false): T {
+    const self = this;
+
+    return new Proxy(server as any, {
+      get(target: any, prop: PropertyKey, receiver: any) {
+        const orig = Reflect.get(target, prop, receiver);
+
+        if (typeof orig !== "function") return orig;
+
+        return function wrapped(...args: any[]) {
+          const start = Date.now();
+          try {
+            const res = orig.apply(target, args);
+            if (res && typeof res.then === "function") {
+              return res
+                .then((r: any) => {
+                  const latency = Date.now() - start;
+                  if (isRpc) self.lastRpcLatencyMs = latency;
+                  else self.lastHorizonLatencyMs = latency;
+                  logger.networkInfo(
+                    `[StellarProvider] ${isRpc ? "RPC" : "Horizon"} ${String(prop)} latency=${latency}ms`,
+                    {
+                      latency,
+                      url: isRpc ? self.getCurrentRpcUrl() : self.getCurrentUrl(),
+                    },
+                  );
+                  return r;
+                })
+                .catch((err: any) => {
+                  const latency = Date.now() - start;
+                  if (isRpc) self.lastRpcLatencyMs = latency;
+                  else self.lastHorizonLatencyMs = latency;
+                  // Report failure and include latency so logs contain timing metrics
+                  if (isRpc) self.reportRpcFailure(err, latency);
+                  else self.reportFailure(err, latency);
+                  throw err;
+                });
+            }
+
+            const latency = Date.now() - start;
+            if (isRpc) self.lastRpcLatencyMs = latency;
+            else self.lastHorizonLatencyMs = latency;
+            logger.networkInfo(
+              `[StellarProvider] ${isRpc ? "RPC" : "Horizon"} ${String(prop)} latency=${latency}ms`,
+              { latency, url: isRpc ? self.getCurrentRpcUrl() : self.getCurrentUrl() },
+            );
+            return res;
+          } catch (err) {
+            const latency = Date.now() - start;
+            if (isRpc) self.lastRpcLatencyMs = latency;
+            else self.lastHorizonLatencyMs = latency;
+            if (isRpc) self.reportRpcFailure(err, latency);
+            else self.reportFailure(err, latency);
+            throw err;
+          }
+        };
+      },
+    }) as T;
   }
 
   // ==========================================
@@ -160,7 +230,7 @@ class StellarProvider {
     return this.urls[this.currentIndex]!;
   }
 
-  reportFailure(error: unknown): boolean {
+  reportFailure(error: unknown, latencyMs?: number): boolean {
     if (!isFailoverError(error)) {
       return false;
     }
@@ -176,13 +246,13 @@ class StellarProvider {
     }
 
     this.currentIndex = nextIndex;
-    this.server = new Horizon.Server(this.urls[this.currentIndex]!);
+    this.server = this.wrapServer(new Horizon.Server(this.urls[this.currentIndex]!));
 
     logger.warn(
       `[StellarProvider] ⚠️ Horizon Node "${failedUrl}" returned an error. ` +
         `Failing over to "${this.urls[this.currentIndex]!}" ` +
         `(node ${this.currentIndex + 1}/${this.urls.length}).`,
-      { isNetwork: true }
+      { isNetwork: true, failedUrl, latencyMs }
     );
 
     return true;
@@ -199,7 +269,7 @@ class StellarProvider {
     return this.rpcUrls[this.rpcCurrentIndex]!;
   }
 
-  reportRpcFailure(error: unknown): boolean {
+  reportRpcFailure(error: unknown, latencyMs?: number): boolean {
     if (!isFailoverError(error)) {
       return false;
     }
@@ -215,15 +285,18 @@ class StellarProvider {
     }
 
     this.rpcCurrentIndex = nextIndex;
-    this.rpcServer = new SorobanRpc.Server(this.rpcUrls[this.rpcCurrentIndex]!, {
-      allowHttp: this.network === "TESTNET",
-    });
+    this.rpcServer = this.wrapServer(
+      new SorobanRpc.Server(this.rpcUrls[this.rpcCurrentIndex]!, {
+        allowHttp: this.network === "TESTNET",
+      }),
+      true,
+    );
 
     logger.warn(
       `[StellarProvider] ⚠️ RPC Node "${failedUrl}" returned an error. ` +
         `Failing over to "${this.rpcUrls[this.rpcCurrentIndex]!}" ` +
         `(node ${this.rpcCurrentIndex + 1}/${this.rpcUrls.length}).`,
-      { isNetwork: true }
+      { isNetwork: true, failedUrl, latencyMs }
     );
 
     return true;

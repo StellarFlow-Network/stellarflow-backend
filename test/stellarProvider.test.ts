@@ -158,6 +158,25 @@ assert(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 6. RPC failover behaviour
+// ─────────────────────────────────────────────────────────────────────────────
+console.log("\n6. RPC failover behaviour:");
+
+const rpcUrlBefore = stellarProvider.getCurrentRpcUrl();
+assert(
+  "getCurrentRpcUrl() returns a non-empty string",
+  typeof rpcUrlBefore === "string" && rpcUrlBefore.length > 0,
+);
+
+const rpc500 = { response: { status: 500 }, message: "RPC Internal Error" };
+const didRpcFailover = stellarProvider.reportRpcFailure(rpc500);
+const rpcUrlAfter = stellarProvider.getCurrentRpcUrl();
+
+assert("RPC HTTP 500 triggers failover", didRpcFailover === true);
+assert("RPC URL changes after 500", rpcUrlAfter !== rpcUrlBefore);
+console.log(`     Switched RPC from ${rpcUrlBefore} to ${rpcUrlAfter}`);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Summary
 // ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${"─".repeat(50)}`);

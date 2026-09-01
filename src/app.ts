@@ -34,12 +34,16 @@ import statusRouter from "./routes/status";
 import systemControlRouter from "./routes/systemControl";
 import systemFailoverRouter from "./routes/systemFailover";
 import analyticsRouter from "./routes/analytics";
+import gasProfileRouter from "./routes/gasProfile";
 import zkRouter from "./routes/zk";
 import governanceRouter from "./routes/governance";
+import healthRouter from "./routes/health";
 import proofRouter from "./routes/proof";
 import ordersRouter from "./routes/orders";
 import sorobanSimulationRouter from "./routes/sorobanSimulation";
+import sorobanRentEstimateRouter from "./routes/sorobanRentEstimate";
 import remittanceRouter from "./routes/remittance";
+import sorobanRentEstimateRouter from "./routes/sorobanRentEstimate";
 import { sendApiError } from "./lib/apiError.js";
 import metricsRouter from "./routes/metrics";
 
@@ -47,12 +51,12 @@ dotenv.config();
 
 const app = express();
 
-const dashboardUrl =
-  process.env.DASHBOARD_URL ||
-  process.env.FRONTEND_URL ||
-  "http://localhost:3000";
-
 app.use(morgan("dev"));
+
+// Issue #792 – Security headers + strict CORS allowlist. Registered before
+// everything else so the headers reach every response, including short-circuit
+// replies such as CORS 403s, preflight 204s and maintenance 503s.
+applyHttpSecurity(app);
 
 // Maintenance mode middleware: must be early in the chain
 app.use(maintenanceMiddleware);
@@ -100,6 +104,8 @@ app.use(express.json());
 app.use(tracingMiddleware);
 app.use(axiosTracingMiddleware);
 
+app.use("/health", healthRouter);
+
 app.use("/api/v1/docs", swaggerUi.serve);
 
 app.get(
@@ -117,8 +123,8 @@ app.get(
 );
 
 app.use("/api/v1/auth", authRouter);
-app.use("/api", rateLimitMiddleware);
 app.use("/api", apiKeyMiddleware);
+app.use("/api", rateLimitMiddleware);
 app.use("/api", jwtMiddleware);
 
 // Ed25519 signature verification for relayer payloads (Issue #225)
@@ -155,6 +161,9 @@ app.use("/api/v1/cache", cacheMetricsRouter);
 // Issue #208 – Analytics / OHLC time-series endpoint
 app.use("/api/v1/analytics", analyticsRouter);
 
+// Issue #786 – Gas & CPU instruction profiler daily averages
+app.use("/api/v1/gas-profile", gasProfileRouter);
+
 app.use("/api/v1/zk", zkRouter);
 app.use("/api/v1/governance", governanceRouter);
 app.use("/api/v1/proof", proofRouter);
@@ -178,6 +187,8 @@ app.get("/", (req, res) => {
     version: "1.0.0",
     endpoints: {
       health: "/health",
+      liveness: "/health/liveness",
+      readiness: "/health/readiness",
       marketRates: {
         allRates: "/api/v1/market-rates/rates",
         singleRate: "/api/v1/market-rates/rate/:currency",

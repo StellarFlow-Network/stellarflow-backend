@@ -3,8 +3,8 @@ import { sendApiError } from "../lib/apiError.js";
 
 // Allowlisted endpoints that should remain accessible during maintenance
 const allowlist = [
-  '/status',
-  '/health', // Add more paths as needed
+  "/status",
+  "/health", // Add more paths as needed
 ];
 
 /**
@@ -12,10 +12,17 @@ const allowlist = [
  * Reads MAINTENANCE_MODE from process.env (set in .env).
  * Returns 503 Service Unavailable for all endpoints except allowlisted ones.
  */
-export function maintenanceMiddleware(req: Request, res: Response, next: NextFunction) {
-  const isMaintenance = process.env.MAINTENANCE_MODE === 'true';
+export function maintenanceMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  const isMaintenance = process.env.MAINTENANCE_MODE === "true";
   // Allow allowlisted endpoints
-  if (isMaintenance && !allowlist.includes(req.path)) {
+  const allowed = allowlist.some(
+    (path) => req.path === path || req.path.startsWith(`${path}/`),
+  );
+  if (isMaintenance && !allowed) {
     sendApiError(res, 503, "MAINTENANCE_MODE");
     return;
   }

@@ -2,6 +2,7 @@
 
 import dotenv from "dotenv";
 import { Horizon, Keypair } from "@stellar/stellar-sdk";
+import stellarProvider from "../src/lib/stellarProvider";
 
 dotenv.config();
 
@@ -49,7 +50,7 @@ async function checkGasAccountBalance(): Promise<void> {
   const horizonUrl = resolveHorizonUrl(network);
   const publicKey = resolveGasAccountPublicKey();
 
-  const server = new Horizon.Server(horizonUrl);
+  const server = stellarProvider.getServer();
   const account = await server.loadAccount(publicKey);
   const native = account.balances.find((b) => b.asset_type === "native");
   const xlmBalance = native ? Number(native.balance) : 0;

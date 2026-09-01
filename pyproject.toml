@@ -1,0 +1,42 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests (require Docker containers)",
+    "e2e_layer(name): marks a layer E2E test",
+]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+    "tests/*",
+    "test/*",
+    "scripts/*",
+    "contracts/*",
+    "alembic/*",
+    "examples/*",
+    "app/main.py",
+    "app/celery_app.py",
+    "app/tasks.py",
+    "app/db/session.py",
+    "app/security/kms.py",
+    "app/models/proof.py",
+]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+precision = 2
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.",
+    "raise NotImplementedError",
+    "pass",
+    "\\.\\.\\.",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"

@@ -2,7 +2,7 @@ import {
   Account,
   Contract,
   Keypair,
-  SorobanRpc,
+  rpc as SorobanRpc,
   Transaction,
   TransactionBuilder,
   xdr,
@@ -144,7 +144,10 @@ export class StellarLiquidationTransactionBroadcaster implements LiquidationTran
     const publicKey = await signer.getPublicKey();
     const account = await this.rpcServer.getAccount(publicKey);
     const transaction = new TransactionBuilder(
-      new Account(account.id, account.sequence),
+      new Account(
+        (account as any).accountId ?? (account as any).id,
+        (account as any).sequenceNumber ?? (account as any).sequence,
+      ),
       {
         fee: "100",
         networkPassphrase: this.networkPassphrase,
@@ -160,9 +163,7 @@ export class StellarLiquidationTransactionBroadcaster implements LiquidationTran
     if (SorobanRpc.Api.isSimulationError(simulation)) {
       throw new Error(`Liquidation simulation failed: ${simulation.error}`);
     }
-    const prepared = this.rpcServer
-      .assembleTransaction(transaction, simulation)
-      .build();
+    const prepared = SorobanRpc.assembleTransaction(transaction, simulation).build();
     const signature = await signer.sign(prepared.hash());
     const keypair = Keypair.fromPublicKey(publicKey);
     prepared.signatures.push(

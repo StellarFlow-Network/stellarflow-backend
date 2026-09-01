@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import asyncpg
+import structlog
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.celery_app import celery_app
 from app.tasks import ingest_flash_loan_revenue, compute_yield_snapshots
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
@@ -76,6 +76,7 @@ async def get_flash_loan_revenue(
     if not database_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
 
+    bound = log.bind(endpoint="get_flash_loan_revenue", treasury_account=treasury_account, limit=limit, offset=offset)
     pool = await asyncpg.create_pool(database_url)
     try:
         async with pool.acquire() as connection:
@@ -105,6 +106,7 @@ async def get_flash_loan_revenue(
                     limit,
                     offset,
                 )
+            bound.debug("flash_loan_revenue.queried", row_count=len(rows))
             return [
                 FlashLoanRevenueResponse(
                     id=row["id"],
@@ -119,7 +121,7 @@ async def get_flash_loan_revenue(
                 for row in rows
             ]
     except Exception as exc:
-        logger.exception("Flash loan revenue query error: %s", exc)
+        bound.exception("flash_loan_revenue.query_error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
         await pool.close()
@@ -139,6 +141,7 @@ async def get_yield_snapshots(
     if not database_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
 
+    bound = log.bind(endpoint="get_yield_snapshots", granularity=granularity, limit=limit, offset=offset)
     pool = await asyncpg.create_pool(database_url)
     try:
         async with pool.acquire() as connection:
@@ -156,6 +159,7 @@ async def get_yield_snapshots(
                 limit,
                 offset,
             )
+            bound.debug("yield_snapshots.queried", row_count=len(rows))
             return [
                 ProtocolYieldSnapshotResponse(
                     id=row["id"],
@@ -192,7 +196,7 @@ async def get_yield_snapshots(
                 for row in rows
             ]
     except Exception as exc:
-        logger.exception("Yield snapshot query error: %s", exc)
+        bound.exception("yield_snapshots.query_error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
         await pool.close()
@@ -205,6 +209,7 @@ async def get_cumulative_flash_loan_revenue() -> CumulativeMetricsResponse:
     if not database_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
 
+    bound = log.bind(endpoint="get_cumulative_flash_loan_revenue")
     pool = await asyncpg.create_pool(database_url)
     try:
         async with pool.acquire() as connection:
@@ -219,6 +224,7 @@ async def get_cumulative_flash_loan_revenue() -> CumulativeMetricsResponse:
                 FROM flash_loan_revenue
                 """
             )
+            bound.debug("cumulative_revenue.queried")
             return CumulativeMetricsResponse(
                 total_revenue=float(row["total_revenue"] or 0),
                 total_events=int(row["total_events"] or 0),
@@ -227,7 +233,7 @@ async def get_cumulative_flash_loan_revenue() -> CumulativeMetricsResponse:
                 last_event_at=row["last_event_at"],
             )
     except Exception as exc:
-        logger.exception("Cumulative revenue query error: %s", exc)
+        bound.exception("cumulative_revenue.query_error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
         await pool.close()
@@ -238,11 +244,13 @@ async def trigger_ingest_flash_loan_revenue(
     lookback_minutes: int = 60,
 ) -> TriggerIngestResponse:
     """Manually trigger a flash-loan revenue ingestion task."""
+    bound = log.bind(endpoint="trigger_ingest_flash_loan_revenue", lookback_minutes=lookback_minutes)
     try:
         result = ingest_flash_loan_revenue.delay(lookback_minutes=lookback_minutes)
+        bound.info("ingest_flash_loan_revenue.enqueued", task_id=result.id)
         return TriggerIngestResponse(success=True, task_id=result.id)
     except Exception as exc:
-        logger.exception("Ingest trigger error: %s", exc)
+        bound.exception("ingest_flash_loan_revenue.enqueue_error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -253,9 +261,11 @@ async def trigger_compute_yield_snapshots(
     """Manually trigger a yield snapshot computation task."""
     if granularity not in {"HOURLY", "DAILY"}:
         raise HTTPException(status_code=400, detail="granularity must be HOURLY or DAILY")
+    bound = log.bind(endpoint="trigger_compute_yield_snapshots", granularity=granularity)
     try:
         result = compute_yield_snapshots.delay(granularity=granularity)
+        bound.info("compute_yield_snapshots.enqueued", task_id=result.id)
         return TriggerIngestResponse(success=True, task_id=result.id)
     except Exception as exc:
-        logger.exception("Yield compute trigger error: %s", exc)
+        bound.exception("compute_yield_snapshots.enqueue_error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc

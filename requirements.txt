@@ -15,6 +15,9 @@ aiohttp>=3.9.0
 # Async PostgreSQL driver for high-performance bulk inserts
 asyncpg>=0.28.0
 
+# Sync PostgreSQL driver for testcontainers / SQLAlchemy sync engine
+psycopg2-binary>=2.9.0
+
 # Distributed workers for heavy analytics jobs
 celery[rabbitmq]>=5.4.0,<6.0.0
 flower>=2.0.1
@@ -49,8 +52,33 @@ cryptography>=42.0.0
 # Async web framework for proof verification endpoints
 fastapi>=0.104.0
 
+# Validate the checked-in OpenAPI contract in CI
+openapi-spec-validator>=0.7.1
+
+# GraphQL API for pools, transactions, accounts, and governance proposals (Issue #788)
+strawberry-graphql[fastapi]>=0.262.0
+
+# Async ORM used by the Python service and GraphQL compatibility repository
+SQLAlchemy>=2.0.0
+
 # ASGI server for the Python service
 uvicorn[standard]>=0.24.0
 
 # Process pool executor for CPU-intensive ZK proof verification
 # (uses stdlib concurrent.futures, no extra package needed)
+
+# ---------------------------------------------------------------------------
+# Integration test suite (Issue #793)
+# ---------------------------------------------------------------------------
+
+# Async test support for pytest
+pytest-asyncio>=0.23.0
+
+# Coverage reporting with branch analysis
+pytest-cov>=5.0.0
+
+# HTTP client for FastAPI TestClient integration tests
+httpx>=0.27.0
+
+# Docker test containers for PostgreSQL, Redis
+testcontainers[postgres,redis]>=4.4.0

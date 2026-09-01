@@ -2,6 +2,7 @@ import { Keypair, Horizon } from "@stellar/stellar-sdk";
 import { promises as fs } from "fs";
 import dotenv from "dotenv";
 import { getStellarNetwork } from "../lib/stellarNetwork";
+import stellarProvider from "../lib/stellarProvider";
 import { WebhookService } from "./webhook";
 import { getSecretKey } from "./secretManager";
 
@@ -53,7 +54,7 @@ export class GasBalanceMonitorService {
                 ? "https://horizon.stellar.org"
                 : "https://horizon-testnet.stellar.org";
 
-        this.server = new Horizon.Server(horizonUrl);
+        this.server = stellarProvider.getServer();
 
         // parseFloat returns NaN for non-numeric strings like "abc"; the fallback guards against that.
         // The env var default "20" is a separate concern from the NaN fallback.

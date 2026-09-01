@@ -1,4 +1,8 @@
-import { CacheWarmingWorker, getCacheWarmingWorker, resetCacheWarmingWorker } from "../src/services/cacheWarmingWorker";
+import {
+  CacheWarmingWorker,
+  getCacheWarmingWorker,
+  resetCacheWarmingWorker,
+} from "../src/services/cacheWarmingWorker";
 
 // Mock dependencies
 jest.mock("../src/cache/CacheService", () => ({
@@ -38,11 +42,23 @@ jest.mock("../src/services/marketRate", () => ({
         { currency: "KES", rate: 150.5, timestamp: new Date(), source: "test" },
       ],
     }),
-    getAllRates: jest.fn().mockResolvedValue([
-      { success: true, data: { currency: "KES", rate: 150.5, timestamp: new Date(), source: "test" } },
-    ]),
+    getAllRates: jest
+      .fn()
+      .mockResolvedValue([
+        {
+          success: true,
+          data: {
+            currency: "KES",
+            rate: 150.5,
+            timestamp: new Date(),
+            source: "test",
+          },
+        },
+      ]),
     getSupportedCurrencies: jest.fn().mockReturnValue(["KES", "GHS", "NGN"]),
-    healthCheck: jest.fn().mockResolvedValue({ KES: true, GHS: true, NGN: true }),
+    healthCheck: jest
+      .fn()
+      .mockResolvedValue({ KES: true, GHS: true, NGN: true }),
     getCacheStatus: jest.fn().mockReturnValue({ KES: { cached: true } }),
   })),
 }));
@@ -95,7 +111,7 @@ describe("CacheWarmingWorker", () => {
   describe("start/stop", () => {
     it("should start and stop the worker", () => {
       const worker = new CacheWarmingWorker({ warmingIntervalMs: 1000 });
-      
+
       worker.start();
       expect(worker.isActive()).toBe(true);
 
@@ -105,10 +121,10 @@ describe("CacheWarmingWorker", () => {
 
     it("should not start twice", () => {
       const worker = new CacheWarmingWorker({ warmingIntervalMs: 1000 });
-      
+
       worker.start();
       worker.start(); // Should not throw
-      
+
       expect(worker.isActive()).toBe(true);
       worker.stop();
     });
@@ -120,7 +136,7 @@ describe("CacheWarmingWorker", () => {
       worker.start();
 
       // Wait for initial warming cycle to complete
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       await worker.onNewLedger(12345);
 
@@ -159,7 +175,7 @@ describe("CacheWarmingWorker", () => {
       worker.start();
 
       // Wait for initial warming cycle
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       const metrics = worker.getMetrics();
       expect(metrics.totalCycles).toBeGreaterThanOrEqual(1);

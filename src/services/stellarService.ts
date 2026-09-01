@@ -21,6 +21,7 @@ import { sequenceManager } from "./sequence-manager";
 import { assertSigningAllowed } from "../state/appState";
 import { signer } from "../signer";
 import { logger } from "../utils/logger";
+import { getGasProfilerService } from "./gasProfiler/gasProfilerService";
 
 dotenv.config();
 
@@ -117,9 +118,10 @@ export class StellarService {
     );
 
     const network = getStellarNetwork();
-    const txURL = network === "TESTNET"
-      ? `https://testnet.stellarexpert.org/tx/${result.hash}`
-      : `https://stellarexpert.org/tx/${result.hash}`;
+    const txURL =
+      network === "TESTNET"
+        ? `https://testnet.stellarexpert.org/tx/${result.hash}`
+        : `https://stellarexpert.org/tx/${result.hash}`;
 
     logger.networkInfo(
       `✅ Price update for ${currency} confirmed. Hash: ${result.hash} | StellarExpert: ${txURL}`,
@@ -164,8 +166,18 @@ export class StellarService {
     const submitted = await rpcServer.sendTransaction(prepared);
     for (let attempt = 0; attempt < 30; attempt++) {
       const result = await rpcServer.getTransaction(submitted.hash);
+      if (result.status === "SUCCESS" || result.status === "FAILED") {
+        // Issue #786 – profile CPU/fee cost. Fire-and-forget so a decode
+        // failure never blocks the governance path; failed txs are still billed.
+        void getGasProfilerService().profileTransaction(
+          result,
+          "submission",
+          submitted.hash,
+        );
+      }
       if (result.status === "SUCCESS") return submitted.hash;
-      if (result.status === "FAILED") throw new Error(`Governance proposal ${proposalId} failed`);
+      if (result.status === "FAILED")
+        throw new Error(`Governance proposal ${proposalId} failed`);
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     throw new Error(`Governance proposal ${proposalId} confirmation timed out`);
@@ -212,9 +224,10 @@ export class StellarService {
 
     const currencies = updates.map((u) => u.currency).join(", ");
     const network = getStellarNetwork();
-    const txURL = network === "TESTNET"
-      ? `https://testnet.stellarexpert.org/tx/${result.hash}`
-      : `https://stellarexpert.org/tx/${result.hash}`;
+    const txURL =
+      network === "TESTNET"
+        ? `https://testnet.stellarexpert.org/tx/${result.hash}`
+        : `https://stellarexpert.org/tx/${result.hash}`;
 
     logger.networkInfo(
       `✅ Batched price update for [${currencies}] confirmed. Hash: ${result.hash} | StellarExpert: ${txURL}`,
@@ -257,9 +270,10 @@ export class StellarService {
     );
 
     const network = getStellarNetwork();
-    const txURL = network === "TESTNET"
-      ? `https://testnet.stellarexpert.org/tx/${result.hash}`
-      : `https://stellarexpert.org/tx/${result.hash}`;
+    const txURL =
+      network === "TESTNET"
+        ? `https://testnet.stellarexpert.org/tx/${result.hash}`
+        : `https://stellarexpert.org/tx/${result.hash}`;
 
     logger.networkInfo(
       `✅ Multi-signed price update for ${currency} confirmed. Hash: ${result.hash} | StellarExpert: ${txURL}`,
@@ -299,21 +313,22 @@ export class StellarService {
         const transaction = builderFn(sourceAccount, currentFee);
         this.assertStrictTimeBounds(transaction);
         await assertSigningAllowed();
-        
+
         const txHash = transaction.hash();
         const signature = await signer.sign(txHash);
         const kp = Keypair.fromPublicKey(publicKey);
-        
+
         transaction.signatures.push(
           new xdr.DecoratedSignature({
             hint: kp.signatureHint(),
             signature: signature,
-          })
+          }),
         );
 
         return await this.submitWithTimeoutListener(transaction, publicKey);
       } catch (error: any) {
-        const resultCode = error.response?.data?.extras?.result_codes?.transaction;
+        const resultCode =
+          error.response?.data?.extras?.result_codes?.transaction;
 
         if (resultCode === "tx_bad_seq" || this.isLocalTimeoutError(error)) {
           logger.warn(
@@ -344,7 +359,9 @@ export class StellarService {
       }
     }
 
-    throw new Error(`Failed to submit transaction after ${maxRetries + 1} attempts`);
+    throw new Error(
+      `Failed to submit transaction after ${maxRetries + 1} attempts`,
+    );
   }
 
   /**
@@ -378,16 +395,16 @@ export class StellarService {
         this.assertStrictTimeBounds(transaction);
 
         await assertSigningAllowed();
-        
+
         const txHash = transaction.hash();
         const signature = await signer.sign(txHash);
         const kp = Keypair.fromPublicKey(publicKey);
-        
+
         transaction.signatures.push(
           new xdr.DecoratedSignature({
             hint: kp.signatureHint(),
             signature: signature,
-          })
+          }),
         );
 
         for (const sig of signatures) {
@@ -404,13 +421,17 @@ export class StellarService {
 
             transaction.signatures.push(decoratedSignature);
           } catch (error) {
-            logger.error(`[StellarService] Failed to add signature for ${sig.signerPublicKey}:`, { error });
+            logger.error(
+              `[StellarService] Failed to add signature for ${sig.signerPublicKey}:`,
+              { error },
+            );
           }
         }
 
         return await this.submitWithTimeoutListener(transaction, publicKey);
       } catch (error: any) {
-        const resultCode = error.response?.data?.extras?.result_codes?.transaction;
+        const resultCode =
+          error.response?.data?.extras?.result_codes?.transaction;
 
         if (resultCode === "tx_bad_seq" || this.isLocalTimeoutError(error)) {
           logger.warn(
@@ -438,7 +459,9 @@ export class StellarService {
       }
     }
 
-    throw new Error(`Failed to submit multi-signed transaction after ${maxRetries + 1} attempts`);
+    throw new Error(
+      `Failed to submit multi-signed transaction after ${maxRetries + 1} attempts`,
+    );
   }
 
   private assertStrictTimeBounds(transaction: Transaction): void {
@@ -470,24 +493,30 @@ export class StellarService {
       return await Promise.race([
         this.server.submitTransaction(transaction),
         new Promise<never>((_, reject) => {
-          pending.timer = setTimeout(() => {
-            const activePending = this.pendingTimeBoundTransactions.get(
-              pending.hash,
-            );
+          pending.timer = setTimeout(
+            () => {
+              const activePending = this.pendingTimeBoundTransactions.get(
+                pending.hash,
+              );
 
-            if (!activePending) {
-              return;
-            }
+              if (!activePending) {
+                return;
+              }
 
-            activePending.timedOut = true;
-            this.pendingTimeBoundTransactions.delete(pending.hash);
-            logger.warn(
-              `[StellarService] Transaction ${pending.hash} exceeded ${this.TRANSACTION_TIME_BOUND_SECONDS}s time-bound. Recycling local assignment.`,
-            );
-            reject(
-              new LocalTransactionTimeoutError(pending.hash, pending.publicKey),
-            );
-          }, Math.max(pending.expiresAtMs - Date.now(), 0));
+              activePending.timedOut = true;
+              this.pendingTimeBoundTransactions.delete(pending.hash);
+              logger.warn(
+                `[StellarService] Transaction ${pending.hash} exceeded ${this.TRANSACTION_TIME_BOUND_SECONDS}s time-bound. Recycling local assignment.`,
+              );
+              reject(
+                new LocalTransactionTimeoutError(
+                  pending.hash,
+                  pending.publicKey,
+                ),
+              );
+            },
+            Math.max(pending.expiresAtMs - Date.now(), 0),
+          );
         }),
       ]);
     } finally {
@@ -505,8 +534,7 @@ export class StellarService {
       hash,
       publicKey,
       createdAtMs,
-      expiresAtMs:
-        createdAtMs + this.TRANSACTION_TIME_BOUND_SECONDS * 1000,
+      expiresAtMs: createdAtMs + this.TRANSACTION_TIME_BOUND_SECONDS * 1000,
       timedOut: false,
     };
 
@@ -552,7 +580,9 @@ export class StellarService {
 
   generateMemoId(currency: string): string {
     const timestamp = Math.floor(Date.now() / 1000);
-    const random = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
+    const random = Math.floor(Math.random() * 1000)
+      .toString()
+      .padStart(3, "0");
     const id = `SF-${currency}-${timestamp}-${random}`;
     return id.substring(0, 28);
   }

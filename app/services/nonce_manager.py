@@ -60,7 +60,6 @@ Usage example::
 
 from __future__ import annotations
 
-import logging
 import os
 import threading
 import time
@@ -69,8 +68,9 @@ from dataclasses import dataclass, field
 from typing import Dict, Generator, Iterator, List, Optional, Set, Tuple
 
 import requests
+import structlog
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -238,10 +238,11 @@ class NonceManager:
                 # SET NX: only write if the key is still absent (another
                 # process may have written it between exists() and SET).
                 self._redis.set(self._redis_key, seed, nx=True)
-                logger.info(
-                    "[NonceManager] Bootstrapped Redis counter for %s → %d",
-                    self.account_address,
-                    seed,
+                log.info(
+                    "nonce_manager.counter.bootstrapped",
+                    component="NonceManager",
+                    account=self.account_address,
+                    seed=seed,
                 )
 
             # Atomic increment — Redis guarantees uniqueness across all clients.
@@ -250,12 +251,13 @@ class NonceManager:
             # Record the slot as pending.
             self._pending[sequence] = _PendingSlot(sequence=sequence)
 
-            logger.debug(
-                "[NonceManager] Acquired sequence %d for %s (in-flight=%d)",
-                sequence,
-                self.account_address,
-                len(self._pending),
-            )
+            log.debug(
+                    "nonce_manager.sequence.acquired",
+                    component="NonceManager",
+                    account=self.account_address,
+                    sequence=sequence,
+                    in_flight=len(self._pending),
+                )
             return sequence
 
     def confirm(self, sequence: int) -> None:
@@ -273,17 +275,19 @@ class NonceManager:
             slot = self._pending.pop(sequence, None)
             if slot is not None:
                 latency_ms = (time.monotonic() - slot.issued_at) * 1000
-                logger.info(
-                    "[NonceManager] Confirmed sequence %d for %s | latency=%.1fms",
-                    sequence,
-                    self.account_address,
-                    latency_ms,
+                log.info(
+                    "nonce_manager.sequence.confirmed",
+                    component="NonceManager",
+                    account=self.account_address,
+                    sequence=sequence,
+                    latency_ms=round(latency_ms, 1),
                 )
             else:
-                logger.debug(
-                    "[NonceManager] confirm() called for unknown sequence %d on %s",
-                    sequence,
-                    self.account_address,
+                log.debug(
+                    "nonce_manager.confirm.unknown_sequence",
+                    component="NonceManager",
+                    account=self.account_address,
+                    sequence=sequence,
                 )
 
     def fail(self, sequence: int) -> None:
@@ -303,17 +307,19 @@ class NonceManager:
             slot = self._pending.pop(sequence, None)
             if slot is not None:
                 latency_ms = (time.monotonic() - slot.issued_at) * 1000
-                logger.info(
-                    "[NonceManager] Failed sequence %d for %s | latency=%.1fms",
-                    sequence,
-                    self.account_address,
-                    latency_ms,
+                log.info(
+                    "nonce_manager.sequence.failed",
+                    component="NonceManager",
+                    account=self.account_address,
+                    sequence=sequence,
+                    latency_ms=round(latency_ms, 1),
                 )
             else:
-                logger.debug(
-                    "[NonceManager] fail() called for unknown sequence %d on %s",
-                    sequence,
-                    self.account_address,
+                log.debug(
+                    "nonce_manager.fail.unknown_sequence",
+                    component="NonceManager",
+                    account=self.account_address,
+                    sequence=sequence,
                 )
 
     def resync_from_horizon(self) -> int:
@@ -344,12 +350,13 @@ class NonceManager:
                 break
             except Exception as exc:
                 last_exc = exc
-                logger.warning(
-                    "[NonceManager] Horizon re-sync attempt %d/%d failed for %s: %s",
-                    attempt,
-                    MAX_RESYNC_RETRIES,
-                    self.account_address,
-                    exc,
+                log.warning(
+                    "nonce_manager.resync.attempt_failed",
+                    component="NonceManager",
+                    account=self.account_address,
+                    attempt=attempt,
+                    max_retries=MAX_RESYNC_RETRIES,
+                    error=str(exc),
                 )
                 if attempt < MAX_RESYNC_RETRIES:
                     time.sleep(RESYNC_RETRY_BACKOFF_SECONDS * attempt)
@@ -367,10 +374,11 @@ class NonceManager:
             # superseded by the authoritative ledger state.
             self._pending.clear()
 
-        logger.info(
-            "[NonceManager] Re-synced %s with Horizon → sequence=%d",
-            self.account_address,
-            ledger_sequence,
+        log.info(
+            "nonce_manager.resync.completed",
+            component="NonceManager",
+            account=self.account_address,
+            ledger_sequence=ledger_sequence,
         )
         return ledger_sequence
 
@@ -427,9 +435,10 @@ class NonceManager:
         with self._lock:
             self._redis.delete(self._redis_key)
             self._pending.clear()
-        logger.info(
-            "[NonceManager] Invalidated Redis counter for %s. Re-sync required.",
-            self.account_address,
+        log.info(
+            "nonce_manager.counter.invalidated",
+            component="NonceManager",
+            account=self.account_address,
         )
 
     # ------------------------------------------------------------------
@@ -552,10 +561,11 @@ class RelayerPool:
                 stale_timeout_seconds=stale_timeout_seconds,
             )
 
-        logger.info(
-            "[RelayerPool] Initialised with %d accounts: %s",
-            len(accounts),
-            accounts,
+        log.info(
+            "relayer_pool.initialised",
+            component="RelayerPool",
+            account_count=len(accounts),
+            accounts=accounts,
         )
 
     # ------------------------------------------------------------------
@@ -628,11 +638,11 @@ class RelayerPool:
                 try:
                     sequence = fb_manager.acquire(seed=fb_seed)
                     chosen_address = fallback.address
-                    logger.info(
-                        "[RelayerPool] Fell back to account %s after primary "
-                        "account %s had no Redis key.",
-                        chosen_address,
-                        chosen_load.address,
+                    log.info(
+                        "relayer_pool.fallback_account_selected",
+                        component="RelayerPool",
+                        fallback_account=chosen_address,
+                        primary_account=chosen_load.address,
                     )
                     break
                 except ValueError:
@@ -643,12 +653,12 @@ class RelayerPool:
                     "Call resync_all() or pass seed_map to acquire_account()."
                 ) from exc
 
-        logger.debug(
-            "[RelayerPool] Assigned sequence %d on account %s "
-            "(in-flight before=%d)",
-            sequence,
-            chosen_address,
-            chosen_load.in_flight,
+        log.debug(
+            "relayer_pool.sequence.assigned",
+            component="RelayerPool",
+            account=chosen_address,
+            sequence=sequence,
+            in_flight_before=chosen_load.in_flight,
         )
         return chosen_address, sequence
 
@@ -670,9 +680,10 @@ class RelayerPool:
         """
         manager = self._managers.get(account_address)
         if manager is None:
-            logger.error(
-                "[RelayerPool] release_account() called for unknown address %s",
-                account_address,
+            log.error(
+                "relayer_pool.release.unknown_account",
+                component="RelayerPool",
+                account=account_address,
             )
             return
 
@@ -731,8 +742,11 @@ class RelayerPool:
                 seq = manager.resync_from_horizon()
                 results[address] = seq
             except NonceMismatchError as exc:
-                logger.error(
-                    "[RelayerPool] resync_all() failed for %s: %s", address, exc
+                log.error(
+                    "relayer_pool.resync_all.account_failed",
+                    component="RelayerPool",
+                    account=address,
+                    error=str(exc),
                 )
         return results
 
@@ -767,7 +781,10 @@ class RelayerPool:
         """
         for manager in self._managers.values():
             manager.invalidate()
-        logger.info("[RelayerPool] All account counters invalidated.")
+        log.info(
+            "relayer_pool.all_counters_invalidated",
+            component="RelayerPool",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -896,11 +913,12 @@ def create_relayer_pool(
         retry_on_timeout=True,
     )
 
-    logger.info(
-        "[NonceManager] Creating RelayerPool | accounts=%d | horizon=%s | redis=%s",
-        len(accounts),
-        horizon_url,
-        redis_url,
+    log.info(
+        "relayer_pool.creating",
+        component="NonceManager",
+        account_count=len(accounts),
+        horizon_url=horizon_url,
+        redis_url=redis_url,
     )
 
     return RelayerPool(

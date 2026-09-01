@@ -256,10 +256,12 @@ export class RemittanceService {
       let nextCursor: string | null = null;
       if (hasMore && pageRows.length > 0) {
         const last = pageRows[pageRows.length - 1];
-        nextCursor = encodeCursor({
-          createdAt: last.createdAt.toISOString(),
-          id: last.id,
-        });
+        if (last) {
+          nextCursor = encodeCursor({
+            createdAt: last.createdAt.toISOString(),
+            id: last.id,
+          });
+        }
       }
 
       // Type helper for the selected row shape returned by Prisma
@@ -283,7 +285,7 @@ export class RemittanceService {
       };
 
       const data: RemittanceTransactionRecord[] = (
-        pageRows as SelectedRow[]
+        pageRows as unknown as SelectedRow[]
       ).map((r) => ({
         id: r.id,
         userId: r.userId,

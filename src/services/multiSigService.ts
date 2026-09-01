@@ -473,8 +473,8 @@ export class MultiSigService {
     multiSigPriceId: number,
     memoId: string,
     stellarTxHash: string,
-    asset?: string,       // optional — caller can pass e.g. "XLM/USD"
-    feeStroops?: number,  // optional — pass tx.fee_charged if available
+    asset?: string, // optional — caller can pass e.g. "XLM/USD"
+    feeStroops?: number, // optional — pass tx.fee_charged if available
   ): Promise<void> {
     // Resolve the asset label from DB if not supplied by caller
     const label = asset ?? (await this.resolveCurrency(multiSigPriceId));
