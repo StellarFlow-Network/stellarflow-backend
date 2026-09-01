@@ -31,8 +31,12 @@ import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
 import { providerSecretRotationService } from "./services/providerSecretRotationService";
 import { priceAggregatorService } from "./services/priceAggregatorService";
 import { contractSanityCheckService } from "./services/contractSanityCheckService";
+import { getCircuitBreakerService } from "./services/circuitBreakerService";
 import { governanceTimelockService } from "./services/governanceTimelockService";
 import { storageRentBumpService } from "./services/storageRentBumpService";
+import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
+import { getRegionalHealthService } from "./services/regionalHealthService";
+import { redisOperationsWorker } from "./services/redisOperationsWorker";
 // Load environment variables
 dotenv.config();
 // Normalize safe startup environment strings before runtime storage.
@@ -225,6 +229,7 @@ let sorobanEventListener = null;
 // FIX 1: Typed as nullable — constructor is not called at module level,
 // so a missing secret env var won't crash the process before the server starts.
 let gasBalanceMonitorService = null;
+const circuitBreakerService = getCircuitBreakerService();
 let isShuttingDown = false;
 let stopEnvFileWatcher;
 const stopConfigWatcher = watchConfig((cfg) => {
@@ -260,12 +265,15 @@ const shutdown = async (signal) => {
         multiSigSubmissionService.stop();
         governanceTimelockService.stop();
         liquidityRebalancingWorker?.stop();
+        apyWorker.stop();
         // FIX 2: Optional chaining — safe to call even if service never started
         gasBalanceMonitorService?.stop();
+        circuitBreakerService.stop();
         hourlyAverageService.stop();
         priceAggregatorService.stop();
         providerSecretRotationService.stop();
         storageRentBumpService.stop();
+        getOrderBookSnapshotEngine().stop();
         stopConfigWatcher();
         stopEnvFileWatcher?.();
         await closeHttpServer();
@@ -301,6 +309,18 @@ httpServer.listen(PORT, async () => {
     console.log(`🔌 Socket.io ready for dashboard connections`);
     redisOperationsWorker.start();
     console.log(`🧹 Redis operations worker started`);
+    // Start the order book snapshot engine (Issue #796)
+    try {
+        getOrderBookSnapshotEngine()
+            .start()
+            .catch((err) => {
+            console.error("Failed to start order book snapshot engine:", err);
+        });
+        console.log(`📖 Order book snapshot engine started`);
+    }
+    catch (err) {
+        console.warn("Order book snapshot engine not started:", err instanceof Error ? err.message : err);
+    }
     // Perform contract sanity check before starting ingestion loop
     let contractSanityPassed = true;
     if (contractSanityCheckService.isConfigured()) {
@@ -398,6 +418,19 @@ httpServer.listen(PORT, async () => {
     }
     catch (err) {
         console.warn("Gas balance monitor service not started:", err instanceof Error ? err.message : err);
+    }
+    // Invariant Violation Automated Circuit Breaker (Issue #829):
+    // monitors balance invariants off-chain and auto-submits a pause()
+    // transaction signed by the emergency keeper key when a CRITICAL breach
+    // is detected. Opt-in via CIRCUIT_BREAKER_ENABLED=true.
+    try {
+        circuitBreakerService.start().catch((err) => {
+            console.error("Failed to start circuit breaker service:", err);
+        });
+        console.log(`🚨 Circuit breaker service started`);
+    }
+    catch (err) {
+        console.warn("Circuit breaker service not started:", err instanceof Error ? err.message : err);
     }
     // Start storage rent bump service
     try {

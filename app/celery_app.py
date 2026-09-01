@@ -4,7 +4,7 @@ import os
 
 from celery import Celery
 from celery.schedules import crontab
-from app.sentry import init_sentry
+from kombu import Exchange, Queue
 
 init_sentry()
 
@@ -22,6 +22,20 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
+    task_queues=(
+        Queue("webhook.retry", Exchange("webhook"), routing_key="webhook.retry", durable=True),
+        Queue("webhook.dead", Exchange("webhook"), routing_key="webhook.dead", durable=True),
+    ),
+    task_routes={
+        "app.tasks.deliver_webhook_task": {
+            "queue": "webhook.retry",
+            "routing_key": "webhook.retry",
+        },
+        "app.tasks.webhook_dead_letter_task": {
+            "queue": "webhook.dead",
+            "routing_key": "webhook.dead",
+        },
+    },
     beat_schedule={
         "poll-anchor-settlement-statuses": {
             "task": "app.tasks.poll_anchor_settlement_statuses",

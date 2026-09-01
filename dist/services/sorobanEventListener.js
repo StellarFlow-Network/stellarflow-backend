@@ -6,6 +6,8 @@ import dotenv from "dotenv";
 import { logger } from "../utils/logger";
 import { verifyOrderFilledEvent } from "./orderFillVerificationService.js";
 import { ingestGovernanceVoteEvent } from "./voterHistoryService.js";
+import { getCacheInvalidationManager } from "../cache/CacheInvalidationManager";
+import { getOrderBookSnapshotEngine } from "./orderBookSnapshotEngine";
 dotenv.config();
 export class SorobanEventListener {
     bpManager = new BackpressureManager();
@@ -90,10 +92,26 @@ export class SorobanEventListener {
                     }
                     // Broadcast all successful updates (Essential or Metric) to UI
                     broadcastToSessions("price_update", price);
-                    // Trigger cache warming on new price update
+                    // Issue #789 – Purge stale Redis response caches before warming so
+                    // the warming worker repopulates with fresh data.
+                    try {
+                        await getCacheInvalidationManager().onLedgerEvent(price.ledgerSeq, price);
+                    }
+                    catch (err) {
+                        logger.error("[EventListener] Cache invalidation failed:", err);
+                    }
+                    // Trigger cache warming on new price update. Dynamically imported
+                    // because the warming worker pulls in the signer, which performs
+                    // secret retrieval at module load.
+                    const { getCacheWarmingWorker } = await import("./cacheWarmingWorker.js");
                     const cacheWarmingWorker = getCacheWarmingWorker();
                     cacheWarmingWorker.onNewLedger(price.ledgerSeq).catch((err) => {
                         logger.error("[EventListener] Cache warming failed:", err);
+                    });
+                    // Trigger order book snapshot on new ledger (every N ledgers)
+                    const orderBookSnapshotEngine = getOrderBookSnapshotEngine();
+                    orderBookSnapshotEngine.onNewLedger(price.ledgerSeq).catch((err) => {
+                        logger.error("[EventListener] Order book snapshot failed:", err);
                     });
                 }
                 catch (err) {
@@ -192,7 +210,9 @@ export class SorobanEventListener {
             });
         }
         catch (err) {
-            logger.networkError("[EventListener] GovernanceVoted poll failed:", { err });
+            logger.networkError("[EventListener] GovernanceVoted poll failed:", {
+                err,
+            });
             return;
         }
         for (const event of response.events ?? []) {

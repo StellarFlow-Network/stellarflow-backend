@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { Keypair, TransactionBuilder, Operation, Memo, xdr, Account, Contract, nativeToScVal, } from "@stellar/stellar-sdk";
+import { Keypair, TransactionBuilder, Operation, Memo, xdr, Account, Contract, nativeToScVal, rpc as SorobanRpc, } from "@stellar/stellar-sdk";
 import stellarProvider from "../lib/stellarProvider";
 import { getStellarNetwork, getStellarNetworkPassphrase, } from "../lib/stellarNetwork";
 import { sequenceManager } from "./sequence-manager";
@@ -86,7 +86,7 @@ export class StellarService {
             .build();
         const rpcServer = stellarProvider.getRpcServer();
         const simulation = await rpcServer.simulateTransaction(transaction);
-        const prepared = rpcServer.assembleTransaction(transaction, simulation).build();
+        const prepared = SorobanRpc.assembleTransaction(transaction, simulation).build();
         const signature = await signer.sign(prepared.hash());
         const keypair = Keypair.fromPublicKey(publicKey);
         prepared.signatures.push(new xdr.DecoratedSignature({

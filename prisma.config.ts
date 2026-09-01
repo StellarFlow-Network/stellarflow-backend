@@ -6,6 +6,8 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    // Prisma CLI schema/migration operations use the direct database path;
+    // application runtime traffic uses DATABASE_URL through PgBouncer.
+    url: process.env.DIRECT_DATABASE_URL || env("DATABASE_URL"),
   },
 });

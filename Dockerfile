@@ -78,8 +78,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install runtime-only C dynamic libraries (without compilers/toolchains)
+# libpango/libharfbuzz/libjpeg/zlib are required by WeasyPrint (Issue #772)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz0b \
+    libjpeg62-turbo \
+    zlib1g \
+    liblcms2-2 \
+    libffi8 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy pre-built packages from builder stage

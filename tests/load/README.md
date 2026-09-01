@@ -25,11 +25,7 @@ docker pull grafana/k6
 | `latest-prices.js` | 1,000 RPS sustained on `/api/v1/market-rates/latest` | 1m |
 | `stress.js` | Ramp up past 1,000 RPS to find breaking point | ~8m |
 | `soak.js` | 1,000 RPS for 30 minutes (memory/leak detection) | ~30m |
-| `peak.js` | Ramp across core API routes to the 10,000 req/sec peak target | ~8m |
-| `monitor.js` | Node script — samples CPU, memory, event-loop lag (`/metrics`) and DB connection pool (`pg_stat_activity`) at a fixed interval while a k6 scenario runs | runs until stopped |
-| `generate-report.js` | Node script — turns a k6 JSON summary + `monitor.js` CSV into a markdown bottleneck report | instant |
-
-`peak.js` hits authenticated routes (everything under `/api/v1` except `/auth`). Pass `-e API_KEY=...` or those requests will 401 — which still exercises rate-limit/auth-middleware overhead under load, but for a true peak-capacity number use a valid key.
+| `pgbouncer-stress.js` | Compare high-concurrency reads through PgBouncer | ~7m |
 
 ## Running
 
@@ -62,6 +58,18 @@ Soak test (sustained 30 minutes):
 ```bash
 k6 run tests/load/soak.js
 ```
+
+PgBouncer comparison test:
+
+```bash
+k6 run -e BASE_URL=http://localhost:3000 tests/load/pgbouncer-stress.js
+```
+
+The Compose backend uses PgBouncer on port `6432` for runtime database
+traffic. Compare this scenario with the same backend configured with
+`DIRECT_DATABASE_URL` and record PostgreSQL CPU, `pg_stat_activity` connection
+counts, and PgBouncer `SHOW POOLS` / `SHOW STATS` output. The comparison should
+use the same host resources, dataset, request rate, and duration.
 
 ## Thresholds
 
