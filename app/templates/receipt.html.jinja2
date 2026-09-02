@@ -1,0 +1,223 @@
+{# PDF payment receipt template (Issue #772).
+   Rendered with Jinja2 and compiled to PDF via WeasyPrint. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Payment Receipt — {{ reference or transaction_id or "Transaction" }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 20mm 16mm;
+      @bottom-left {
+        content: "{{ brand_name }} — Payment Receipt";
+        font-size: 8pt;
+        color: #8a94a6;
+      }
+      @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 8pt;
+        color: #8a94a6;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+      color: #1f2937;
+      font-size: 10.5pt;
+      line-height: 1.45;
+      margin: 0;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 3px solid #6366f1;
+      padding-bottom: 12pt;
+      margin-bottom: 16pt;
+    }
+    .brand {
+      font-size: 16pt;
+      font-weight: 700;
+      color: #4f46e5;
+      letter-spacing: 0.5pt;
+    }
+    .brand small {
+      display: block;
+      font-size: 8.5pt;
+      font-weight: 400;
+      color: #8a94a6;
+      letter-spacing: 0.2pt;
+    }
+    .receipt-title {
+      text-align: right;
+    }
+    .receipt-title .label {
+      font-size: 8.5pt;
+      text-transform: uppercase;
+      letter-spacing: 1pt;
+      color: #8a94a6;
+    }
+    .receipt-title .value {
+      font-size: 13pt;
+      font-weight: 700;
+      color: #111827;
+    }
+    .badge {
+      display: inline-block;
+      margin-top: 4pt;
+      padding: 2pt 8pt;
+      border-radius: 8pt;
+      font-size: 8.5pt;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+    }
+    .badge.completed { background: #dcfce7; color: #15803d; }
+    .badge.pending   { background: #fef9c3; color: #a16207; }
+    .badge.failed    { background: #fee2e2; color: #b91c1c; }
+    .badge.reversed  { background: #f3f4f6; color: #374151; }
+    .badge.default   { background: #e0e7ff; color: #4338ca; }
+
+    .grid {
+      display: table;
+      width: 100%;
+      border-spacing: 16pt 8pt;
+      margin: 0 -16pt;
+    }
+    .col {
+      display: table-cell;
+      vertical-align: top;
+    }
+    .col.wide { width: 55%; }
+    .section-title {
+      font-size: 8.5pt;
+      text-transform: uppercase;
+      letter-spacing: 0.8pt;
+      color: #8a94a6;
+      margin-bottom: 6pt;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 3pt;
+    }
+    .detail { margin-bottom: 4pt; }
+    .detail .k {
+      display: inline-block;
+      width: 45%;
+      color: #6b7280;
+      font-size: 9.5pt;
+    }
+    .detail .v {
+      display: inline-block;
+      color: #111827;
+      font-weight: 600;
+      font-size: 10pt;
+    }
+
+    table.amounts {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 6pt 0 14pt;
+    }
+    table.amounts th {
+      text-align: left;
+      font-size: 8.5pt;
+      text-transform: uppercase;
+      letter-spacing: 0.6pt;
+      color: #8a94a6;
+      font-weight: 600;
+      padding: 5pt 6pt;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    table.amounts td {
+      padding: 6pt 6pt;
+      font-size: 10pt;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    table.amounts td.amount {
+      font-weight: 700;
+      color: #111827;
+    }
+    table.amounts tr.total td {
+      border-top: 2px solid #4f46e5;
+      border-bottom: none;
+      font-weight: 700;
+      color: #4f46e5;
+      font-size: 11pt;
+    }
+
+    .footer {
+      margin-top: 20pt;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 8pt;
+      font-size: 8.5pt;
+      color: #8a94a6;
+    }
+    .footer p { margin: 2pt 0; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">
+      {{ brand_name }}
+      <small>Cross-border remittance payout receipt</small>
+    </div>
+    <div class="receipt-title">
+      <div class="label">Payment Receipt</div>
+      <div class="value">#{{ reference or transaction_id or receipt_id }}</div>
+      <span class="badge {{ status|lower|default('complete') }}">{{ status or "COMPLETED" }}</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="col">
+      <div class="section-title">Recipient</div>
+      <div class="detail"><span class="k">Name</span><span class="v">{{ recipient_name or "—" }}</span></div>
+      <div class="detail"><span class="k">Email</span><span class="v">{{ recipient_email or user_email or "—" }}</span></div>
+      {% if recipient_account %}
+      <div class="detail"><span class="k">Account</span><span class="v">{{ recipient_account }}</span></div>
+      {% endif %}
+    </div>
+    <div class="col wide">
+      <div class="section-title">Transaction</div>
+      <div class="detail"><span class="k">Transaction ID</span><span class="v">{{ transaction_id or "—" }}</span></div>
+      <div class="detail"><span class="k">Provider</span><span class="v">{{ provider or "StellarFlow" }}</span></div>
+      <div class="detail"><span class="k">Reference</span><span class="v">{{ reference or "—" }}</span></div>
+      {% if stellar_tx_hash %}
+      <div class="detail"><span class="k">Stellar TX Hash</span><span class="v" style="font-size:8.5pt;">{{ stellar_tx_hash }}</span></div>
+      {% endif %}
+      <div class="detail"><span class="k">Completed</span><span class="v">{{ completed_at or created_at or "—" }}</span></div>
+    </div>
+  </div>
+
+  <div class="section-title">Payment Details</div>
+  <table class="amounts">
+    <thead>
+      <tr>
+        <th>Asset</th>
+        <th>Amount Sent</th>
+        <th>Output Amount</th>
+        <th>Rate</th>
+        <th>Fee</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ asset or "—" }}</td>
+        <td class="amount">{{ amount or "0.00" }} {{ sender_currency or "" }}</td>
+        <td>{{ output_amount or "0.00" }} {{ receiver_currency or "" }}</td>
+        <td>{{ rate or "—" }}</td>
+        <td>{{ fee or "0.00" }} {{ sender_currency or "" }}</td>
+      </tr>
+      <tr class="total">
+        <td>Total Payout</td>
+        <td colspan="4">{{ output_amount or "0.00" }} {{ receiver_currency or "" }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p>This receipt certifies a payout processed through the {{ brand_name }} cross-border remittance network.</p>
+    <p>Generated on {{ generated_at }} — keep this document for your records.</p>
+  </div>
+</body>
+</html>

@@ -170,7 +170,9 @@ export async function getVoterProfile(
 ): Promise<void> {
   try {
     // ── 1. Validate path param ──────────────────────────────────────────────
-    const { account_id } = req.params;
+    const account_id = typeof req.params.account_id === "string"
+      ? req.params.account_id
+      : undefined;
 
     if (!account_id || !STELLAR_ACCOUNT_RE.test(account_id)) {
       sendApiError(
@@ -244,8 +246,13 @@ export async function getVoterProfile(
     }
 
     // ── 3. Fetch data in parallel ────────────────────────────────────────────
+    const voteHistoryOptions = { from: fromDate, to: toDate, limit };
+    if (cursor !== undefined) {
+      Object.assign(voteHistoryOptions, { cursor });
+    }
+
     const [voteHistory, delegationTree, weightTrend] = await Promise.all([
-      getVoteHistory(account_id, { from: fromDate, to: toDate, limit, cursor }),
+      getVoteHistory(account_id, voteHistoryOptions),
       getDelegationTree(account_id),
       getWeightTrend(account_id, trendDays),
     ]);

@@ -1,6 +1,6 @@
 import { httpClient } from "../lib/httpClient.js";
 import { OUTGOING_HTTP_TIMEOUT_MS } from "../utils/httpTimeout.js";
-import { withRetry } from "../utils/retryUtil.js";
+import { publishWebhookRetry } from "./webhookRetryPublisher.js";
 
 type MarkdownText = {
   type: "mrkdwn";
@@ -178,27 +178,30 @@ export class WebhookService {
     const webhookUrl = this.webhookUrl;
 
     try {
-      await withRetry(
-        () =>
-          httpClient.post(webhookUrl, message, {
-            headers: { "Content-Type": "application/json" },
-            timeout: OUTGOING_HTTP_TIMEOUT_MS,
-          }),
-        {
-          maxRetries: 3,
-          retryDelay: 1000,
-          onRetry: (attempt, error, delay) => {
-            console.debug(
-              `Webhook notification retry attempt ${attempt}/3 after ${delay}ms. Error: ${error.message}`,
-            );
-          },
-        },
-      );
+      const response = await httpClient.post(webhookUrl, message, {
+        headers: { "Content-Type": "application/json" },
+        timeout: OUTGOING_HTTP_TIMEOUT_MS,
+      });
+      if (response.status >= 200 && response.status < 300) return;
+
+      if (![408, 425, 429, 500, 502, 503, 504].includes(response.status)) {
+        console.error(`Webhook delivery failed with permanent HTTP ${response.status}`);
+        return;
+      }
+
+      await publishWebhookRetry(webhookUrl, message as unknown as Record<string, unknown>);
     } catch (error) {
-      console.error(
-        "Failed to send webhook notification after retries:",
-        error,
-      );
+      const status = (error as { response?: { status?: number } }).response?.status;
+      if (status && ![408, 425, 429, 500, 502, 503, 504].includes(status)) {
+        console.error(`Webhook delivery failed with permanent HTTP ${status}`);
+        return;
+      }
+
+      try {
+        await publishWebhookRetry(webhookUrl, message as unknown as Record<string, unknown>);
+      } catch (queueError) {
+        console.error("Failed to queue webhook delivery retry:", queueError);
+      }
     }
   }
 

@@ -20,6 +20,7 @@ function compareStreamIds(left: string, right: string): number {
 export class RedisOperationsWorker {
   private timer: ReturnType<typeof setInterval> | undefined;
   private alertActive = false;
+  private lastHeartbeatAt: number | null = null;
 
   constructor(
     private readonly notifications = new NotificationService(),
@@ -46,6 +47,7 @@ export class RedisOperationsWorker {
   }
 
   async runOnce(): Promise<void> {
+    this.lastHeartbeatAt = Date.now();
     const redis = getRedisClient();
     if (!redis?.isOpen) return;
     await redis.sendCommand([
@@ -57,6 +59,14 @@ export class RedisOperationsWorker {
     await this.monitorMemory();
     for await (const stream of this.eventStreams())
       await this.trimStream(stream);
+  }
+
+  getLastHeartbeatAt(): number | null {
+    return this.lastHeartbeatAt;
+  }
+
+  getHeartbeatTimeoutMs(): number {
+    return Math.max(this.intervalMs * 2, 15_000);
   }
 
   private async *eventStreams(): AsyncGenerator<string> {

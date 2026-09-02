@@ -20,7 +20,7 @@ export async function getLiquidityPoolAnalytics(
       return;
     }
     const rows = await prisma.poolVolumeAnalytics.findMany({
-      where: poolId ? { poolId } : undefined,
+      ...(poolId ? { where: { poolId } } : {}),
       orderBy: [{ poolId: "asc" }, { timestamp: "desc" }],
       distinct: ["poolId"],
     });

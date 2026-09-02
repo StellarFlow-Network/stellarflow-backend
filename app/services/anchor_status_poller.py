@@ -6,7 +6,6 @@ event after another worker has already claimed the transition.
 """
 
 import json
-import logging
 import os
 from typing import Any, Awaitable, Callable, Mapping
 from urllib.parse import quote
@@ -14,8 +13,9 @@ from urllib.parse import quote
 import aiohttp
 import asyncpg
 import redis.asyncio as aioredis
+import structlog
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 PENDING_EXTERNAL = "pending_external"
 COMPLETED = "COMPLETED"
@@ -87,7 +87,16 @@ class AnchorStatusPoller:
                                 await self.publish(redis, str(row["id"]))
                                 completed += 1
                         except Exception:
-                            logger.exception("Anchor status poll failed for remittance %s", row["id"])
+                            log.exception(
+                                "anchor_poller.row_failed",
+                                component="AnchorStatusPoller",
+                                remittance_id=str(row["id"]),
+                            )
+            log.info(
+                "anchor_poller.poll_completed",
+                component="AnchorStatusPoller",
+                completed_count=completed,
+            )
             return completed
         finally:
             await pool.close()
@@ -98,7 +107,11 @@ class AnchorStatusPoller:
         protocol = "sep31" if "sep31" in provider.lower() else "sep24"
         endpoint = os.getenv(f"ANCHOR_{protocol.upper()}_STATUS_URL") or os.getenv("ANCHOR_STATUS_URL")
         if not endpoint:
-            logger.warning("No status endpoint configured for %s", protocol)
+            log.warning(
+                "anchor_poller.no_status_endpoint",
+                component="AnchorStatusPoller",
+                protocol=protocol,
+            )
             return None
 
         if protocol == "sep31":

@@ -1,4 +1,4 @@
-import { SorobanRpc, Transaction, xdr } from "@stellar/stellar-sdk";
+import { rpc as SorobanRpc, Transaction, xdr } from "@stellar/stellar-sdk";
 import stellarProvider from "../lib/stellarProvider";
 
 export interface StorageTtlCheck {

@@ -80,6 +80,18 @@ class OrderDepthAggregatorService {
     };
   }
 
+  async updateDepth(
+    market: string,
+    tickSize: string | number,
+  ): Promise<void> {
+    const depth = await this.getDepth(market, tickSize);
+    const redis = getRedisClient();
+    if (!redis?.isReady) return;
+
+    const keyPrefix = process.env.ORDER_BOOK_REDIS_PREFIX ?? DEFAULT_KEY_PREFIX;
+    await redis.set(`${keyPrefix}:${market}:depth:cache`, JSON.stringify(depth));
+  }
+
   private aggregateSide(
     members: string[],
     tickSize: number,

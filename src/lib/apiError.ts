@@ -49,6 +49,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     "Unable to fetch an external price for comparison.",
   ENDPOINT_NOT_FOUND: "Endpoint not found",
   CORS_DENIED: "Cross-origin request denied by CORS policy.",
+  MISSING_ORIGIN:
+    "Request must include an approved Origin header or authenticate as a non-browser client.",
   PAYLOAD_TOO_LARGE: "Request body exceeds the allowed size.",
   INVALID_JSON: "Request body must be valid JSON.",
 

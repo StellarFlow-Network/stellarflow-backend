@@ -39,8 +39,10 @@ export const prisma = new Proxy({} as PrismaClient, {
       }
       const pool = new pg.Pool({
         connectionString,
-        max: 20,
-        idleTimeoutMillis: 10000,
+        max: Number(process.env.PG_POOL_MAX ?? 20),
+        min: Number(process.env.PG_POOL_MIN ?? 0),
+        idleTimeoutMillis: Number(process.env.PG_POOL_IDLE_TIMEOUT_MS ?? 10000),
+        connectionTimeoutMillis: Number(process.env.PG_POOL_CONNECTION_TIMEOUT_MS ?? 5000),
       });
       const adapter = new PrismaPg(pool);
       const baseClient = new PrismaClient({ adapter });

@@ -255,11 +255,13 @@ export class RemittanceService {
       // Build nextCursor from the last row of the current page ----------------
       let nextCursor: string | null = null;
       if (hasMore && pageRows.length > 0) {
-        const last = pageRows[pageRows.length - 1]!;
-        nextCursor = encodeCursor({
-          createdAt: last.createdAt.toISOString(),
-          id: last.id,
-        });
+        const last = pageRows[pageRows.length - 1];
+        if (last) {
+          nextCursor = encodeCursor({
+            createdAt: last.createdAt.toISOString(),
+            id: last.id,
+          });
+        }
       }
 
       // Type helper for the selected row shape returned by Prisma
@@ -269,10 +271,10 @@ export class RemittanceService {
         asset: string;
         senderCurrency: string;
         receiverCurrency: string;
-        amount: unknown;
-        outputAmount: unknown;
-        fee: unknown;
-        rate: unknown;
+        amount: { valueOf(): number } | number;
+        outputAmount: { valueOf(): number } | number;
+        fee: { valueOf(): number } | number;
+        rate: { valueOf(): number } | number;
         status: string;
         provider: string | null;
         stellarTxHash: string | null;

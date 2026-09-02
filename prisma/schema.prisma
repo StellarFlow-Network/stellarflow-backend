@@ -487,6 +487,118 @@ model RemittanceTransaction {
   @@index([recipientPublicKey])
 }
 
+// Remittance Dispute Model – Issue #834
+// Tracks dispute tickets opened when fiat payouts fail or time out.
+// State machine: open -> investigating -> refunded | closed.
+model RemittanceDispute {
+  id           String    @id @default(uuid())
+  remittanceId String    // RemittanceTransaction.id the dispute belongs to
+  userId       String    // Relayer / end-user identifier
+  status       String    @db.VarChar(20) @default("open") // open | investigating | refunded | closed
+  reason       String    @db.VarChar(255) // Payout failure / timeout reason captured at open
+  details      String?   // Structured JSON details captured when the dispute was opened
+  email        String?   // Contact address notified on state changes
+  webhookUrl   String?   // Endpoint notified on state changes (webhook updates)
+  refundAmount Decimal?  @db.Decimal(24, 10) // Amount refunded for manual refunds
+  refundedById String?   // Operator / admin identifier that triggered the refund
+  refundedAt   DateTime? // When the manual refund was issued
+  resolvedById String?   // Operator / admin identifier that closed the dispute
+  resolvedAt   DateTime? // When the dispute was closed
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, status, createdAt])
+  @@index([remittanceId])
+  @@index([status, createdAt])
+}
+model OhlcvCandle {
+  id        String   @id @default(uuid())
+  pair      String   @db.VarChar(10)
+  timeframe String   // e.g., "1m", "15m", "1h", "1d"
+  open      Decimal  @db.Decimal(20, 10)
+  high      Decimal  @db.Decimal(20, 10)
+  low       Decimal  @db.Decimal(20, 10)
+  close     Decimal  @db.Decimal(20, 10)
+  volume    Decimal  @db.Decimal(20, 10)
+  timestamp DateTime @db.Timestamp(3)
+  @@unique([pair, timeframe, timestamp])
+  @@index([pair, timeframe, timestamp])
+}
+
+model PoolLiquidity {
+  id        String   @id @default(uuid())
+  poolId    String   @db.VarChar(50)
+  timestamp DateTime @db.Timestamp(3)
+  liquidity Decimal  @db.Decimal(20, 10)
+  @@unique([poolId, timestamp])
+  @@index([poolId, timestamp])
+}
+
+model PoolVolumeAnalytics {
+  id        String   @id @default(uuid())
+  poolId    String   @db.VarChar(50)
+  timestamp DateTime @db.Timestamp(3)
+  volume24h Decimal  @db.Decimal(30, 10)
+  fees24h   Decimal  @db.Decimal(30, 10)
+  tvl       Decimal  @db.Decimal(30, 10)
+
+  @@unique([poolId, timestamp])
+  @@index([poolId, timestamp])
+}
+
+model GovernanceProposal {
+  id              Int       @id @default(autoincrement())
+  proposalId      String    @unique
+  contractId      String
+  title           String?
+  actionType      String?
+  actionData      String?
+  expiresAt       DateTime
+  status          String    @default("Queued")
+  transactionHash String?
+  executedAt      DateTime?
+  cancelledAt     DateTime?
+  queuedAt        DateTime?
+  timelockActionSource String?
+  notificationCount Int @default(0)
+  executionReadyNotifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  votes           GovernanceVote[]
+
+  @@index([status, expiresAt])
+  @@index([contractId])
+  @@index([actionType])
+}
+
+enum RebalancingSwapStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model RebalancingSwap {
+  id                String   @id
+  poolKey           String   @db.VarChar(100)
+  anchorAccount     String   @db.VarChar(56)
+  fromCurrency      String   @db.VarChar(12)
+  toCurrency        String   @db.VarChar(12)
+  fromAmount        Decimal  @db.Decimal(30, 7)
+  estimatedToAmount Decimal  @db.Decimal(30, 7)
+  normalizedVolume  Decimal  @db.Decimal(30, 7)
+  fromReserveRatio  Decimal  @db.Decimal(8, 7)
+  toReserveRatio    Decimal  @db.Decimal(8, 7)
+  status            RebalancingSwapStatus @default(QUEUED)
+  managerAccounts   String[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([poolKey, status])
+  @@index([status, createdAt])
+}
+
 model PaymentRoute {
   id               String    @id @default(uuid())
   senderCurrency   String    @map("sender_currency") @db.VarChar(16)
@@ -540,58 +652,46 @@ model FxQuote {
   @@index([expiresAt], map: "ix_fx_quote_expires_at")
   @@map("fx_quote")
 }
-model OhlcvCandle {
-  id        String   @id @default(uuid())
-  pair      String   @db.VarChar(10)
-  timeframe String   // e.g., "1m", "15m", "1h", "1d"
-  open      Decimal  @db.Decimal(20, 10)
-  high      Decimal  @db.Decimal(20, 10)
-  low       Decimal  @db.Decimal(20, 10)
-  close     Decimal  @db.Decimal(20, 10)
-  volume    Decimal  @db.Decimal(20, 10)
-  timestamp DateTime @db.Timestamp(3)
-  @@unique([pair, timeframe, timestamp])
-  @@index([pair, timeframe, timestamp])
+model VaultApyMetric {
+  id         String   @id @default(uuid())
+  vaultId    String
+  ledgerSeq  Int
+  sharePrice Decimal  @db.Decimal(38, 18)
+  apy7d      Decimal? @db.Decimal(20, 10)
+  apy30d     Decimal? @db.Decimal(20, 10)
+  timestamp  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([vaultId, timestamp])
 }
 
-model PoolLiquidity {
-  id        String   @id @default(uuid())
-  poolId    String   @db.VarChar(50)
-  timestamp DateTime @db.Timestamp(3)
-  liquidity Decimal  @db.Decimal(20, 10)
-  @@unique([poolId, timestamp])
-  @@index([poolId, timestamp])
+model GovernanceVote {
+  id         Int      @id @default(autoincrement())
+  accountId  String
+  proposalId String
+  choice     String
+  weight     Decimal  @db.Decimal(38, 18)
+  txHash     String?
+  votedAt    DateTime
+  proposal   GovernanceProposal @relation(fields: [proposalId], references: [proposalId])
+
+  @@unique([accountId, proposalId])
+  @@index([accountId, votedAt])
 }
 
-model PoolVolumeAnalytics {
-  id        String   @id @default(uuid())
-  poolId    String   @db.VarChar(50)
-  timestamp DateTime @db.Timestamp(3)
-  volume24h Decimal  @db.Decimal(30, 10)
-  fees24h   Decimal  @db.Decimal(30, 10)
-  tvl       Decimal  @db.Decimal(30, 10)
+model TimelockEvent {
+  id         String   @id @default(uuid())
+  eventType  String
+  proposalId String
+  contractId String
+  ledgerSeq  Int
+  txHash     String
+  topics     String
+  value      String
+  createdAt  DateTime @default(now())
 
-  @@unique([poolId, timestamp])
-  @@index([poolId, timestamp])
-}
-
-model GovernanceProposal {
-  id              Int       @id @default(autoincrement())
-  proposalId      String    @unique
-  contractId      String
-  actionType      String?
-  actionData      String?
-  expiresAt       DateTime
-  status          String    @default("Queued")
-  transactionHash String?
-  executedAt      DateTime?
-  cancelledAt     DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  @@index([status, expiresAt])
-  @@index([contractId])
-  @@index([actionType])
+  @@unique([txHash, eventType, proposalId])
+  @@index([ledgerSeq])
 }
 
 model HarvestExecution {

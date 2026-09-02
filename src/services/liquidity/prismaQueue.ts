@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import type {
   QueuedRebalancingSwap,
   RebalancingPlan,
@@ -22,7 +23,9 @@ export class PrismaRebalancingQueue implements RebalancingQueue {
         });
         if (pending) return null;
 
-        const swap = await tx.rebalancingSwap.create({ data: plan });
+        const swap = await tx.rebalancingSwap.create({
+          data: { ...plan, id: randomUUID() },
+        });
         return {
           ...plan,
           id: swap.id,

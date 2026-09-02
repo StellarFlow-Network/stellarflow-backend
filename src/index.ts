@@ -1,14 +1,14 @@
 import { createServer } from "http";
 import compression from "compression";
-import cors from "cors";
 import dotenv from "dotenv";
-import express from "express";
 import { Horizon } from "@stellar/stellar-sdk";
+import stellarProvider from "./lib/stellarProvider";
 import { getStellarNetwork } from "./lib/stellarNetwork";
 import marketRatesRouter from "./routes/marketRates";
 import historyRouter from "./routes/history";
 import priceUpdatesRouter from "./routes/priceUpdates";
 import statsRouter from "./routes/stats";
+import vaultRoutes from "./routes/vaults";
 import app from "./app";
 import prisma from "./lib/prisma";
 import { disconnectRedis } from "./lib/redis";
@@ -22,6 +22,7 @@ import {
 } from "./services/gasBalanceMonitorService";
 import { sanitizeEnvironmentVariables } from "./config/environment";
 import { validateEnv } from "./utils/envValidator";
+import { refreshAllowedOrigins } from "./middleware/corsMiddleware";
 import { enableGlobalLogMasking } from "./utils/logMasker";
 import { hourlyAverageService } from "./services/hourlyAverageService";
 import { ohlcvAggregator } from "./jobs/ohlcvJob";
@@ -37,6 +38,7 @@ import { priceAggregatorService } from "./services/priceAggregatorService";
 import { contractSanityCheckService } from "./services/contractSanityCheckService";
 import { getCircuitBreakerService } from "./services/circuitBreakerService";
 import { governanceTimelockService } from "./services/governanceTimelockService";
+import { getRegionalHealthService } from "./services/regionalHealthService";
 import { storageRentBumpService } from "./services/storageRentBumpService";
 import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
 import { getRegionalHealthService } from "./services/regionalHealthService";
@@ -93,35 +95,34 @@ if (missingEnvVars.length > 0) {
   process.exit(1);
 }
 
-const dashboardUrl =
-  process.env.DASHBOARD_URL ||
-  process.env.FRONTEND_URL ||
-  "http://localhost:3000";
+// Issue #792 – Fail fast when the CORS allowlist is empty in production rather
+// than starting a server that rejects every browser client.
+const allowedOrigins = refreshAllowedOrigins();
 
-if (!dashboardUrl) {
-  console.error("❌ Missing required environment variable: DASHBOARD_URL");
+if (allowedOrigins.length === 0) {
+  console.error(
+    "❌ No CORS origins configured. Set CORS_ALLOWED_ORIGINS (comma-separated) or DASHBOARD_URL.",
+  );
   process.exit(1);
 }
 
+console.log(`🔒 CORS allowlist: ${allowedOrigins.join(", ")}`);
+
 const PORT = process.env.PORT || 3000;
 
-// Horizon server for health checks
-const stellarNetwork = getStellarNetwork();
-const horizonUrl =
-  stellarNetwork === "PUBLIC"
-    ? "https://horizon.stellar.org"
-    : "https://horizon-testnet.stellar.org";
-const horizonServer = new Horizon.Server(horizonUrl);
+// Use shared StellarProvider for health checks (supports failover)
+const horizonServer = stellarProvider.getServer();
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// CORS, security headers and body parsing are configured once in app.ts.
+// Re-registering them here previously overwrote the strict allowlist with a
+// wildcard Access-Control-Allow-Origin.
 
 // Routes
 app.use("/api/market-rates", marketRatesRouter);
 app.use("/api/history", historyRouter);
 app.use("/api/price-updates", priceUpdatesRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/v1/vaults", vaultRoutes);
 
 // Health check endpoint
 /**
@@ -159,29 +160,14 @@ app.use("/api/stats", statsRouter);
  *       '503':
  *         description: One or more services unavailable
  */
-app.get("/health", async (req, res) => {
-  const checks: { database: boolean; horizon: boolean } = {
-    database: false,
-    horizon: false,
+app.get("/health", async (_req, res) => {
+  const watchdog = await systemHealthWatchdog.runOnce();
+  const checks = {
+    database: watchdog.checks.database?.status === "healthy",
+    horizon: watchdog.checks.horizon?.status === "healthy",
+    soroban: watchdog.checks.soroban?.status === "healthy",
   };
-
-  // Check database connectivity
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    checks.database = true;
-  } catch {
-    checks.database = false;
-  }
-
-  // Check Stellar Horizon reachability
-  try {
-    await horizonServer.root();
-    checks.horizon = true;
-  } catch {
-    checks.horizon = false;
-  }
-
-  const healthy = checks.database && checks.horizon;
+  const healthy = watchdog.status === "healthy";
 
   res.status(healthy ? 200 : 503).json({
     success: healthy,
@@ -190,6 +176,7 @@ app.get("/health", async (req, res) => {
       : "One or more services unavailable",
     timestamp: new Date().toISOString(),
     checks,
+    watchdog,
   });
 });
 
@@ -264,6 +251,28 @@ initSocket(httpServer);
 const liquidityRebalancingWorker = startLiquidityRebalancingWorker();
 let sorobanEventListener: SorobanEventListener | null = null;
 
+systemHealthWatchdog.registerWorker({
+  name: "redis-operations",
+  getLastHeartbeatAt: () => redisOperationsWorker.getLastHeartbeatAt(),
+  heartbeatTimeoutMs: redisOperationsWorker.getHeartbeatTimeoutMs(),
+  restart: () => {
+    redisOperationsWorker.stop();
+    redisOperationsWorker.start();
+  },
+});
+
+if (liquidityRebalancingWorker) {
+  systemHealthWatchdog.registerWorker({
+    name: "liquidity-rebalancing",
+    getLastHeartbeatAt: () => liquidityRebalancingWorker.getLastHeartbeatAt(),
+    heartbeatTimeoutMs: liquidityRebalancingWorker.getHeartbeatTimeoutMs(),
+    restart: () => {
+      liquidityRebalancingWorker.stop();
+      liquidityRebalancingWorker.start();
+    },
+  });
+}
+
 // FIX 1: Typed as nullable — constructor is not called at module level,
 // so a missing secret env var won't crash the process before the server starts.
 let gasBalanceMonitorService: GasBalanceMonitorService | null = null;
@@ -316,6 +325,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     liquidityRebalancingWorker?.stop();
     apyWorker.stop();
     storageMonitorService.stop(); // <--- ADDED
+    systemHealthWatchdog.stop();
     // FIX 2: Optional chaining — safe to call even if service never started
     gasBalanceMonitorService?.stop();
     circuitBreakerService.stop();
@@ -442,6 +452,14 @@ httpServer.listen(PORT, async () => {
   if (contractSanityPassed) {
     try {
       sorobanEventListener = new SorobanEventListener();
+      systemHealthWatchdog.registerQueue({
+        name: "soroban-event-ingestion",
+        getDepth: () => sorobanEventListener?.getQueueDepth() ?? 0,
+        maxHealthyDepth:
+          Number(process.env.WATCHDOG_INGESTION_QUEUE_MAX_DEPTH) > 0
+            ? Number(process.env.WATCHDOG_INGESTION_QUEUE_MAX_DEPTH)
+            : 800,
+      });
       sorobanEventListener.start().catch((err) => {
         console.error("Failed to start event listener:", err);
       });
