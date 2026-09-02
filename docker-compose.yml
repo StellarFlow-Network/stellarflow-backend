@@ -6,15 +6,31 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/stellarflow?schema=public&sslmode=require
+      - DATABASE_URL=postgresql://postgres:postgres@pgbouncer:6432/stellarflow?schema=public&sslmode=disable
+      - DIRECT_DATABASE_URL=postgresql://postgres:postgres@db:5432/stellarflow?schema=public&sslmode=disable
+      - PGBOUNCER_ENABLED=true
       - REDIS_URL=redis://redis:6379
       - NODE_ENV=development
       - PORT=3000
     depends_on:
       db:
         condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health/liveness').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - stellarflow-net
 
@@ -35,9 +51,17 @@ services:
     build: .
     command: celery -A app.celery_app:celery_app worker --loglevel=INFO
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/stellarflow?schema=public&sslmode=require
+      - DATABASE_URL=postgresql://postgres:postgres@pgbouncer:6432/stellarflow?schema=public&sslmode=disable
       - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
       - CELERY_RESULT_BACKEND=rpc://
+      - S3_BUCKET=${S3_BUCKET:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
     depends_on:
       db:
         condition: service_healthy
@@ -74,21 +98,6 @@ services:
 
   db:
     image: postgres:16-alpine
-    command: >
-      sh -c "
-      if [ ! -f /var/lib/postgresql/data/server.crt ]; then
-        # On Alpine, we might need to install openssl first if not present
-        # However, a simpler way is to just assume the user might provide them or use a safer approach.
-        # For the sake of this task, we will enable the flags and setting up the entrypoint.
-        # We will use the default alpine entrypoint but append the SSL flags.
-        apk add --no-cache openssl;
-        openssl req -new -x509 -days 365 -nodes -text -out /var/lib/postgresql/data/server.crt \
-          -keyout /var/lib/postgresql/data/server.key -subj '/CN=db';
-        chmod 600 /var/lib/postgresql/data/server.key;
-        chown postgres:postgres /var/lib/postgresql/data/server.key;
-      fi;
-      exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/var/lib/postgresql/data/server.crt -c ssl_key_file=/var/lib/postgresql/data/server.key
-      "
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -102,6 +111,31 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - stellarflow-net
+
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    ports:
+      - "6432:6432"
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    environment:
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=db
+      - DB_NAME=stellarflow
+      - POOL_MODE=transaction
+      - LISTEN_PORT=6432
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U postgres -d stellarflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
       - stellarflow-net
 

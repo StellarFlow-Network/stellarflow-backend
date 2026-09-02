@@ -2,16 +2,13 @@ import cron from "node-cron";
 import prisma from "../lib/prisma";
 import { getStellarNetwork } from "../lib/stellarNetwork";
 import { Horizon } from "@stellar/stellar-sdk";
+import stellarProvider from "../lib/stellarProvider";
 import { subDays } from "date-fns";
 
 export class ApyWorker {
   private timer: ReturnType<typeof setInterval> | undefined;
   private lastPolledLedger: number = 0;
-  private horizon = new Horizon.Server(
-    getStellarNetwork() === "PUBLIC"
-      ? "https://horizon.stellar.org"
-      : "https://horizon-testnet.stellar.org"
-  );
+  private horizon = stellarProvider.getServer();
   private vaultIds = process.env.YIELD_VAULT_IDS?.split(",") || ["default-vault"];
 
   start(): void {

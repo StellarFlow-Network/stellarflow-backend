@@ -6,6 +6,7 @@ const NONCE_TTL_SECONDS = 300;
 
 export class CryptographicNonceStore {
   private readonly logger = createFetcherLogger("CryptographicNonceStore");
+  private readonly inMemoryStore = new Set<string>();
 
   constructor(private readonly ttlSeconds: number = NONCE_TTL_SECONDS) {}
 
@@ -37,15 +38,26 @@ export class CryptographicNonceStore {
 
   /**
    * Atomically reserves a nonce for a client using Redis SET NX with TTL.
+   * Uses in-memory Set fallback when Redis is unavailable.
    * Returns true only if the nonce has not been seen before within the TTL window.
    */
   async consume(clientId: string, nonce: string): Promise<boolean> {
+    const key = this.getRedisKey(clientId, nonce);
     const redis = getRedisClient();
+
     if (!redis) {
+      if (this.inMemoryStore.has(key)) {
+        this.logger.warn("Rejected replayed request nonce (in-memory)", {
+          clientId: this.normalizeClientId(clientId),
+          nonceHash: this.hashNonce(clientId, nonce),
+        });
+        return false;
+      }
+      this.inMemoryStore.add(key);
+      setTimeout(() => this.inMemoryStore.delete(key), this.ttlSeconds * 1000);
       return true;
     }
 
-    const key = this.getRedisKey(clientId, nonce);
     const result = await redis.set(key, "1", {
       NX: true,
       EX: this.ttlSeconds,
@@ -75,12 +87,12 @@ export class CryptographicNonceStore {
    * Explicitly check whether a nonce is already present without consuming it.
    */
   async hasSeenNonce(clientId: string, nonce: string): Promise<boolean> {
+    const key = this.getRedisKey(clientId, nonce);
     const redis = getRedisClient();
     if (!redis) {
-      return false;
+      return this.inMemoryStore.has(key);
     }
 
-    const key = this.getRedisKey(clientId, nonce);
     return (await redis.exists(key)) === 1;
   }
 
@@ -88,12 +100,15 @@ export class CryptographicNonceStore {
    * Remove a nonce from the current anti-replay set when an operation must be retried or explicitly cancelled.
    */
   async invalidate(clientId: string, nonce: string): Promise<void> {
+    const key = this.getRedisKey(clientId, nonce);
+    this.inMemoryStore.delete(key);
+
     const redis = getRedisClient();
     if (!redis) {
       return;
     }
 
-    await redis.del(this.getRedisKey(clientId, nonce));
+    await redis.del(key);
   }
 }
 

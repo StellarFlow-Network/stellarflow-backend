@@ -375,6 +375,7 @@ model ApiKey {
   isActive   Boolean   @default(true)
   expiresAt  DateTime?
   lastUsedAt DateTime?
+  tier       String    @default("Free") // API Key tier (Free, Developer, Institutional)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 }
@@ -457,11 +458,18 @@ model RemittanceTransaction {
   outputAmount    Decimal  @db.Decimal(24, 10)  // Amount in receiver currency
   fee             Decimal  @db.Decimal(24, 10)  @default(0)
   rate            Decimal  @db.Decimal(24, 10)  // Exchange rate applied
-  status          String   @db.VarChar(20)  // PENDING | COMPLETED | FAILED | REVERSED
+  status          String   @db.VarChar(32)  // PENDING | COMPLETED | FAILED | REVERSED | pending_screening | screening | flagged_compliance | compliance_cleared | payout_relayed | payout_halted
   provider        String?  @db.VarChar(128) // Liquidity provider / rail used
   stellarTxHash   String?  // Stellar transaction hash when submitted on-chain
   reference       String?  @db.VarChar(128) // External reference / correlation ID
   errorMessage    String?  // Populated when status = FAILED
+  senderPublicKey    String?  // Stellar public key screened against OFAC (#784)
+  recipientPublicKey String?
+  screeningProvider  String?
+  screeningHits      Json?
+  payoutHalted       Boolean   @default(false)
+  payoutRelayedAt    DateTime?
+  screenedAt         DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -475,6 +483,33 @@ model RemittanceTransaction {
   @@index([status, createdAt])
   // Asset-level reporting
   @@index([asset, createdAt])
+  @@index([senderPublicKey])
+  @@index([recipientPublicKey])
+}
+
+// Remittance Dispute Model – Issue #834
+// Tracks dispute tickets opened when fiat payouts fail or time out.
+// State machine: open -> investigating -> refunded | closed.
+model RemittanceDispute {
+  id           String    @id @default(uuid())
+  remittanceId String    // RemittanceTransaction.id the dispute belongs to
+  userId       String    // Relayer / end-user identifier
+  status       String    @db.VarChar(20) @default("open") // open | investigating | refunded | closed
+  reason       String    @db.VarChar(255) // Payout failure / timeout reason captured at open
+  details      String?   // Structured JSON details captured when the dispute was opened
+  email        String?   // Contact address notified on state changes
+  webhookUrl   String?   // Endpoint notified on state changes (webhook updates)
+  refundAmount Decimal?  @db.Decimal(24, 10) // Amount refunded for manual refunds
+  refundedById String?   // Operator / admin identifier that triggered the refund
+  refundedAt   DateTime? // When the manual refund was issued
+  resolvedById String?   // Operator / admin identifier that closed the dispute
+  resolvedAt   DateTime? // When the dispute was closed
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId, status, createdAt])
+  @@index([remittanceId])
+  @@index([status, createdAt])
 }
 model OhlcvCandle {
   id        String   @id @default(uuid())
@@ -515,6 +550,7 @@ model GovernanceProposal {
   id              Int       @id @default(autoincrement())
   proposalId      String    @unique
   contractId      String
+  title           String?
   actionType      String?
   actionData      String?
   expiresAt       DateTime
@@ -522,12 +558,134 @@ model GovernanceProposal {
   transactionHash String?
   executedAt      DateTime?
   cancelledAt     DateTime?
+  queuedAt        DateTime?
+  timelockActionSource String?
+  notificationCount Int @default(0)
+  executionReadyNotifiedAt DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  votes           GovernanceVote[]
 
   @@index([status, expiresAt])
   @@index([contractId])
   @@index([actionType])
+}
+
+enum RebalancingSwapStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model RebalancingSwap {
+  id                String   @id
+  poolKey           String   @db.VarChar(100)
+  anchorAccount     String   @db.VarChar(56)
+  fromCurrency      String   @db.VarChar(12)
+  toCurrency        String   @db.VarChar(12)
+  fromAmount        Decimal  @db.Decimal(30, 7)
+  estimatedToAmount Decimal  @db.Decimal(30, 7)
+  normalizedVolume  Decimal  @db.Decimal(30, 7)
+  fromReserveRatio  Decimal  @db.Decimal(8, 7)
+  toReserveRatio    Decimal  @db.Decimal(8, 7)
+  status            RebalancingSwapStatus @default(QUEUED)
+  managerAccounts   String[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([poolKey, status])
+  @@index([status, createdAt])
+}
+
+model PaymentRoute {
+  id              String   @id @default(uuid())
+  senderCurrency  String
+  receiverCurrency String
+  sourceAsset     String
+  targetRail      String
+  provider        String
+  rate            Decimal  @db.Decimal(30, 12)
+  fee             Decimal  @db.Decimal(30, 12)
+  estimatedAmount Decimal  @db.Decimal(30, 12)
+  slippageBps     Int      @default(0)
+  liquidityPoolId String?
+  priority        Int      @default(0)
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  quotes          FxQuote[]
+
+  @@index([senderCurrency, receiverCurrency, status])
+}
+
+model FxQuote {
+  id              String   @id @default(uuid())
+  paymentRouteId  String
+  senderCurrency  String
+  receiverCurrency String
+  inputAmount     Decimal  @db.Decimal(30, 12)
+  outputAmount    Decimal  @db.Decimal(30, 12)
+  rate            Decimal  @db.Decimal(30, 12)
+  fee             Decimal  @db.Decimal(30, 12)
+  slippageBps     Int
+  liveFeedRate    Decimal  @db.Decimal(30, 12)
+  feedSource      String
+  feedTimestamp   DateTime
+  rateDeviationBps Int
+  status          String
+  expiresAt       DateTime
+  lockedAt        DateTime?
+  executedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  paymentRoute    PaymentRoute @relation(fields: [paymentRouteId], references: [id])
+
+  @@index([paymentRouteId, status])
+  @@index([status, expiresAt])
+}
+
+model VaultApyMetric {
+  id         String   @id @default(uuid())
+  vaultId    String
+  ledgerSeq  Int
+  sharePrice Decimal  @db.Decimal(38, 18)
+  apy7d      Decimal? @db.Decimal(20, 10)
+  apy30d     Decimal? @db.Decimal(20, 10)
+  timestamp  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([vaultId, timestamp])
+}
+
+model GovernanceVote {
+  id         Int      @id @default(autoincrement())
+  accountId  String
+  proposalId String
+  choice     String
+  weight     Decimal  @db.Decimal(38, 18)
+  txHash     String?
+  votedAt    DateTime
+  proposal   GovernanceProposal @relation(fields: [proposalId], references: [proposalId])
+
+  @@unique([accountId, proposalId])
+  @@index([accountId, votedAt])
+}
+
+model TimelockEvent {
+  id         String   @id @default(uuid())
+  eventType  String
+  proposalId String
+  contractId String
+  ledgerSeq  Int
+  txHash     String
+  topics     String
+  value      String
+  createdAt  DateTime @default(now())
+
+  @@unique([txHash, eventType, proposalId])
+  @@index([ledgerSeq])
 }
 
 model HarvestExecution {

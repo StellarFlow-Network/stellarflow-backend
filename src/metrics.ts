@@ -30,3 +30,9 @@ export const submissionDuration = new Histogram({
   labelNames: ["asset"] as const,
   buckets: [0.1, 0.5, 1, 2, 5, 10, 30],
 });
+
+export const assetVolatility = new Gauge({
+  name: "stellar_asset_volatility_24h",
+  help: "24-hour rolling volatility index for an asset",
+  labelNames: ["asset"] as const,
+});

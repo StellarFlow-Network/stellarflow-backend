@@ -31,6 +31,7 @@ export interface OrderBookSnapshot {
 interface MarketOrderCache {
   bids: Map<number, number>;
   asks: Map<number, number>;
+  [side: string]: Map<number, number>;
 }
 
 function normalizeMarket(market: string): string {
@@ -87,24 +88,24 @@ export class OrderBookSynchronizer {
 
     switch (normalizedEvent.type) {
       case "created": {
-        const currentQty = cache[side].get(price) ?? 0;
-        cache[side].set(price, currentQty + normalizedEvent.quantity);
+        const currentQty = cache[side]!.get(price) ?? 0;
+        cache[side]!.set(price, currentQty + normalizedEvent.quantity);
         await this.persistRedisPriceLevel(market, side, price);
         break;
       }
       case "executed": {
-        const currentQty = cache[side].get(price) ?? 0;
+        const currentQty = cache[side]!.get(price) ?? 0;
         const nextQty = Math.max(0, currentQty - normalizedEvent.quantity);
         if (nextQty > 0) {
-          cache[side].set(price, nextQty);
+          cache[side]!.set(price, nextQty);
         } else {
-          cache[side].delete(price);
+          cache[side]!.delete(price);
         }
         await this.persistRedisPriceLevel(market, side, price, nextQty);
         break;
       }
       case "cancelled": {
-        cache[side].delete(price);
+        cache[side]!.delete(price);
         await this.removeRedisPriceLevel(market, side, price);
         break;
       }
@@ -168,7 +169,7 @@ export class OrderBookSynchronizer {
     price: number,
   ): number {
     const cache = this.ensureMarketCache(market);
-    return cache[side].get(price) ?? 0;
+    return cache[side]!.get(price) ?? 0;
   }
 
   private buildSnapshot(market: string, cache: MarketOrderCache): OrderBookSnapshot {
@@ -216,7 +217,7 @@ export class OrderBookSynchronizer {
     }
 
     const cache = this.ensureMarketCache(market);
-    const nextQty = quantityOverride ?? cache[side].get(price) ?? 0;
+    const nextQty = quantityOverride ?? cache[side]!.get(price) ?? 0;
 
     if (nextQty <= 0) {
       await redis.zRem(this.getRedisKey(market, side), String(price));
@@ -228,7 +229,7 @@ export class OrderBookSynchronizer {
       value: String(price),
     });
 
-    cache[side].set(price, nextQty);
+    cache[side]!.set(price, nextQty);
   }
 
   private async removeRedisPriceLevel(
@@ -242,7 +243,7 @@ export class OrderBookSynchronizer {
     }
 
     const cache = this.ensureMarketCache(market);
-    cache[side].delete(price);
+    cache[side]!.delete(price);
     await redis.zRem(this.getRedisKey(market, side), String(price));
   }
 }

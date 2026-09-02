@@ -17,7 +17,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      apiKey?: AuthenticatedApiKey;
+      apiKey?: AuthenticatedApiKey & { tier?: string };
     }
   }
 }
@@ -96,6 +96,7 @@ export function apiKeyAuth() {
           isActive: true,
           expiresAt: true,
           lastUsedAt: true,
+          tier: true,
         },
       })) as typeof apiKeyRecord;
     } catch (dbError) {
@@ -155,6 +156,7 @@ export function apiKeyAuth() {
       label: apiKeyRecord.label,
       scopes: apiKeyRecord.scopes as ApiScope[],
       ownerId: apiKeyRecord.ownerId,
+      tier: (apiKeyRecord as any).tier || "Free",
     };
 
     // Non-blocking: update lastUsedAt in the background so we

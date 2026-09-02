@@ -38,16 +38,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
 import os
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+import structlog
+
 from app.services.executor_pool import get_heavy_pool, shutdown_pools
 
-logger = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -145,13 +146,22 @@ def _get_redis_client() -> Any:
             socket_timeout=3,
             retry_on_timeout=True,
         )
-        logger.info("[ProofEngine] Redis client initialised at %s", redis_url)
+        log.info(
+            "proof_engine.redis.initialised",
+            component="ProofEngine",
+            redis_url=redis_url,
+        )
     except ImportError:
-        logger.warning(
-            "[ProofEngine] redis[asyncio] not installed — L2 caching disabled."
+        log.warning(
+            "proof_engine.redis.not_installed",
+            component="ProofEngine",
         )
     except Exception as exc:
-        logger.warning("[ProofEngine] Redis initialisation failed: %s", exc)
+        log.warning(
+            "proof_engine.redis.init_failed",
+            component="ProofEngine",
+            error=str(exc),
+        )
 
     return _redis_client
 
@@ -275,10 +285,10 @@ def get_process_pool() -> ProcessPoolExecutor:
     global _process_pool
     if _process_pool is None:
         _process_pool = get_heavy_pool()
-        logger.info(
-            "[ProofEngine] Process pool initialised via executor_pool "
-            "(%d workers)",
-            PROOF_PROCESS_POOL_WORKERS,
+        log.info(
+            "proof_engine.process_pool.initialised",
+            component="ProofEngine",
+            workers=PROOF_PROCESS_POOL_WORKERS,
         )
     return _process_pool
 
@@ -347,7 +357,11 @@ async def verify_proof_async(
     if proof_hash in _l1_cache:
         cached = _l1_cache[proof_hash]
         elapsed_ms = (time.monotonic() - start) * 1000
-        logger.debug("[ProofEngine] L1 cache hit for %s", proof_hash[:16])
+        log.debug(
+            "proof_engine.cache.l1_hit",
+            component="ProofEngine",
+            proof_hash_prefix=proof_hash[:16],
+        )
         return ProofValidationResult(
             valid=cached.valid,
             proof_hash=proof_hash,
@@ -369,7 +383,11 @@ async def verify_proof_async(
                 data = json.loads(raw)
                 _l1_cache[proof_hash] = ProofValidationResult(**data)
                 elapsed_ms = (time.monotonic() - start) * 1000
-                logger.debug("[ProofEngine] L2 cache hit for %s", proof_hash[:16])
+                log.debug(
+            "proof_engine.cache.l2_hit",
+            component="ProofEngine",
+            proof_hash_prefix=proof_hash[:16],
+        )
                 return ProofValidationResult(
                     valid=data["valid"],
                     proof_hash=proof_hash,
@@ -380,7 +398,11 @@ async def verify_proof_async(
                     public_inputs_count=data.get("public_inputs_count", 0),
                 )
         except Exception as exc:
-            logger.warning("[ProofEngine] L2 cache lookup failed: %s", exc)
+            log.warning(
+                "proof_engine.cache.l2_lookup_failed",
+                component="ProofEngine",
+                error=str(exc),
+            )
 
     # 6. Offload to process pool (expensive, CPU-bound)
     pool = get_process_pool()
@@ -392,7 +414,11 @@ async def verify_proof_async(
         )
     except Exception as exc:
         elapsed_ms = (time.monotonic() - start) * 1000
-        logger.exception("[ProofEngine] Verification failed: %s", exc)
+        log.exception(
+            "proof_engine.verification.failed",
+            component="ProofEngine",
+            error=str(exc),
+        )
         return ProofValidationResult(
             valid=False,
             proof_hash=proof_hash,
@@ -408,11 +434,11 @@ async def verify_proof_async(
     # With ``run_in_executor`` the event loop should only be blocked for
     # a handful of microseconds while the Future is created.
     if pool_time_ms > 5.0:
-        logger.warning(
-            "[ProofEngine] Event-loop pool dispatch took %.2fms "
-            "(proof=%s)",
-            pool_time_ms,
-            proof_hash[:16],
+        log.warning(
+            "proof_engine.pool_dispatch.slow",
+            component="ProofEngine",
+            pool_dispatch_ms=round(pool_time_ms, 3),
+            proof_hash_prefix=proof_hash[:16],
         )
 
     # 7. Build result
@@ -442,14 +468,19 @@ async def verify_proof_async(
                 json.dumps(result.to_dict()),
             )
         except Exception as exc:
-            logger.warning("[ProofEngine] L2 cache write failed: %s", exc)
+            log.warning(
+                "proof_engine.cache.l2_write_failed",
+                component="ProofEngine",
+                error=str(exc),
+            )
 
-    logger.debug(
-        "[ProofEngine] Verified proof %s in %.1fms (pool=%.1fms, valid=%s)",
-        proof_hash[:16],
-        elapsed_ms,
-        pool_time_ms,
-        valid,
+    log.debug(
+        "proof_engine.verification.completed",
+        component="ProofEngine",
+        proof_hash_prefix=proof_hash[:16],
+        elapsed_ms=round(elapsed_ms, 1),
+        pool_ms=round(pool_time_ms, 1),
+        valid=valid,
     )
 
     return result
@@ -588,7 +619,7 @@ def shutdown_process_pool() -> None:
     global _process_pool
     shutdown_pools()
     _process_pool = None
-    logger.info("[ProofEngine] Process pool reference cleared")
+    log.info("proof_engine.process_pool.cleared", component="ProofEngine")
 
 
 __all__ = [

@@ -15,9 +15,14 @@ async function warmCache() {
   try {
     const worker = getCacheWarmingWorker();
     worker.start();
-    console.log("[Cache Warming] Cache warming worker started for market endpoints");
+    console.log(
+      "[Cache Warming] Cache warming worker started for market endpoints",
+    );
   } catch (error) {
-    console.warn("[Cache Warming] Could not start cache warming worker:", error);
+    console.warn(
+      "[Cache Warming] Could not start cache warming worker:",
+      error,
+    );
   }
 
   try {

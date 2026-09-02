@@ -8,6 +8,7 @@ import {
 import stellarProvider from "../lib/stellarProvider";
 import { getStellarNetworkPassphrase } from "../lib/stellarNetwork";
 import { StellarService } from "./stellarService";
+import { getGasProfilerService } from "./gasProfiler/gasProfilerService";
 import { logger } from "../utils/logger";
 import dotenv from "dotenv";
 
@@ -23,7 +24,8 @@ export class StorageRentBumpService {
   private readonly MIN_TTL_LEDGERS = 10000;
   private readonly EXTEND_TO_LEDGERS = 535000; // ~30 days
 
-  constructor(pollIntervalMs: number = 60 * 60 * 1000) { // Default to every hour
+  constructor(pollIntervalMs: number = 60 * 60 * 1000) {
+    // Default to every hour
     this.stellarService = new StellarService();
     this.pollIntervalMs = pollIntervalMs;
     this.CONTRACT_ID = process.env.CONTRACT_ID || "";
@@ -36,12 +38,16 @@ export class StorageRentBumpService {
     }
 
     if (!this.CONTRACT_ID) {
-      console.warn("[StorageRentBumpService] No CONTRACT_ID configured. Service will not start.");
+      console.warn(
+        "[StorageRentBumpService] No CONTRACT_ID configured. Service will not start.",
+      );
       return;
     }
 
     this.isRunning = true;
-    console.info(`[StorageRentBumpService] Started with ${this.pollIntervalMs}ms poll interval`);
+    console.info(
+      `[StorageRentBumpService] Started with ${this.pollIntervalMs}ms poll interval`,
+    );
 
     // Initial check
     await this.checkAndBumpStorage();
@@ -75,7 +81,9 @@ export class StorageRentBumpService {
         console.error("[StorageRentBumpService] Polling error:", err);
       });
     }, this.pollIntervalMs);
-    console.info(`[StorageRentBumpService] Poll interval updated to ${this.pollIntervalMs}ms`);
+    console.info(
+      `[StorageRentBumpService] Poll interval updated to ${this.pollIntervalMs}ms`,
+    );
   }
 
   private async checkAndBumpStorage(): Promise<void> {
@@ -84,25 +92,31 @@ export class StorageRentBumpService {
       const contract = new Contract(this.CONTRACT_ID);
 
       const keys = [
-        xdr.LedgerKey.contractData(new xdr.LedgerKeyContractData({
-          contract: contract.address().toScAddress(),
-          key: xdr.ScVal.scvLedgerKeyContractInstance(),
-          durability: xdr.ContractDataDurability.persistent(),
-        })),
-        xdr.LedgerKey.contractData(new xdr.LedgerKeyContractData({
-          contract: contract.address().toScAddress(),
-          key: xdr.ScVal.scvSymbol("oracles"),
-          durability: xdr.ContractDataDurability.persistent(),
-        })),
-        xdr.LedgerKey.contractData(new xdr.LedgerKeyContractData({
-          contract: contract.address().toScAddress(),
-          key: xdr.ScVal.scvSymbol("treasury"),
-          durability: xdr.ContractDataDurability.persistent(),
-        }))
+        xdr.LedgerKey.contractData(
+          new xdr.LedgerKeyContractData({
+            contract: contract.address().toScAddress(),
+            key: xdr.ScVal.scvLedgerKeyContractInstance(),
+            durability: xdr.ContractDataDurability.persistent(),
+          }),
+        ),
+        xdr.LedgerKey.contractData(
+          new xdr.LedgerKeyContractData({
+            contract: contract.address().toScAddress(),
+            key: xdr.ScVal.scvSymbol("oracles"),
+            durability: xdr.ContractDataDurability.persistent(),
+          }),
+        ),
+        xdr.LedgerKey.contractData(
+          new xdr.LedgerKeyContractData({
+            contract: contract.address().toScAddress(),
+            key: xdr.ScVal.scvSymbol("treasury"),
+            durability: xdr.ContractDataDurability.persistent(),
+          }),
+        ),
       ];
 
       const ledgerEntries = await server.getLedgerEntries(...keys);
-      
+
       const latestLedger = await server.getLatestLedger();
       const currentLedger = latestLedger.sequence;
 
@@ -110,7 +124,7 @@ export class StorageRentBumpService {
 
       for (const entry of ledgerEntries.entries) {
         if (!entry.liveUntilLedgerSeq) continue;
-        
+
         const ttl = entry.liveUntilLedgerSeq - currentLedger;
         if (ttl < this.MIN_TTL_LEDGERS) {
           // `getLedgerEntries` returns each entry with its `key` already decoded
@@ -120,18 +134,25 @@ export class StorageRentBumpService {
       }
 
       if (keysToBump.length === 0) {
-        logger.debug("[StorageRentBumpService] All protocol storage keys have sufficient TTL.");
+        logger.debug(
+          "[StorageRentBumpService] All protocol storage keys have sufficient TTL.",
+        );
         return;
       }
 
-      console.info(`[StorageRentBumpService] Bumping storage for ${keysToBump.length} keys`);
+      console.info(
+        `[StorageRentBumpService] Bumping storage for ${keysToBump.length} keys`,
+      );
 
       const sorobanData = new SorobanDataBuilder()
         .setReadOnly(keysToBump)
         .build();
 
-      const baseFee = parseInt(await this.stellarService.getRecommendedFee(), 10);
-      
+      const baseFee = parseInt(
+        await this.stellarService.getRecommendedFee(),
+        10,
+      );
+
       // We will bump storage using an extendFootprintTtl operation
       const txHash = await this.stellarService.submitTransactionWithRetries(
         (sourceAccount, currentFee) => {
@@ -149,10 +170,22 @@ export class StorageRentBumpService {
             .build();
         },
         3,
-        baseFee
+        baseFee,
       );
 
-      console.info(`[StorageRentBumpService] ✅ Storage bump transaction confirmed: ${txHash}`);
+      console.info(
+        `[StorageRentBumpService] ✅ Storage bump transaction confirmed: ${txHash}`,
+      );
+
+      // Issue #786 – Horizon confirmation does not include Soroban meta; fetch
+      // the result from RPC and profile it. Fire-and-forget.
+      const hash =
+        typeof txHash === "string"
+          ? txHash
+          : (txHash as { hash?: string })?.hash;
+      if (hash) {
+        void getGasProfilerService().profileByHash(hash, "submission");
+      }
     } catch (error) {
       console.error("[StorageRentBumpService] Error bumping storage:", error);
     }

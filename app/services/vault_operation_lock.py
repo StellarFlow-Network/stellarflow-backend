@@ -10,6 +10,9 @@ from contextlib import AbstractContextManager
 from typing import Any
 
 import redis
+import structlog
+
+log = structlog.get_logger(__name__)
 
 
 _RELEASE_SCRIPT = """
@@ -86,12 +89,35 @@ class VaultOperationLock(AbstractContextManager["VaultOperationLock"]):
             validity_ms = self._ttl_ms - elapsed_ms - max(1, int(self._ttl_ms * 0.01))
             if len(acquired_clients) >= quorum and validity_ms > 0:
                 self._acquired_clients = acquired_clients
+                log.debug(
+                    "vault_lock.acquired",
+                    component="VaultOperationLock",
+                    account_id=self.account_id,
+                    attempt=attempt + 1,
+                    quorum=quorum,
+                    validity_ms=round(validity_ms, 1),
+                )
                 return self
 
             self._release_clients(acquired_clients)
             if attempt < self._retries:
+                log.warning(
+                    "vault_lock.acquire_attempt_failed",
+                    component="VaultOperationLock",
+                    account_id=self.account_id,
+                    attempt=attempt + 1,
+                    retries=self._retries,
+                    acquired=len(acquired_clients),
+                    quorum=quorum,
+                )
                 time.sleep(self._retry_delay_ms / 1000)
 
+        log.error(
+            "vault_lock.acquire_exhausted",
+            component="VaultOperationLock",
+            account_id=self.account_id,
+            retries=self._retries,
+        )
         raise VaultLockError(f"Could not acquire vault lock for account {self.account_id}")
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
@@ -102,6 +128,11 @@ class VaultOperationLock(AbstractContextManager["VaultOperationLock"]):
         acquired_clients = self._acquired_clients
         self._acquired_clients = []
         self._release_clients(acquired_clients)
+        log.debug(
+            "vault_lock.released",
+            component="VaultOperationLock",
+            account_id=self.account_id,
+        )
 
     def _release_clients(self, clients: Sequence[redis.Redis[Any]]) -> None:
         for client in clients:

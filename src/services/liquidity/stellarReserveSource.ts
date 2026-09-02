@@ -1,4 +1,5 @@
 import { Horizon } from "@stellar/stellar-sdk";
+import stellarProvider from "../../lib/stellarProvider";
 import type {
   LiquidityAsset,
   LiquidityPoolConfig,
@@ -17,13 +18,7 @@ export class StellarReserveSource implements ReserveSource {
 
   constructor(server?: Horizon.Server) {
     const network = process.env.STELLAR_NETWORK || "TESTNET";
-    this.server =
-      server ??
-      new Horizon.Server(
-        network === "PUBLIC"
-          ? "https://horizon.stellar.org"
-          : "https://horizon-testnet.stellar.org",
-      );
+    this.server = server ?? stellarProvider.getServer();
   }
 
   async getReserves(pool: LiquidityPoolConfig): Promise<[number, number]> {

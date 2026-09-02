@@ -1,8 +1,8 @@
 {
   // Visit https://aka.ms/tsconfig to read more about this file
   "compilerOptions": {
-
-    "baseUrl": ".",
+    // Path mapping no longer requires baseUrl (deprecated in TS 6, removed in TS 7).
+    // Entries stay relative to this config file.
     "paths": {
       "csv-writer": ["./src/types/csv-writer.d.ts"]
     },
@@ -13,8 +13,9 @@
     // Environment Settings
     "module": "ESNext",
     "target": "ESNext",
-    "moduleResolution": "node",
-    "ignoreDeprecations": "5.0",
+    // "node" was an alias for deprecated node10; bundler matches how tsx runs this app
+    // without requiring .js extensions on every relative import (unlike NodeNext).
+    "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
     "types": ["node"],

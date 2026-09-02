@@ -1,0 +1,15 @@
+{
+  "keep": {
+    "days": false,
+    "amount": 10
+  },
+  "auditLog": "c:\\Users\\isaac\\Documents\\GitHub\\stellarflow-backend\\logs\\.cee21ced212e15da6e3dd23af63cc3739e51d8bf-audit.json",
+  "files": [
+    {
+      "date": 1787752360357,
+      "name": "c:\\Users\\isaac\\Documents\\GitHub\\stellarflow-backend\\logs\\system-2026-08-26.log",
+      "hash": "c04495fddfad5ebc78552c75d860c36014c765109b55d68364d5e4725f1d6a45"
+    }
+  ],
+  "hashType": "sha256"
+}

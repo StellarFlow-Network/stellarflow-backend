@@ -8,8 +8,8 @@ declare global {
         userId: number;
         email: string;
         role: string;
-        group?: string;        // Added for future group isolation
-        permissions?: string[]; // Added for fine-grained control
+        group?: string;
+        permissions?: string[];
       };
       sessionId?: number;
     }
@@ -29,11 +29,11 @@ function startSessionCleanup(): void {
   }, 60 * 60 * 1000);
 }
 
-export const jwtMiddleware = (
+export const jwtMiddleware = async (
   req: Request,
   res: Response,
   next: NextFunction,
-): void => {
+): Promise<void> => {
   if (!sessionCleanupTimer) {
     startSessionCleanup();
   }
@@ -41,25 +41,32 @@ export const jwtMiddleware = (
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {
-    return next();
+    next();
+    return;
   }
 
   const token = authHeader.substring(7);
-
   const payload = verifyToken(token);
 
   if (!payload) {
-    return next();
+    next();
+    return;
   }
 
-  // Updated user object with role (already present) + optional fields
+  const session = await getActiveSession(token);
+  if (!session) {
+    next();
+    return;
+  }
+
   (req as Request & { user: any }).user = {
     userId: payload.userId,
     email: payload.email,
-    role: payload.role || 'OBSERVER',           // Default to OBSERVER if missing
+    role: payload.role || "OBSERVER",
     group: payload.group,
     permissions: payload.permissions,
   };
 
+  req.sessionId = session.relayerId;
   next();
 };

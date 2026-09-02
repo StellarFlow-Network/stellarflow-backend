@@ -1,14 +1,26 @@
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret-key-for-auth-session-encryption";
+process.env.JWT_EXPIRY_HOURS = process.env.JWT_EXPIRY_HOURS || "24";
+
+import bcrypt from "bcrypt";
 import express, { Request, Response } from "express";
 import request from "supertest";
-import { hashPassword } from "../src/utils/jwt";
+import {
+  hashPassword,
+  encryptSessionPayload,
+  decryptSessionPayload,
+  storeEncryptedSession,
+  revokeSessionByToken,
+  validateSessionToken,
+} from "../src/utils/jwt";
 
 jest.mock("../src/lib/prisma", () => {
+  const mockPasswordHash = bcrypt.hashSync("test", 10);
   const mockRelayer = {
     id: 1,
     name: "Test Admin",
     apiKey: "test-api-key",
     email: "admin@test.com",
-    passwordHash: "",
+    passwordHash: mockPasswordHash,
     role: "ADMIN",
     isActive: true,
     allowedAssets: "ALL",
@@ -113,12 +125,56 @@ describe("hashPassword", () => {
   it("produces a valid bcrypt hash", async () => {
     const hash = await hashPassword("testpassword");
     expect(hash).toBeDefined();
-    expect(hash).toMatch(/^\$2[ab]\$\d{2\}\$.{53}$/);
+    expect(hash).toMatch(/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/);
   });
 
   it("produces different hashes for same password", async () => {
     const hash1 = await hashPassword("testpassword");
     const hash2 = await hashPassword("testpassword");
     expect(hash1).not.toBe(hash2);
+  });
+});
+
+describe("encrypted session storage", () => {
+  it("encrypts and decrypts session payloads without leaking plaintext", () => {
+    const payload = {
+      userId: 42,
+      email: "user@example.com",
+      role: "ADMIN",
+      sid: "session-123",
+    };
+
+    const encrypted = encryptSessionPayload(payload);
+    expect(encrypted).toBeDefined();
+    expect(encrypted).not.toContain("user@example.com");
+    expect(encrypted).not.toContain("session-123");
+    expect(decryptSessionPayload(encrypted)).toEqual(payload);
+  });
+
+  it("stores a session in Redis with TTL and revokes it immediately", async () => {
+    const payload = {
+      userId: 42,
+      email: "user@example.com",
+      role: "ADMIN",
+      sid: "session-456",
+    };
+
+    const sessionData = await storeEncryptedSession(payload, 60);
+    expect(sessionData.key).toContain("stellarflow:sessions:");
+    expect(sessionData.ttlSeconds).toBe(60);
+
+    const valid = await validateSessionToken({
+      ...payload,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 300,
+    });
+    expect(valid).toBe(true);
+
+    const revoked = await revokeSessionByToken({
+      ...payload,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 300,
+    });
+    expect(revoked).toBe(true);
   });
 });

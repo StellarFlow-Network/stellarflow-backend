@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": false,
+        "amount": 10
+    },
+    "auditLog": "F:\\DRIPS\\stellarflow-backend-fork\\logs\\.fbfaa06bdb834534b986f09ab8245fdcf0868614-audit.json",
+    "files": [
+        {
+            "date": 1788120690403,
+            "name": "F:\\DRIPS\\stellarflow-backend-fork\\logs\\system-2026-08-30.log",
+            "hash": "e299e4db5fb6f0dc31f6159807f2f9c4b96b3c759bdd2c118e995b6838166636"
+        }
+    ],
+    "hashType": "sha256"
+}

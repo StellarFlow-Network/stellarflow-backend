@@ -1,11 +1,12 @@
 import dotenv from "dotenv";
-import { Keypair, TransactionBuilder, Operation, Memo, xdr, Account, Contract, nativeToScVal, } from "@stellar/stellar-sdk";
+import { Keypair, TransactionBuilder, Operation, Memo, xdr, Account, Contract, nativeToScVal, rpc as SorobanRpc, } from "@stellar/stellar-sdk";
 import stellarProvider from "../lib/stellarProvider";
 import { getStellarNetwork, getStellarNetworkPassphrase, } from "../lib/stellarNetwork";
 import { sequenceManager } from "./sequence-manager";
 import { assertSigningAllowed } from "../state/appState";
 import { signer } from "../signer";
 import { logger } from "../utils/logger";
+import { getGasProfilerService } from "./gasProfiler/gasProfilerService";
 dotenv.config();
 class LocalTransactionTimeoutError extends Error {
     code = "LOCAL_TX_TIME_BOUND_EXPIRED";
@@ -86,7 +87,7 @@ export class StellarService {
             .build();
         const rpcServer = stellarProvider.getRpcServer();
         const simulation = await rpcServer.simulateTransaction(transaction);
-        const prepared = rpcServer.assembleTransaction(transaction, simulation).build();
+        const prepared = SorobanRpc.assembleTransaction(transaction, simulation).build();
         const signature = await signer.sign(prepared.hash());
         const keypair = Keypair.fromPublicKey(publicKey);
         prepared.signatures.push(new xdr.DecoratedSignature({
@@ -96,6 +97,11 @@ export class StellarService {
         const submitted = await rpcServer.sendTransaction(prepared);
         for (let attempt = 0; attempt < 30; attempt++) {
             const result = await rpcServer.getTransaction(submitted.hash);
+            if (result.status === "SUCCESS" || result.status === "FAILED") {
+                // Issue #786 – profile CPU/fee cost. Fire-and-forget so a decode
+                // failure never blocks the governance path; failed txs are still billed.
+                void getGasProfilerService().profileTransaction(result, "submission", submitted.hash);
+            }
             if (result.status === "SUCCESS")
                 return submitted.hash;
             if (result.status === "FAILED")
@@ -348,7 +354,9 @@ export class StellarService {
     }
     generateMemoId(currency) {
         const timestamp = Math.floor(Date.now() / 1000);
-        const random = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
+        const random = Math.floor(Math.random() * 1000)
+            .toString()
+            .padStart(3, "0");
         const id = `SF-${currency}-${timestamp}-${random}`;
         return id.substring(0, 28);
     }

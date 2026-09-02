@@ -31,7 +31,13 @@
     "db:validate": "python3 scripts/validate_migrations.py",
     "test:migrations": "python3 -m pytest tests/test_alembic_migrations.py",
     "docs": "typedoc",
-    "docs:watch": "typedoc --watch"
+    "docs:watch": "typedoc --watch",
+    "load:smoke": "k6 run tests/load/smoke.js",
+    "load:peak": "k6 run tests/load/peak.js",
+    "load:stress": "k6 run tests/load/stress.js",
+    "load:soak": "k6 run tests/load/soak.js",
+    "load:monitor": "node tests/load/monitor.js",
+    "load:report": "node tests/load/generate-report.js"
   },
   "keywords": [],
   "author": "",
@@ -54,12 +60,15 @@
     "@prisma/driver-adapter-utils": "^7.8.0",
     "@stellar/stellar-sdk": "^14.6.1",
     "@tanstack/react-query": "^5.100.5",
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.0.0",
     "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
+    "amqplib": "^2.0.1",
     "async-mutex": "^0.5.0",
     "axios": "^1.7.0",
     "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
     "color-name": "^2.1.0",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
@@ -83,6 +92,7 @@
     "raw-body": "^3.0.2",
     "redis": "^5.12.1",
     "socket.io": "^4.8.3",
+    "supertest": "^7.2.2",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "ts-node": "^10.9.2",
@@ -92,6 +102,7 @@
     "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
+    "@types/amqplib": "^0.10.8",
     "@types/bcrypt": "^5.0.2",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.6",
@@ -110,7 +121,7 @@
     "lint-staged": "^16.4.0",
     "prettier": "^3.8.1",
     "prisma": "^7.8.0",
-    "ts-jest": "^29.4.4",
+    "ts-jest": "^29.4.12",
     "tsx": "^4.21.0",
     "typedoc": "^0.28.18"
   }

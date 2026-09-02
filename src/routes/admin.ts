@@ -22,6 +22,12 @@ import {
   replayAllDLQEntries,
   getKmsRotationStatus,
 } from "../controllers/dlqController";
+import {
+  listDisputes,
+  getDisputeById,
+  transitionDisputeStatus,
+  triggerManualRefund,
+} from "../controllers/disputeController";
 
 const rateLimitUpdateSchema = Joi.object({
   windowMs: Joi.number().integer().min(1000).max(86400000).optional(),
@@ -523,5 +529,173 @@ router.post("/dlq/replay/all", replayAllDLQEntries);
  *         description: Internal server error
  */
 router.get("/kms/rotation-status", getKmsRotationStatus);
+
+// ---------------------------------------------------------------------------
+// Remittance Dispute Resolution (Issue #834)
+// ---------------------------------------------------------------------------
+
+/**
+ * @swagger
+ * /api/admin/remittance/disputes:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: List remittance dispute tickets
+ *     description: >
+ *       Returns dispute tickets tracked for fiat payouts that failed or timed
+ *       out.  Optional filters: status (open|investigating|refunded|closed),
+ *       userId, limit, offset.
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [open, investigating, refunded, closed]
+ *         description: Filter by dispute ticket status
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: string
+ *         description: Filter by the affected user ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Max records to return (1-200)
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Offset for pagination
+ *     responses:
+ *       '200':
+ *         description: Dispute tickets returned
+ *       '400':
+ *         description: Invalid status filter
+ *       '500':
+ *         description: Internal server error
+ */
+router.get("/remittance/disputes", listDisputes);
+
+/**
+ * @swagger
+ * /api/admin/remittance/disputes/{id}:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get a remittance dispute ticket
+ *     description: Returns a single dispute ticket by ID.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Dispute ticket ID
+ *     responses:
+ *       '200':
+ *         description: Dispute ticket returned
+ *       '404':
+ *         description: Dispute ticket not found
+ *       '500':
+ *         description: Internal server error
+ */
+router.get("/remittance/disputes/:id", getDisputeById);
+
+/**
+ * @swagger
+ * /api/admin/remittance/disputes/{id}/status:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Transition a dispute ticket status
+ *     description: >
+ *       Advances a dispute ticket through its state machine
+ *       (open -> investigating -> refunded | closed).  A state change
+ *       dispatches email + webhook updates to the affected user.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Dispute ticket ID
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [open, investigating, refunded, closed]
+ *               email:
+ *                 type: string
+ *                 description: Override notification email address
+ *               webhookUrl:
+ *                 type: string
+ *                 description: Override notification webhook endpoint
+ *     responses:
+ *       '200':
+ *         description: Dispute ticket transitioned
+ *       '400':
+ *         description: Invalid target status
+ *       '404':
+ *         description: Dispute ticket not found
+ *       '409':
+ *         description: Invalid state transition
+ *       '500':
+ *         description: Internal server error
+ */
+router.post("/remittance/disputes/:id/status", transitionDisputeStatus);
+
+/**
+ * @swagger
+ * /api/admin/remittance/disputes/{id}/refund:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Trigger a manual refund for a dispute ticket
+ *     description: >
+ *       Allows an operator to manually refund a dispute ticket.  Moves the
+ *       ticket to `refunded`, records the refund metadata and dispatches the
+ *       email + webhook update to the affected user.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Dispute ticket ID
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refundAmount:
+ *                 type: number
+ *                 description: Amount refunded (optional)
+ *               email:
+ *                 type: string
+ *                 description: Override notification email address
+ *               webhookUrl:
+ *                 type: string
+ *                 description: Override notification webhook endpoint
+ *     responses:
+ *       '200':
+ *         description: Manual refund triggered
+ *       '400':
+ *         description: Invalid refund amount
+ *       '404':
+ *         description: Dispute ticket not found
+ *       '409':
+ *         description: Dispute already closed
+ *       '500':
+ *         description: Internal server error
+ */
+router.post("/remittance/disputes/:id/refund", triggerManualRefund);
 
 export default router;

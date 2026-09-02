@@ -28,14 +28,15 @@ Architecture
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from typing import Any, Callable, Optional
 
-logger = logging.getLogger(__name__)
+import structlog
+
+log = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -83,9 +84,10 @@ def get_heavy_pool() -> ProcessPoolExecutor:
                     _heavy_pool = ProcessPoolExecutor(max_workers=HEAVY_POOL_WORKERS)
         else:
             _heavy_pool = ProcessPoolExecutor(max_workers=HEAVY_POOL_WORKERS)
-        logger.info(
-            "[ExecutorPool] Heavy pool started with %d workers",
-            HEAVY_POOL_WORKERS,
+        log.info(
+            "executor_pool.heavy_pool.started",
+            component="ExecutorPool",
+            workers=HEAVY_POOL_WORKERS,
         )
     return _heavy_pool
 
@@ -100,9 +102,10 @@ def get_light_pool() -> ThreadPoolExecutor:
                     _light_pool = ThreadPoolExecutor(max_workers=LIGHT_POOL_WORKERS)
         else:
             _light_pool = ThreadPoolExecutor(max_workers=LIGHT_POOL_WORKERS)
-        logger.info(
-            "[ExecutorPool] Light pool started with %d workers",
-            LIGHT_POOL_WORKERS,
+        log.info(
+            "executor_pool.light_pool.started",
+            component="ExecutorPool",
+            workers=LIGHT_POOL_WORKERS,
         )
     return _light_pool
 
@@ -113,11 +116,11 @@ def shutdown_pools() -> None:
     if _heavy_pool is not None:
         _heavy_pool.shutdown(wait=True, cancel_futures=False)
         _heavy_pool = None
-        logger.info("[ExecutorPool] Heavy pool shut down")
+        log.info("executor_pool.heavy_pool.shutdown", component="ExecutorPool")
     if _light_pool is not None:
         _light_pool.shutdown(wait=True, cancel_futures=False)
         _light_pool = None
-        logger.info("[ExecutorPool] Light pool shut down")
+        log.info("executor_pool.light_pool.shutdown", component="ExecutorPool")
 
 
 # ---------------------------------------------------------------------------
@@ -170,10 +173,11 @@ class EventLoopLatencyMonitor:
             return
         self._running = True
         self._task = asyncio.create_task(self._probe_loop())
-        logger.info(
-            "[LatencyMonitor] Started budget=%.1fms interval=%.2fs",
-            self._budget_ms,
-            self._interval,
+        log.info(
+            "latency_monitor.started",
+            component="LatencyMonitor",
+            budget_ms=self._budget_ms,
+            interval_secs=self._interval,
         )
 
     async def stop(self) -> None:
@@ -185,7 +189,7 @@ class EventLoopLatencyMonitor:
             except asyncio.CancelledError:
                 pass
             self._task = None
-        logger.info("[LatencyMonitor] Stopped.")
+        log.info("latency_monitor.stopped", component="LatencyMonitor")
 
     async def _probe_loop(self) -> None:
         loop = asyncio.get_running_loop()
@@ -209,12 +213,12 @@ class EventLoopLatencyMonitor:
 
             if latency_ms > self._budget_ms:
                 self._violations += 1
-                logger.warning(
-                    "[LatencyMonitor] Event-loop latency %.2fms exceeds budget %.2fms "
-                    "(violations=%d)",
-                    latency_ms,
-                    self._budget_ms,
-                    self._violations,
+                log.warning(
+                    "latency_monitor.budget_exceeded",
+                    component="LatencyMonitor",
+                    latency_ms=round(latency_ms, 3),
+                    budget_ms=self._budget_ms,
+                    violations=self._violations,
                 )
 
             await asyncio.sleep(self._interval)

@@ -127,6 +127,57 @@ def test_solana_verification_pending(mock_session):
     assert result["status"] == VerificationStatus.PENDING
 
 
+def test_merkle_inclusion_proof_verifies_against_block_header():
+    worker = BridgeLockVerificationWorker()
+    leaf_hash = "0xabc123"
+    sibling_hash = "0xdef456"
+    root_hash = worker._merkle_root_from_branch(leaf_hash, [sibling_hash], 0)
+
+    result = worker.verify_merkle_inclusion_proof(
+        leaf_hash=leaf_hash,
+        proof_hashes=[sibling_hash],
+        index=0,
+        expected_root=root_hash,
+        block_header={"stateRoot": root_hash},
+    )
+
+    assert result["valid"] is True
+    assert result["status"] == VerificationStatus.VERIFIED
+    assert result["root_hash"] == root_hash
+
+
+def test_record_verified_proof_prevents_replay_and_emits_queue_payload(in_memory_db, mock_session):
+    worker = BridgeLockVerificationWorker(session=mock_session)
+    job_id = "job-proofs-replay"
+    queue = []
+
+    first = worker.record_verified_proof(
+        in_memory_db,
+        job_id=job_id,
+        chain_type=ChainType.EVM,
+        tx_hash="0xdeadbeef",
+        proof_root="0xroot123",
+        payload={"recipient": "GABC...", "amount": 42},
+        queue_sender=lambda payload: queue.append(payload),
+    )
+
+    assert first is True
+    assert queue and queue[0]["job_id"] == job_id
+    assert queue[0]["status"] == "VERIFIED"
+
+    second = worker.record_verified_proof(
+        in_memory_db,
+        job_id=job_id,
+        chain_type=ChainType.EVM,
+        tx_hash="0xdeadbeef",
+        proof_root="0xroot123",
+        payload={"recipient": "GABC...", "amount": 42},
+        queue_sender=lambda payload: queue.append(payload),
+    )
+
+    assert second is False
+
+
 def test_log_verified_job_in_database(in_memory_db, mock_session):
     worker = BridgeLockVerificationWorker(session=mock_session)
     job_id = "job-sqlite-test"
