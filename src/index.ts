@@ -8,6 +8,7 @@ import marketRatesRouter from "./routes/marketRates";
 import historyRouter from "./routes/history";
 import priceUpdatesRouter from "./routes/priceUpdates";
 import statsRouter from "./routes/stats";
+import bridgeRouter from "./routes/bridge";
 import vaultRoutes from "./routes/vaults";
 import app from "./app";
 import prisma from "./lib/prisma";
@@ -43,6 +44,7 @@ import { storageRentBumpService } from "./services/storageRentBumpService";
 import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
 import { getRegionalHealthService } from "./services/regionalHealthService";
 import { redisOperationsWorker } from "./services/redisOperationsWorker";
+import { initializeBridgeServices, stopBridgeServices } from "./services/bridgeIntegration";
 import { VolatilityService } from "./services/volatility.service";
 import { ArbitrageScanner } from "./services/arbitrageScanner";
 import { storageMonitorService } from "./services/storageMonitorService";
@@ -122,6 +124,7 @@ app.use("/api/market-rates", marketRatesRouter);
 app.use("/api/history", historyRouter);
 app.use("/api/price-updates", priceUpdatesRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/v1/bridge", bridgeRouter);
 app.use("/api/v1/vaults", vaultRoutes);
 
 // Health check endpoint
@@ -241,6 +244,15 @@ app.get("/", (req, res) => {
         priceChange: "/api/v1/intelligence/price-change/:currency",
         staleCurrencies: "/api/v1/intelligence/stale",
       },
+      bridge: {
+        chains: "/api/v1/bridge/chains",
+        validators: "/api/v1/bridge/validators",
+        events: "/api/v1/bridge/events",
+        operations: "/api/v1/bridge/operations",
+        queueStats: "/api/v1/bridge/queue/stats",
+        retry: "POST /api/v1/bridge/queue/retry",
+        simulate: "POST /api/v1/bridge/simulate",
+      },
     },
   });
 });
@@ -340,6 +352,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     ArbitrageScanner.stop();
     stopConfigWatcher();
     stopEnvFileWatcher?.();
+    await stopBridgeServices();
 
     await closeHttpServer();
     console.log("HTTP server closed.");
@@ -490,6 +503,16 @@ httpServer.listen(PORT, async () => {
         err instanceof Error ? err.message : err,
       );
     }
+  }
+
+  // Start cross-chain bridge services if enabled
+  try {
+    await initializeBridgeServices();
+  } catch (err) {
+    console.warn(
+      "Cross-chain bridge services not started:",
+      err instanceof Error ? err.message : err,
+    );
   }
 
   try {
