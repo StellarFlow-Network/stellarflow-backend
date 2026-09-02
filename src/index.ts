@@ -2,11 +2,14 @@ import { createServer } from "http";
 import compression from "compression";
 import dotenv from "dotenv";
 import { Horizon } from "@stellar/stellar-sdk";
+import stellarProvider from "./lib/stellarProvider";
 import { getStellarNetwork } from "./lib/stellarNetwork";
 import marketRatesRouter from "./routes/marketRates";
 import historyRouter from "./routes/history";
 import priceUpdatesRouter from "./routes/priceUpdates";
 import statsRouter from "./routes/stats";
+import bridgeRouter from "./routes/bridge";
+import vaultRoutes from "./routes/vaults";
 import app from "./app";
 import prisma from "./lib/prisma";
 import { disconnectRedis } from "./lib/redis";
@@ -41,6 +44,7 @@ import { storageRentBumpService } from "./services/storageRentBumpService";
 import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
 import { getRegionalHealthService } from "./services/regionalHealthService";
 import { redisOperationsWorker } from "./services/redisOperationsWorker";
+import { initializeBridgeServices, stopBridgeServices } from "./services/bridgeIntegration";
 import { VolatilityService } from "./services/volatility.service";
 import { ArbitrageScanner } from "./services/arbitrageScanner";
 import { storageMonitorService } from "./services/storageMonitorService";
@@ -108,13 +112,8 @@ console.log(`🔒 CORS allowlist: ${allowedOrigins.join(", ")}`);
 
 const PORT = process.env.PORT || 3000;
 
-// Horizon server for health checks
-const stellarNetwork = getStellarNetwork();
-const horizonUrl =
-  stellarNetwork === "PUBLIC"
-    ? "https://horizon.stellar.org"
-    : "https://horizon-testnet.stellar.org";
-const horizonServer = new Horizon.Server(horizonUrl);
+// Use shared StellarProvider for health checks (supports failover)
+const horizonServer = stellarProvider.getServer();
 
 // CORS, security headers and body parsing are configured once in app.ts.
 // Re-registering them here previously overwrote the strict allowlist with a
@@ -125,6 +124,8 @@ app.use("/api/market-rates", marketRatesRouter);
 app.use("/api/history", historyRouter);
 app.use("/api/price-updates", priceUpdatesRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/v1/bridge", bridgeRouter);
+app.use("/api/v1/vaults", vaultRoutes);
 
 // Health check endpoint
 /**
@@ -243,6 +244,15 @@ app.get("/", (req, res) => {
         priceChange: "/api/v1/intelligence/price-change/:currency",
         staleCurrencies: "/api/v1/intelligence/stale",
       },
+      bridge: {
+        chains: "/api/v1/bridge/chains",
+        validators: "/api/v1/bridge/validators",
+        events: "/api/v1/bridge/events",
+        operations: "/api/v1/bridge/operations",
+        queueStats: "/api/v1/bridge/queue/stats",
+        retry: "POST /api/v1/bridge/queue/retry",
+        simulate: "POST /api/v1/bridge/simulate",
+      },
     },
   });
 });
@@ -342,6 +352,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     ArbitrageScanner.stop();
     stopConfigWatcher();
     stopEnvFileWatcher?.();
+    await stopBridgeServices();
 
     await closeHttpServer();
     console.log("HTTP server closed.");
@@ -492,6 +503,16 @@ httpServer.listen(PORT, async () => {
         err instanceof Error ? err.message : err,
       );
     }
+  }
+
+  // Start cross-chain bridge services if enabled
+  try {
+    await initializeBridgeServices();
+  } catch (err) {
+    console.warn(
+      "Cross-chain bridge services not started:",
+      err instanceof Error ? err.message : err,
+    );
   }
 
   try {

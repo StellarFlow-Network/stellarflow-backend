@@ -22,6 +22,14 @@ psycopg2-binary>=2.9.0
 celery[rabbitmq]>=5.4.0,<6.0.0
 flower>=2.0.1
 
+# ---------------------------------------------------------------------------
+# Issue #744 — High-Throughput Horizon Ledger Event Ingestion Worker
+# ---------------------------------------------------------------------------
+
+# Async WebSocket client used by ingestion/horizon_worker.py (resilient
+# streaming listener with exponential backoff reconnects)
+websockets>=12.0
+
 # MsgPack binary serialisation with C-extensions for Redis cache payloads
 msgpack>=1.0.0
 

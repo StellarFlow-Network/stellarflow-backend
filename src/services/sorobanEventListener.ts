@@ -9,6 +9,7 @@ import { parseBase64ToPositiveNumber } from "../serialization/helpers.js";
 import { verifyOrderFilledEvent } from "./orderFillVerificationService.js";
 import { ingestGovernanceVoteEvent } from "./voterHistoryService.js";
 import { getCacheInvalidationManager } from "../cache/CacheInvalidationManager";
+import { getOrderBookSnapshotEngine } from "./orderBookSnapshotEngine";
 
 dotenv.config();
 
@@ -146,13 +147,13 @@ export class SorobanEventListener {
           const { getCacheWarmingWorker } =
             await import("./cacheWarmingWorker.js");
           const cacheWarmingWorker = getCacheWarmingWorker();
-          cacheWarmingWorker.onNewLedger(price.ledgerSeq).catch((err) => {
+          cacheWarmingWorker.onNewLedger(price.ledgerSeq).catch((err: unknown) => {
             logger.error("[EventListener] Cache warming failed:", err);
           });
 
           // Trigger order book snapshot on new ledger (every N ledgers)
           const orderBookSnapshotEngine = getOrderBookSnapshotEngine();
-          orderBookSnapshotEngine.onNewLedger(price.ledgerSeq).catch((err) => {
+          orderBookSnapshotEngine.onNewLedger(price.ledgerSeq).catch((err: unknown) => {
             logger.error("[EventListener] Order book snapshot failed:", err);
           });
         } catch (err) {

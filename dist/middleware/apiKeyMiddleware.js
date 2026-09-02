@@ -51,6 +51,7 @@ export function apiKeyAuth() {
                     isActive: true,
                     expiresAt: true,
                     lastUsedAt: true,
+                    tier: true,
                 },
             }));
         }
@@ -86,6 +87,7 @@ export function apiKeyAuth() {
             label: apiKeyRecord.label,
             scopes: apiKeyRecord.scopes,
             ownerId: apiKeyRecord.ownerId,
+            tier: apiKeyRecord.tier || "Free",
         };
         // Non-blocking: update lastUsedAt in the background so we
         // don't add DB latency to every authenticated request.

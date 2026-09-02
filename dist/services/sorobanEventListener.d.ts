@@ -37,5 +37,6 @@ export declare class SorobanEventListener {
     private parseOperations;
     stop(): void;
     isActive(): boolean;
+    getQueueDepth(): number;
 }
 //# sourceMappingURL=sorobanEventListener.d.ts.map

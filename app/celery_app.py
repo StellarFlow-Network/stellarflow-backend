@@ -4,18 +4,9 @@ import os
 
 from celery import Celery
 from celery.schedules import crontab
+from kombu import Exchange, Queue
 
-from app.telemetry import instrument_celery, setup_tracing
-
-# The celery-worker / celery-beat processes are separate Python processes
-# from the FastAPI app, so tracing must be initialised here too (Issue
-# #760). instrument_celery() hooks Celery's before_task_publish /
-# task_prerun signals so the W3C traceparent header is propagated through
-# the RabbitMQ task message headers automatically: a span started while
-# handling an HTTP request that calls a task's .delay()/.apply_async()
-# continues, as a child span, inside whichever worker picks the task up.
-setup_tracing()
-instrument_celery()
+init_sentry()
 
 celery_app = Celery(
     "stellarflow",
@@ -31,6 +22,20 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
+    task_queues=(
+        Queue("webhook.retry", Exchange("webhook"), routing_key="webhook.retry", durable=True),
+        Queue("webhook.dead", Exchange("webhook"), routing_key="webhook.dead", durable=True),
+    ),
+    task_routes={
+        "app.tasks.deliver_webhook_task": {
+            "queue": "webhook.retry",
+            "routing_key": "webhook.retry",
+        },
+        "app.tasks.webhook_dead_letter_task": {
+            "queue": "webhook.dead",
+            "routing_key": "webhook.dead",
+        },
+    },
     beat_schedule={
         "poll-anchor-settlement-statuses": {
             "task": "app.tasks.poll_anchor_settlement_statuses",

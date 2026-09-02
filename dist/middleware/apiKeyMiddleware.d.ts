@@ -3,7 +3,9 @@ import { AuthenticatedApiKey } from "../types/apiKey.types";
 declare global {
     namespace Express {
         interface Request {
-            apiKey?: AuthenticatedApiKey;
+            apiKey?: AuthenticatedApiKey & {
+                tier?: string;
+            };
         }
     }
 }

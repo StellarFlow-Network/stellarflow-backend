@@ -41,8 +41,9 @@ import healthRouter from "./routes/health";
 import proofRouter from "./routes/proof";
 import ordersRouter from "./routes/orders";
 import sorobanSimulationRouter from "./routes/sorobanSimulation";
-import remittanceRouter from "./routes/remittance";
 import sorobanRentEstimateRouter from "./routes/sorobanRentEstimate";
+import remittanceRouter from "./routes/remittance";
+import anchorsRouter from "./routes/anchors";
 import { sendApiError } from "./lib/apiError.js";
 import metricsRouter from "./routes/metrics";
 
@@ -98,6 +99,10 @@ app.use(
 );
 
 app.use(express.json());
+
+// Issue #924 – GraphQL query depth & complexity guard
+// Intercepts POST /graphql requests before they reach any downstream handler.
+app.use("/graphql", graphqlQueryGuard());
 
 // Add tracing middleware early in the stack
 app.use(tracingMiddleware);
@@ -170,6 +175,9 @@ app.use("/api/v1/orders", ordersRouter);
 
 // Issue #815 – Remittance transaction history endpoint
 app.use("/api/v1/remittance", remittanceRouter);
+
+// Issue #931 – Anchor SEP-24 / SEP-31 Webhook Ingestion Service
+app.use("/api/v1/anchors", anchorsRouter);
 
 // Issue #836 – Soroban Contract Instruction & Storage Rent Estimator
 // eslint-disable-next-line no-undef

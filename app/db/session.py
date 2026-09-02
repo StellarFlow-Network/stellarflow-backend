@@ -40,13 +40,22 @@ if async_url.startswith("postgresql://"):
 elif async_url.startswith("postgres://"):
     async_url = async_url.replace("postgres://", "postgresql+asyncpg://", 1)
 
-_engine = create_async_engine(
-    async_url,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    echo=False,
-)
+_engine_kwargs = {
+    "pool_pre_ping": True,
+    "echo": False,
+}
+
+# PgBouncer owns server-side pooling; keep the application-side pool bounded.
+if os.environ.get("PGBOUNCER_ENABLED", "false").lower() == "true":
+    _engine_kwargs.update({
+        "pool_size": 5,
+        "max_overflow": 5,
+        "connect_args": {"statement_cache_size": 0},
+    })
+else:
+    _engine_kwargs.update({"pool_size": 10, "max_overflow": 20})
+
+_engine = create_async_engine(async_url, **_engine_kwargs)
 
 async_session_factory = async_sessionmaker(
     bind=_engine,

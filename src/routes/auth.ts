@@ -24,7 +24,9 @@ import {
   clearBruteForceRecord,
 } from "../middleware/bruteForceMiddleware.js";
 import express from "express";
+import crypto from "crypto";
 import { sendApiError } from "../lib/apiError.js";
+import { storeEncryptedSession, revokeSessionByToken } from "../utils/jwt.js";
 
 const router = express.Router();
 
@@ -114,19 +116,33 @@ router.post(
       // Successful auth — clear any brute-force counters for this IP
       clearBruteForceRecord(clientIp);
 
+      const sessionId = crypto.randomUUID();
       const token = generateToken({
         userId: relayer.id,
         email: relayer.email!,
         role: relayer.role || "VIEWER",
-      }, "15m"); // generate short-lived access token by default now
+        sid: sessionId,
+      }, "15m");
 
       const refreshTokenData = generateRefreshToken(relayer.id);
+      const sessionUserAgent = req.headers["user-agent"] || "unknown";
+
+      await storeEncryptedSession({
+        userId: relayer.id,
+        email: relayer.email!,
+        role: relayer.role || "VIEWER",
+        sid: sessionId,
+        ipAddress: clientIp,
+        userAgent: sessionUserAgent,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        exp: Math.floor((Date.now() + 15 * 60 * 1000) / 1000),
+      }, 15 * 60);
 
       await createUserSession(
         relayer.id,
         token,
         clientIp,
-        req.headers["user-agent"] || "unknown",
+        sessionUserAgent,
       );
 
       await prisma.relayer.update({
@@ -190,6 +206,7 @@ router.post(
       const token = authHeader.substring(7);
 
       await invalidateSession(token);
+      await revokeSessionByToken(token);
 
       const userId = (req as any).user?.userId;
 
