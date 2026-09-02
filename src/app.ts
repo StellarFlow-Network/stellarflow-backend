@@ -100,6 +100,10 @@ app.use(
 
 app.use(express.json());
 
+// Issue #924 – GraphQL query depth & complexity guard
+// Intercepts POST /graphql requests before they reach any downstream handler.
+app.use("/graphql", graphqlQueryGuard());
+
 // Add tracing middleware early in the stack
 app.use(tracingMiddleware);
 app.use(axiosTracingMiddleware);
