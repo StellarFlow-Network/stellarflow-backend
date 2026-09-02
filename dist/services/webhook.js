@@ -44,6 +44,14 @@ export class WebhookService {
         const message = this.formatPriorityAlert(alertDetails);
         await this.postMessage(message);
     }
+    /** Alerts the ops channel when transaction gas usage spikes unexpectedly (Issue #786). */
+    async sendGasSpikeAlert(alertDetails) {
+        if (!this.webhookUrl) {
+            return;
+        }
+        const message = this.formatGasSpikeAlert(alertDetails);
+        await this.postMessage(message);
+    }
     async postMessage(message) {
         if (!this.webhookUrl) {
             return;
@@ -409,6 +417,77 @@ export class WebhookService {
                         {
                             type: "mrkdwn",
                             text: `*Time:*\n${detectedAt.toISOString()}`,
+                        },
+                    ],
+                },
+            ],
+        };
+    }
+    formatGasSpikeAlert(alertDetails) {
+        const { txType, metric, current, baselineMean, percentIncrease, zScore, baselineSampleCount, timestamp, } = alertDetails;
+        const title = `⛽ Gas Usage Spike: ${txType}`;
+        const change = `+${percentIncrease.toFixed(1)}%`;
+        if (this.platform === "discord") {
+            return {
+                embeds: [
+                    {
+                        title,
+                        color: 0xff6600,
+                        fields: [
+                            { name: "Transaction Type", value: txType, inline: true },
+                            { name: "Metric", value: metric, inline: true },
+                            { name: "Change", value: change, inline: true },
+                            {
+                                name: "Current",
+                                value: current.toLocaleString("en-US"),
+                                inline: true,
+                            },
+                            {
+                                name: "Baseline Average",
+                                value: baselineMean.toLocaleString("en-US"),
+                                inline: true,
+                            },
+                            { name: "Z-Score", value: zScore.toFixed(2), inline: true },
+                            {
+                                name: "Baseline Window",
+                                value: `${baselineSampleCount} day(s)`,
+                                inline: true,
+                            },
+                            { name: "Time", value: timestamp.toISOString() },
+                        ],
+                    },
+                ],
+            };
+        }
+        return {
+            blocks: [
+                {
+                    type: "header",
+                    text: { type: "plain_text", text: title },
+                },
+                {
+                    type: "section",
+                    fields: [
+                        { type: "mrkdwn", text: `*Transaction Type:*\n${txType}` },
+                        { type: "mrkdwn", text: `*Metric:*\n${metric}` },
+                        { type: "mrkdwn", text: `*Change:*\n${change}` },
+                        {
+                            type: "mrkdwn",
+                            text: `*Current:*\n${current.toLocaleString("en-US")}`,
+                        },
+                        {
+                            type: "mrkdwn",
+                            text: `*Baseline Average:*\n${baselineMean.toLocaleString("en-US")}`,
+                        },
+                        { type: "mrkdwn", text: `*Z-Score:*\n${zScore.toFixed(2)}` },
+                    ],
+                },
+                {
+                    type: "context",
+                    elements: [
+                        {
+                            type: "mrkdwn",
+                            text: `Baseline of ${baselineSampleCount} day(s) · detected at ${timestamp.toISOString()}`,
                         },
                     ],
                 },
