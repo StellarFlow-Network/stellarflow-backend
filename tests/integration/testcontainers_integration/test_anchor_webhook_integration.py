@@ -18,7 +18,11 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from app.adapters.anchor import router, verify_hmac_signature
+from app.adapters.anchor import (
+    router,
+    transition_remittance_status,
+    verify_hmac_signature,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -245,3 +249,39 @@ class TestAnchorWebhookEndpoint:
             },
         )
         assert response.status_code == 200
+
+    async def test_transition_updates_remittance_status_by_anchor_reference(self) -> None:
+        calls = []
+
+        class FakeResult:
+            rowcount = 1
+
+        class FakeSession:
+            async def execute(self, query, params):
+                calls.append((str(query), params))
+                return FakeResult()
+
+            async def commit(self):
+                calls.append(("commit", None))
+
+        class FakeSessionContext:
+            async def __aenter__(self):
+                return FakeSession()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        await transition_remittance_status(
+            "anchor-ref-818",
+            "DELIVERED",
+            session_factory=lambda: FakeSessionContext(),
+        )
+
+        query, params = calls[0]
+        assert '"RemittanceTransaction"' in query
+        assert "reference = :transaction_id" in query
+        assert params == {
+            "status": "DELIVERED",
+            "transaction_id": "anchor-ref-818",
+        }
+        assert calls[1] == ("commit", None)

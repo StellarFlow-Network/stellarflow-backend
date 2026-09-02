@@ -3,10 +3,11 @@ import hmac
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import text
 
 # Import the WebSocket connection manager to broadcast updates
 try:
@@ -43,18 +44,62 @@ def verify_hmac_signature(payload: bytes, signature: str, secret: bytes) -> bool
     return hmac.compare_digest(expected_hmac.lower(), normalized_signature.lower())
 
 
-async def transition_remittance_status(transaction_id: str, new_status: str) -> None:
+SessionFactory = Callable[[], Any]
+
+
+async def transition_remittance_status(
+    transaction_id: str,
+    new_status: str,
+    session_factory: Optional[SessionFactory] = None,
+) -> None:
     """
-    Mock database function to transition the transaction status.
-    In a real implementation, this would use Prisma or asyncpg to update the record.
-    (PROCESSING -> DISPATCHED -> DELIVERED)
+    Transition a remittance transaction status when the Python service has DB access.
+
+    Anchor payloads may identify either the internal remittance id or an external
+    anchor reference, so both columns are matched.
     """
     valid_statuses = ["PROCESSING", "DISPATCHED", "DELIVERED"]
     if new_status not in valid_statuses:
         logger.warning(f"Unexpected status '{new_status}' for transaction {transaction_id}")
     
     logger.info(f"Transitioning remittance transaction {transaction_id} to status: {new_status}")
-    # TODO: Implement actual database update here when the Remittance schema is added.
+
+    if session_factory is None:
+        try:
+            from app.db.session import async_session_factory
+
+            session_factory = async_session_factory
+        except RuntimeError as exc:
+            logger.warning(
+                "Database unavailable for anchor webhook status update: %s",
+                exc,
+            )
+            return
+
+    try:
+        async with session_factory() as session:
+            result = await session.execute(
+                text(
+                    """
+                    UPDATE "RemittanceTransaction"
+                    SET status = :status,
+                        "updatedAt" = NOW()
+                    WHERE id = :transaction_id
+                       OR reference = :transaction_id
+                    """
+                ),
+                {"status": new_status, "transaction_id": transaction_id},
+            )
+            await session.commit()
+
+            rowcount = getattr(result, "rowcount", 0)
+            if rowcount == 0:
+                logger.warning(
+                    "No remittance transaction found for anchor id %s",
+                    transaction_id,
+                )
+    except Exception as exc:
+        logger.warning("Anchor webhook remittance status update skipped: %s", exc)
 
 
 @router.post("", response_model=WebhookResponse)
