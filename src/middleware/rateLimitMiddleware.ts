@@ -60,6 +60,14 @@ export function rateLimitMiddleware(options?: RateLimitOptions) {
         return;
       }
 
+      next();
+    } catch (error) {
+      console.error("Rate limit middleware error:", error);
+      next();
+    }
+  };
+}
+
 /**
  * Returns true when the request IP is in the whitelist.
  * Triggers a background refresh if the cache is stale.

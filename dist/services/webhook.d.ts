@@ -35,6 +35,16 @@ type PriorityAlertDetails = {
     stdDev: number;
     timestamp: Date | number;
 };
+type GasSpikeAlertDetails = {
+    txType: string;
+    metric: string;
+    current: number;
+    baselineMean: number;
+    percentIncrease: number;
+    zScore: number;
+    baselineSampleCount: number;
+    timestamp: Date;
+};
 export declare class WebhookService {
     private webhookUrl;
     private platform;
@@ -44,12 +54,15 @@ export declare class WebhookService {
     sendGasBalanceAlert(alertDetails: GasBalanceAlertDetails): Promise<void>;
     sendMonitorFailureAlert(alertDetails: MonitorFailureAlertDetails): Promise<void>;
     sendPriorityAlert(alertDetails: PriorityAlertDetails): Promise<void>;
+    /** Alerts the ops channel when transaction gas usage spikes unexpectedly (Issue #786). */
+    sendGasSpikeAlert(alertDetails: GasSpikeAlertDetails): Promise<void>;
     private postMessage;
     private formatErrorMessage;
     private formatReviewMessage;
     private formatGasBalanceAlert;
     private formatMonitorFailureAlert;
     private formatPriorityAlert;
+    private formatGasSpikeAlert;
 }
 export declare function getWebhookService(): WebhookService;
 export declare const webhookService: WebhookService;

@@ -298,5 +298,8 @@ export class SorobanEventListener {
     isActive() {
         return this.isRunning;
     }
+    getQueueDepth() {
+        return this.bpManager.getQueueLength();
+    }
 }
 //# sourceMappingURL=sorobanEventListener.js.map
