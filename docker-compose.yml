@@ -5,6 +5,7 @@ services:
     build: .
     ports:
       - "${PORT:-3000}:3000"
+      - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@pgbouncer:6432/stellarflow?schema=public&sslmode=disable
       - DIRECT_DATABASE_URL=postgresql://postgres:postgres@db:5432/stellarflow?schema=public&sslmode=disable
@@ -44,6 +45,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - stellarflow-net
+
+  ingestion-worker:
+    build: .
+    command: python -m app.tasks ingestion-worker
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/stellarflow?schema=public&sslmode=require
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - CELERY_RESULT_BACKEND=rpc://
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     networks:
       - stellarflow-net
 
