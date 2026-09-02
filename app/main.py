@@ -139,6 +139,7 @@ async def lifespan(app: FastAPI):
     await stop_latency_monitor()
     shutdown_process_pool()
     shutdown_pools()
+    shutdown_tracing()
 
 
 # ---------------------------------------------------------------------------

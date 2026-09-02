@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -30,6 +31,61 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Awaitable
 
 logger = logging.getLogger(__name__)
+# ---------------------------------------------------------------------------
+# OpenTelemetry — W3C trace-context propagation across the DLQ (Issue #760)
+# ---------------------------------------------------------------------------
+#
+# The DLQ is itself an async queue: a payload can fail during the original
+# request/task, sit in Redis for minutes or days, and only run again when an
+# operator calls the replay endpoint from an unrelated later request. Without
+# help, that later replay would start a brand-new, disconnected trace. To
+# keep it linked to the original failure, ``DLQEntry`` stores the W3C
+# ``traceparent``/``tracestate`` headers captured at push time, and replay
+# restores them as the parent context for the retry span.
+#
+# OpenTelemetry is an optional runtime dependency from this module's point of
+# view (it's imported lazily so app/queue/dlq.py keeps working even in a
+# context where the otel packages aren't installed), matching the defensive
+# try/except ImportError style used elsewhere in this codebase.
+try:
+    from opentelemetry import propagate as _otel_propagation
+    from opentelemetry import trace as _otel_trace
+
+    _OTEL_AVAILABLE = True
+    _tracer = _otel_trace.get_tracer(__name__)
+except ImportError:  # pragma: no cover - exercised when otel isn't installed
+    _OTEL_AVAILABLE = False
+    _tracer = None
+
+
+def _capture_trace_context() -> Optional[Dict[str, str]]:
+    """Serialise the currently active span context as a W3C carrier dict so
+    it can travel inside a Redis-stored :class:`DLQEntry` and be restored by
+    whichever process eventually replays it."""
+    if not _OTEL_AVAILABLE:
+        return None
+    carrier: Dict[str, str] = {}
+    _otel_propagation.inject(carrier)
+    return carrier or None
+
+
+def _extract_trace_context(carrier: Optional[Dict[str, str]]):
+    """Rebuild an OpenTelemetry context from a stored W3C carrier dict."""
+    if not _OTEL_AVAILABLE or not carrier:
+        return None
+    return _otel_propagation.extract(carrier)
+
+
+@contextlib.asynccontextmanager
+async def _dlq_span(name: str, parent_ctx: Any, attributes: Dict[str, Any]):
+    """Start a span under *parent_ctx* (or the current context if ``None``)
+    for the duration of the wrapped block. A no-op context manager when
+    OpenTelemetry isn't installed."""
+    if not _OTEL_AVAILABLE or _tracer is None:
+        yield
+        return
+    with _tracer.start_as_current_span(name, context=parent_ctx, attributes=attributes):
+        yield
 
 __all__ = [
     # Data structures
@@ -133,6 +189,13 @@ class DLQEntry:
         if permanently failed.
     permanently_failed:
         ``True`` once all retry attempts are exhausted.
+    trace_context:
+        W3C ``traceparent``/``tracestate`` headers captured from the span
+        that was active when this entry was first created (Issue #760).
+        Restored as the parent context when the entry is later replayed, so
+        a payload retried minutes or days after the original failure still
+        shows up as part of the original request's trace instead of
+        starting a disconnected one. ``None`` when tracing is disabled.
     """
 
     entry_id: int
@@ -146,6 +209,7 @@ class DLQEntry:
     enqueued_at: str
     next_retry_at: Optional[str]
     permanently_failed: bool = False
+    trace_context: Optional[Dict[str, str]] = None
 
     @classmethod
     def create(
@@ -158,8 +222,9 @@ class DLQEntry:
         attempt: int,
         policy: RetryPolicy,
         tb_str: str = "",
+        trace_context: Optional[Dict[str, str]] = None,
     ) -> "DLQEntry":
-        """Factory method to build a ``DLQEntry`` from an ingestion exception."""
+            """Factory method to build a ``DLQEntry`` from an ingestion exception."""
         now = datetime.now(timezone.utc)
         enqueued_at = now.isoformat()
         perm_failed = policy.exhausted(attempt)
@@ -169,6 +234,11 @@ class DLQEntry:
             import datetime as _dt
             retry_time = now + _dt.timedelta(seconds=delay)
             next_retry_ts = retry_time.isoformat()
+
+        # Preserve the trace context across retries of the *same* logical
+        # failure (the caller passes the original one back in); only capture
+        # a fresh one from the active span on the first attempt.
+        resolved_trace_context = trace_context if trace_context is not None else _capture_trace_context()
 
         return cls(
             entry_id=entry_id,
@@ -182,6 +252,7 @@ class DLQEntry:
             enqueued_at=enqueued_at,
             next_retry_at=next_retry_ts,
             permanently_failed=perm_failed,
+            trace_context=resolved_trace_context,
         )
 
     @property
@@ -291,6 +362,7 @@ class RedisDLQ:
         source: str = "ingestion-pipeline",
         attempt: int = 1,
         tb_str: str = "",
+        trace_context: Optional[Dict[str, str]] = None,    
     ) -> DLQEntry:
         """Push a failed payload onto the DLQ.
 
@@ -306,6 +378,12 @@ class RedisDLQ:
             Current attempt number (1-indexed).
         tb_str:
             Optional pre-formatted traceback string.
+        trace_context:
+            W3C trace headers to stamp on the entry. When omitted, the
+            currently active span's context is captured automatically
+            (Issue #760) — pass the original entry's ``trace_context``
+            explicitly when re-pushing during a replay so the link back to
+            the first failure isn't lost.
 
         Returns
         -------
@@ -324,6 +402,7 @@ class RedisDLQ:
             attempt=attempt,
             policy=self._policy,
             tb_str=tb_str,
+            trace_context=trace_context,
         )
         redis = await self._get_redis()
         # Append to the right; trim to max_size from the left
@@ -462,6 +541,7 @@ class RedisDLQ:
         processor: Callable[[bytes], Awaitable[None]],
         *,
         source: str = "ingestion-pipeline",
+        trace_context: Optional[Dict[str, str]] = None,
     ) -> bool:
         """Attempt to process *raw_payload* with exponential backoff retries.
 
@@ -478,6 +558,14 @@ class RedisDLQ:
             failure.
         source:
             Logical label for the ingestion subsystem (used in DLQ entries).
+        trace_context:
+            W3C trace headers (Issue #760) identifying the trace this
+            payload originally failed under. Pass the stored
+            ``DLQEntry.trace_context`` here when replaying an entry from the
+            admin endpoint so the retry span is linked back to the original
+            request/task instead of starting a disconnected trace. Leave
+            unset for a first-attempt call — the current active context is
+            used automatically.
 
         Returns
         -------
@@ -485,9 +573,15 @@ class RedisDLQ:
             ``True`` if processing eventually succeeded, ``False`` if all
             attempts were exhausted.
         """
+        parent_ctx = _extract_trace_context(trace_context)
         for attempt in range(1, self._policy.max_attempts + 1):
             try:
-                await processor(raw_payload)
+                async with _dlq_span(
+                    "dlq.process_payload",
+                    parent_ctx,
+                    {"dlq.source": source, "dlq.attempt": attempt, "dlq.max_attempts": self._policy.max_attempts},
+                ):
+                    await processor(raw_payload)
                 logger.info(
                     "[DLQ] Payload processed successfully on attempt %d/%d (source=%s)",
                     attempt,
@@ -503,6 +597,7 @@ class RedisDLQ:
                     source=source,
                     attempt=attempt,
                     tb_str=tb_str,
+                    trace_context=trace_context,
                 )
                 if entry.permanently_failed:
                     logger.error(
@@ -616,7 +711,7 @@ async def handle_dlq_replay(
                 "message": f"DLQ entry {entry_id} not found.",
             }
         success = await dlq.retry_with_backoff(
-            entry.raw_payload, processor, source=entry.source
+            entry.raw_payload, processor, source=entry.source, trace_context=entry.trace_context
         )
         results.append({"entry_id": entry_id, "success": success})
     else:
@@ -624,7 +719,7 @@ async def handle_dlq_replay(
         entries = await dlq.list_entries(include_permanently_failed=False)
         for entry in entries:
             success = await dlq.retry_with_backoff(
-                entry.raw_payload, processor, source=entry.source
+                entry.raw_payload, processor, source=entry.source, trace_context=entry.trace_context
             )
             results.append({"entry_id": entry.entry_id, "success": success})
 

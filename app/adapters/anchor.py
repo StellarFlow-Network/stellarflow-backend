@@ -33,10 +33,15 @@ def verify_hmac_signature(payload: bytes, signature: str, secret: bytes) -> bool
     """Verifies the HMAC-SHA256 signature of the webhook payload."""
     if not signature:
         return False
-        
+
+    normalized_signature = signature.strip()
+    if "=" in normalized_signature:
+        normalized_signature = normalized_signature.split("=", 1)[1]
+
     expected_hmac = hmac.new(secret, payload, hashlib.sha256).hexdigest()
-    # Use hmac.compare_digest to prevent timing attacks
-    return hmac.compare_digest(expected_hmac, signature)
+    # Use hmac.compare_digest to prevent timing attacks while accepting the
+    # common "sha256=<hex>" header form used by external partners.
+    return hmac.compare_digest(expected_hmac.lower(), normalized_signature.lower())
 
 
 SessionFactory = Callable[[], Any]
