@@ -52,6 +52,12 @@ try:
 except ImportError:
     _HAS_REVENUE_ROUTER = False
 
+try:
+    from app.routers.shielded import router as shielded_router
+    _HAS_SHIELDED_ROUTER = True
+except ImportError:
+    _HAS_SHIELDED_ROUTER = False
+
 log = structlog.get_logger(__name__)
 
 
@@ -219,7 +225,11 @@ async def health() -> JSONResponse:
         sentry_sdk.capture_exception(e)
         raise e
 
-app.include_router(revenue.router, prefix="/api/v1")
+if _HAS_REVENUE_ROUTER:
+    app.include_router(revenue_router.router, prefix="/api/v1")
+
+if _HAS_SHIELDED_ROUTER:
+    app.include_router(shielded_router, prefix="/api/v1")
 
 @app.get("/health")
 def health_check():

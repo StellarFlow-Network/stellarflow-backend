@@ -614,3 +614,111 @@ def webhook_dead_letter_task(message: dict[str, object], reason: str) -> None:
         message.get("event_id"),
         reason,
     )
+
+
+# ---------------------------------------------------------------------------
+# Issue #798: Shielded Private Transaction Note Indexer Task
+# ---------------------------------------------------------------------------
+
+async def _index_range(start_ledger: int, end_ledger: int) -> dict[str, int]:
+    """Index NoteDeposited and NullifierSpent ledger events for a ledger range."""
+    import json
+    import structlog
+    from app.db.session import async_session_factory
+    from app.models.events import LedgerEvent
+    from app.services.note_parser import NoteParser
+    from app.services.merkle_service import MerkleService
+    from app.models.shielded import ShieldedCommitment
+    from sqlalchemy import select
+
+    task_log = structlog.get_logger(__name__)
+    database_url = DatabaseTask._database_url
+    if not database_url:
+        raise RuntimeError("DATABASE_URL or DB_URL must be configured")
+
+    pool = await asyncpg.create_pool(database_url)
+    try:
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT event_hash, ledger_sequence, tx_hash, event_type, payload, created_at
+                FROM ledger_events
+                WHERE ledger_sequence BETWEEN $1 AND $2
+                  AND event_type IN ('note_deposited', 'nullifier_spent')
+                ORDER BY ledger_sequence ASC, (payload->>'index')::int ASC NULLS FIRST
+                """,
+                start_ledger,
+                end_ledger,
+            )
+
+        events: list[LedgerEvent] = []
+        for r in rows:
+            raw_payload = r["payload"]
+            payload_dict = (
+                json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+            )
+            events.append(
+                LedgerEvent(
+                    event_hash=r["event_hash"],
+                    ledger_sequence=r["ledger_sequence"],
+                    tx_hash=r["tx_hash"],
+                    event_type=r["event_type"],
+                    payload=payload_dict,
+                    created_at=r["created_at"],
+                )
+            )
+
+        async with async_session_factory() as session:
+            note_parser = NoteParser()
+            merkle_service = MerkleService()
+
+            commitments_indexed, nullifiers_indexed = await note_parser.parse_batch(session, events)
+
+            if commitments_indexed > 0:
+                # Fetch new commitments added to pass to merkle service
+                new_comm_stmt = (
+                    select(ShieldedCommitment)
+                    .where(ShieldedCommitment.ledger_sequence.between(start_ledger, end_ledger))
+                    .order_by(ShieldedCommitment.leaf_index.asc())
+                )
+                new_comm_res = await session.execute(new_comm_stmt)
+                new_commitments = list(new_comm_res.scalars().all())
+                await merkle_service.update_root(session, new_commitments, ledger_sequence=end_ledger)
+
+            await session.commit()
+
+        task_log.info(
+            "index_shielded_notes_range.completed",
+            start_ledger=start_ledger,
+            end_ledger=end_ledger,
+            commitments_indexed=commitments_indexed,
+            nullifiers_indexed=nullifiers_indexed,
+        )
+
+        return {
+            "start_ledger": start_ledger,
+            "end_ledger": end_ledger,
+            "commitments_indexed": commitments_indexed,
+            "nullifiers_indexed": nullifiers_indexed,
+        }
+    finally:
+        await pool.close()
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.index_shielded_notes_range",
+    autoretry_for=(OSError, asyncpg.PostgresError),
+    retry_backoff=True,
+    retry_backoff_max=160,
+    max_retries=3,
+)
+def index_shielded_notes_range(
+    self: DatabaseTask,
+    start_ledger: int,
+    end_ledger: int,
+) -> dict[str, int]:
+    """Celery task to index shielded notes in a given ledger range."""
+    return asyncio.run(_index_range(start_ledger, end_ledger))
+

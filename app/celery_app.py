@@ -25,6 +25,7 @@ celery_app.conf.update(
     task_queues=(
         Queue("webhook.retry", Exchange("webhook"), routing_key="webhook.retry", durable=True),
         Queue("webhook.dead", Exchange("webhook"), routing_key="webhook.dead", durable=True),
+        Queue("index-shielded-notes", Exchange("shielded"), routing_key="shielded.index", durable=True),
     ),
     task_routes={
         "app.tasks.deliver_webhook_task": {
@@ -34,6 +35,10 @@ celery_app.conf.update(
         "app.tasks.webhook_dead_letter_task": {
             "queue": "webhook.dead",
             "routing_key": "webhook.dead",
+        },
+        "app.tasks.index_shielded_notes_range": {
+            "queue": "index-shielded-notes",
+            "routing_key": "shielded.index",
         },
     },
     beat_schedule={

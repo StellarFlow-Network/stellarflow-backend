@@ -659,4 +659,15 @@ __all__ = [
     "OhlcCandleItem",
     "OhlcResponse",
     "AggregatorStatusResponse",
+    # Shielded Note Indexer ORM models
+    "ShieldedCommitment",
+    "SpentNullifier",
+    "MerkleRoot",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Shielded Note Indexer ORM models
+# ---------------------------------------------------------------------------
+
+from app.models.shielded import MerkleRoot, ShieldedCommitment, SpentNullifier  # noqa: E402
