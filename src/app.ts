@@ -37,6 +37,7 @@ import analyticsRouter from "./routes/analytics";
 import gasProfileRouter from "./routes/gasProfile";
 import zkRouter from "./routes/zk";
 import governanceRouter from "./routes/governance";
+import governanceWebhooksRouter from "./routes/governanceWebhooks";
 import healthRouter from "./routes/health";
 import proofRouter from "./routes/proof";
 import ordersRouter from "./routes/orders";
@@ -119,6 +120,14 @@ app.use(
   adminMiddleware,
   adminRateLimitMiddleware,
   systemFailoverRouter,
+);
+
+// Issue #1082 – Governance Proposal Execution Status Webhook Broadcaster
+app.use(
+  "/api/v1/admin/governance/webhooks",
+  adminMiddleware,
+  adminRateLimitMiddleware,
+  governanceWebhooksRouter,
 );
 
 app.use("/api/v1/market-rates", marketRatesRouter);

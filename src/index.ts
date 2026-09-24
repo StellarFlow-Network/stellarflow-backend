@@ -39,6 +39,7 @@ import { priceAggregatorService } from "./services/priceAggregatorService";
 import { contractSanityCheckService } from "./services/contractSanityCheckService";
 import { getCircuitBreakerService } from "./services/circuitBreakerService";
 import { governanceTimelockService } from "./services/governanceTimelockService";
+import { governanceWebhookBroadcaster } from "./services/governanceWebhookBroadcaster";
 import { getRegionalHealthService } from "./services/regionalHealthService";
 import { storageRentBumpService } from "./services/storageRentBumpService";
 import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
@@ -335,6 +336,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     sorobanEventListener?.stop();
     multiSigSubmissionService.stop();
     governanceTimelockService.stop();
+    governanceWebhookBroadcaster.stop();
     liquidityRebalancingWorker?.stop();
     apyWorker.stop();
     storageMonitorService.stop(); // <--- ADDED
@@ -524,6 +526,18 @@ httpServer.listen(PORT, async () => {
   } catch (err) {
     console.warn(
       "Governance timelock service not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  try {
+    governanceWebhookBroadcaster.start().catch((err: Error) => {
+      console.error("Failed to start governance webhook broadcaster:", err);
+    });
+    console.log("Governance webhook broadcaster started");
+  } catch (err) {
+    console.warn(
+      "Governance webhook broadcaster not started:",
       err instanceof Error ? err.message : err,
     );
   }

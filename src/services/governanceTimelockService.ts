@@ -14,6 +14,7 @@ import prisma from "../lib/prisma";
 import stellarProvider from "../lib/stellarProvider";
 import { StellarService } from "./stellarService";
 import { notificationService } from "./notificationService";
+import { governanceWebhookBroadcaster } from "./governanceWebhookBroadcaster";
 import { logger } from "../utils/logger";
 import { xdr } from "@stellar/stellar-sdk";
 
@@ -152,6 +153,7 @@ export class GovernanceTimelockService {
   constructor(
     pollIntervalMs = Number(process.env.GOVERNANCE_POLL_INTERVAL_MS) || 15_000,
     stellarService = new StellarService(),
+    private readonly webhookBroadcaster = governanceWebhookBroadcaster,
   ) {
     this.pollIntervalMs = pollIntervalMs;
     this.stellarService = stellarService;
@@ -275,7 +277,10 @@ export class GovernanceTimelockService {
             txHash,
           );
         } else if (eventName === "TimelockActionExecuted") {
-          await this.handleTimelockActionExecuted(proposalId);
+          await this.handleTimelockActionExecuted(
+            proposalId,
+            event.contractId ?? contractId,
+          );
         }
 
         if (ledgerSeq > this.lastIndexedLedger) {
@@ -336,21 +341,38 @@ export class GovernanceTimelockService {
   /** Mark a GovernanceProposal as Executed when its TimelockActionExecuted event arrives. */
   private async handleTimelockActionExecuted(
     proposalId: string,
+    contractId?: string,
   ): Promise<void> {
+    const executedAt = new Date();
+
     await prisma.governanceProposal
       .update({
         where: { proposalId },
         data: {
           status: "Executed",
-          executedAt: new Date(),
-          updatedAt: new Date(),
+          executedAt,
+          updatedAt: executedAt,
         },
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         // Proposal row might not exist if we missed the ProposalQueued event —
         // log and continue rather than crashing.
         logger.warn(
           `[GovernanceTimelockService] Could not mark ${proposalId} Executed (row may not exist):`,
+          err,
+        );
+      });
+
+    void this.webhookBroadcaster
+      .broadcastProposalExecuted({
+        proposalId,
+        contractId: contractId ?? null,
+        status: "Executed",
+        executedAt,
+      })
+      .catch((err) => {
+        logger.warn(
+          `[GovernanceTimelockService] Webhook broadcast failed for ${proposalId}:`,
           err,
         );
       });
@@ -394,6 +416,21 @@ export class GovernanceTimelockService {
             "updatedAt"                = NOW()
           WHERE "id" = ${proposal.id}
         `;
+
+        void this.webhookBroadcaster
+          .broadcastProposalExpired({
+            proposalId: proposal.proposalId,
+            contractId: proposal.contractId,
+            status: "Queued",
+            expiresAt: proposal.expiresAt,
+            reason: "timelock_expired",
+          })
+          .catch((err) => {
+            logger.warn(
+              `[GovernanceTimelockService] Webhook broadcast failed for ${proposal.proposalId}:`,
+              err,
+            );
+          });
 
         logger.info(
           `[GovernanceTimelockService] Notified ready proposal: ${proposal.proposalId}`,
@@ -439,6 +476,22 @@ export class GovernanceTimelockService {
           SET "status" = 'Executed', "transactionHash" = ${transactionHash}, "executedAt" = NOW(), "updatedAt" = NOW()
           WHERE "id" = ${proposal.id} AND "status" = 'Queued'
         `;
+
+        void this.webhookBroadcaster
+          .broadcastProposalExecuted({
+            proposalId: proposal.proposalId,
+            contractId: proposal.contractId,
+            status: "Executed",
+            transactionHash,
+            expiresAt: proposal.expiresAt,
+            executedAt: new Date(),
+          })
+          .catch((err) => {
+            logger.warn(
+              `[GovernanceTimelockService] Webhook broadcast failed for ${proposal.proposalId}:`,
+              err,
+            );
+          });
       } catch (err) {
         logger.error(
           `[GovernanceTimelockService] Failed to execute proposal ${proposal.proposalId}:`,
