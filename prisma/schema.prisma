@@ -635,6 +635,7 @@ model PaymentRoute {
 model FxQuote {
   id              String   @id @default(uuid())
   paymentRouteId  String
+  userAddress     String?  @db.VarChar(128)
   senderCurrency  String
   receiverCurrency String
   inputAmount     Decimal  @db.Decimal(30, 12)
@@ -656,6 +657,7 @@ model FxQuote {
 
   @@index([paymentRouteId, status])
   @@index([status, expiresAt])
+  @@index([userAddress, status, executedAt])
 }
 
 model VaultApyMetric {

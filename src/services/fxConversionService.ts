@@ -112,7 +112,7 @@ export class FxConversionService {
   async requestQuote(
     routeId: string,
     inputAmount: number,
-    options?: { quoteTtlMs?: number },
+    options?: { quoteTtlMs?: number; userAddress?: string },
   ): Promise<FxQuoteResult> {
     try {
       if (inputAmount <= 0) {
@@ -245,6 +245,9 @@ export class FxConversionService {
       const quote = await prisma.fxQuote.create({
         data: {
           paymentRouteId: routeId,
+          ...(options?.userAddress
+            ? { userAddress: options.userAddress }
+            : {}),
           senderCurrency: route.senderCurrency,
           receiverCurrency: route.receiverCurrency,
           inputAmount,

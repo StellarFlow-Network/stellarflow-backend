@@ -5,6 +5,7 @@ import marketRatesRouter from "./routes/marketRates";
 import historyRouter from "./routes/history";
 import priceUpdatesRouter from "./routes/priceUpdates";
 import statsRouter from "./routes/stats";
+import bridgeRouter from "./routes/bridge";
 import vaultRoutes from "./routes/vaults";
 import app from "./app";
 import prisma from "./lib/prisma";
@@ -36,10 +37,12 @@ import { getRegionalHealthService } from "./services/regionalHealthService";
 import { storageRentBumpService } from "./services/storageRentBumpService";
 import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
 import { redisOperationsWorker } from "./services/redisOperationsWorker";
+import { initializeBridgeServices, stopBridgeServices } from "./services/bridgeIntegration";
 import { VolatilityService } from "./services/volatility.service";
 import { ArbitrageScanner } from "./services/arbitrageScanner";
 import { storageMonitorService } from "./services/storageMonitorService";
 import { complianceScreeningWorker } from "./services/complianceScreeningWorker";
+import { startDekRotationJob } from "./jobs/dekRotationJob";
 // Load environment variables
 dotenv.config();
 // Normalize safe startup environment strings before runtime storage.
@@ -92,6 +95,7 @@ app.use("/api/market-rates", marketRatesRouter);
 app.use("/api/history", historyRouter);
 app.use("/api/price-updates", priceUpdatesRouter);
 app.use("/api/stats", statsRouter);
+app.use("/api/v1/bridge", bridgeRouter);
 app.use("/api/v1/vaults", vaultRoutes);
 // Health check endpoint
 /**
@@ -208,6 +212,15 @@ app.get("/", (req, res) => {
                 priceChange: "/api/v1/intelligence/price-change/:currency",
                 staleCurrencies: "/api/v1/intelligence/stale",
             },
+            bridge: {
+                chains: "/api/v1/bridge/chains",
+                validators: "/api/v1/bridge/validators",
+                events: "/api/v1/bridge/events",
+                operations: "/api/v1/bridge/operations",
+                queueStats: "/api/v1/bridge/queue/stats",
+                retry: "POST /api/v1/bridge/queue/retry",
+                simulate: "POST /api/v1/bridge/simulate",
+            },
         },
     });
 });
@@ -292,6 +305,7 @@ const shutdown = async (signal) => {
         ArbitrageScanner.stop();
         stopConfigWatcher();
         stopEnvFileWatcher?.();
+        await stopBridgeServices();
         await closeHttpServer();
         console.log("HTTP server closed.");
         await prisma.$disconnect();
@@ -406,6 +420,13 @@ httpServer.listen(PORT, async () => {
             console.warn("Multi-sig submission service not started:", err instanceof Error ? err.message : err);
         }
     }
+    // Start cross-chain bridge services if enabled
+    try {
+        await initializeBridgeServices();
+    }
+    catch (err) {
+        console.warn("Cross-chain bridge services not started:", err instanceof Error ? err.message : err);
+    }
     try {
         governanceTimelockService.start().catch((err) => {
             console.error("Failed to start governance timelock service:", err);
@@ -475,6 +496,15 @@ httpServer.listen(PORT, async () => {
     }
     catch (err) {
         console.warn("Storage rent bump service not started:", err instanceof Error ? err.message : err);
+    }
+    // Start DEK (Data Encryption Key) rotation job for relayer private keys
+    // Rotates encryption keys every 90 days for enhanced security
+    try {
+        startDekRotationJob(); // Runs daily at 2:00 AM UTC
+        console.log(`🔐 DEK rotation job scheduled (daily at 2:00 AM UTC)`);
+    }
+    catch (err) {
+        console.error("Failed to start DEK rotation job:", err);
     }
     // Start Volatility Service
     try {

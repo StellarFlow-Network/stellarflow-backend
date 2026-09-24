@@ -207,7 +207,7 @@ router.patch("/routes/:id/status", async (req, res) => {
 // Request an FX quote for a specific route
 router.post("/quotes", async (req, res) => {
   try {
-    const { routeId, inputAmount, quoteTtlMs } = req.body ?? {};
+    const { routeId, inputAmount, quoteTtlMs, userAddress } = req.body ?? {};
 
     if (!routeId || inputAmount === undefined) {
       sendApiError(
@@ -222,7 +222,14 @@ router.post("/quotes", async (req, res) => {
     const result = await fxConversionService.requestQuote(
       routeId,
       Number(inputAmount),
-      quoteTtlMs !== undefined ? { quoteTtlMs: Number(quoteTtlMs) } : undefined,
+      {
+        ...(quoteTtlMs !== undefined
+          ? { quoteTtlMs: Number(quoteTtlMs) }
+          : {}),
+        ...(typeof userAddress === "string" && userAddress.trim().length > 0
+          ? { userAddress: userAddress.trim() }
+          : {}),
+      },
     );
 
     if (result.success) {

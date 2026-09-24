@@ -50,6 +50,7 @@ import { ArbitrageScanner } from "./services/arbitrageScanner";
 import { storageMonitorService } from "./services/storageMonitorService";
 import { complianceScreeningWorker } from "./services/complianceScreeningWorker";
 import { startDekRotationJob } from "./jobs/dekRotationJob";
+import { ledgerEventStreamWorker } from "./services/ledgerEventStreamWorker";
 
 // Load environment variables
 dotenv.config();
@@ -270,6 +271,7 @@ systemHealthWatchdog.registerWorker({
   heartbeatTimeoutMs: redisOperationsWorker.getHeartbeatTimeoutMs(),
   restart: () => {
     redisOperationsWorker.stop();
+    await ledgerEventStreamWorker.stop();
     redisOperationsWorker.start();
   },
 });
@@ -402,6 +404,11 @@ httpServer.listen(PORT, async () => {
 
   redisOperationsWorker.start();
   console.log(`🧹 Redis operations worker started`);
+
+  void ledgerEventStreamWorker.start().catch((err) => {
+    console.error("Failed to start ledger event stream worker:", err);
+  });
+  console.log(`📡 Ledger event stream worker started`);
 
   complianceScreeningWorker.start();
   console.log(`🛡️ Compliance screening worker started`);
