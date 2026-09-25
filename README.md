@@ -355,3 +355,23 @@ This is an integration scaffold, not a verified patch against the complete repos
 - `tests/services/test_nullifier_lock.py` — lock ownership and timeout tests.
 - `tests/services/test_nullifier_tree_writer.py` — atomicity/concurrency test plan.
 - `docs/nullifier-tree-concurrency.md` — integration and operational guidance.
+
+
+# Issue #1069 — Governance Proposal Sentiment Analysis
+
+This scaffold introduces a proposal-comment sentiment pipeline with:
+- three-class output: POSITIVE, NEUTRAL, NEGATIVE
+- per-comment scores and model metadata
+- proposal-level aggregation
+- time-bucketed sentiment trends
+- API integration guidance for governance overview pages
+
+## Important
+
+This is an integration scaffold, not a verified production patch. The repository's
+actual governance models, comment source, voting schema, API router, and frontend
+contract must be connected before merge.
+
+Do not describe comment sentiment as the sentiment of all voters. Keep text sentiment
+and voting participation/results as separate signals unless a documented product
+formula is approved.
