@@ -5,6 +5,7 @@ import { BackpressureManager, PacketPriority } from "../queue/backpressure";
 import { verifyBridgeEventSignatures } from "./bridgeSignatureVerification";
 import { stageSorobanMintTransaction } from "./bridgeMintingService";
 import { enqueueBridgeOperation } from "./bridgeQueueService";
+import { treasuryBurnTracker } from "./treasuryBurnTracker";
 
 export interface BridgeEventData {
   chainId: number;
@@ -37,7 +38,7 @@ export class BridgeEventListener {
   private isRunning: boolean = false;
   private pollIntervalMs: number;
   private providers: Map<string, ethers.JsonRpcProvider> = new Map();
-  private pollTimers: Map<string, NodeJS.Timeout> = new Map();
+  private pollTimers: Map<string, ReturnType<typeof setInterval>> = new Map();
   private lastProcessedBlocks: Map<string, number> = new Map();
 
   constructor(pollIntervalMs: number = 15000) {
@@ -109,7 +110,7 @@ export class BridgeEventListener {
     );
   }
 
-  private startChainPolling(chain: ChainConfig & { bridgeValidators: any[] }): void {
+  private startChainPolling(chain: ChainConfig & { id: number; bridgeValidators: any[] }): void {
     const timer = setInterval(() => {
       this.pollChainEvents(chain).catch((err) => {
         logger.error(`[BridgeEventListener] Poll error for ${chain.chainName}:`, {
@@ -121,7 +122,7 @@ export class BridgeEventListener {
     this.pollTimers.set(chain.chainId, timer);
   }
 
-  private async pollChainEvents(chain: ChainConfig & { bridgeValidators: any[] }): Promise<void> {
+  private async pollChainEvents(chain: ChainConfig & { id: number; bridgeValidators: any[] }): Promise<void> {
     try {
       const provider = this.providers.get(chain.chainId);
       if (!provider) {
@@ -146,19 +147,8 @@ export class BridgeEventListener {
       );
 
       // Get logs for the bridge contract
-      const contract = new ethers.Contract(
-        chain.bridgeContract!,
-        [
-          "event TokensLocked(address indexed from, address indexed to, uint256 amount, uint256 destinationChainId, bytes32 nonce)",
-          "event TokensReleased(address indexed to, uint256 amount, uint256 sourceChainId, bytes32 nonce)",
-          "event TokensBurned(address indexed from, uint256 amount, uint256 destinationChainId, bytes32 nonce)",
-        ],
-        provider,
-      );
-
-      const filter = contract.filters;
       const logs = await provider.getLogs({
-        address: chain.bridgeContract,
+        address: chain.bridgeContract!,
         fromBlock,
         toBlock,
       });
@@ -183,7 +173,7 @@ export class BridgeEventListener {
             }
           }
         } catch (error) {
-          logger.error(`[BridgeEventListener] Failed to parse log ${log.logIndex}:`, error);
+          logger.error(`[BridgeEventListener] Failed to parse log ${log.index}:`, error);
         }
       }
     } catch (error) {
@@ -191,7 +181,7 @@ export class BridgeEventListener {
     }
   }
 
-  private async parseLog(log: any, chain: ChainConfig): Promise<BridgeEventData | null> {
+  private async parseLog(log: any, chain: ChainConfig & { id: number }): Promise<BridgeEventData | null> {
     try {
       const block = await this.providers.get(chain.chainId)?.getBlock(log.blockNumber);
       if (!block) return null;
@@ -209,19 +199,19 @@ export class BridgeEventListener {
       if (eventSignature === TOKENS_LOCKED) {
         eventType = "TOKEN_LOCK";
         decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-          ["address", "address", "uint256", "uint256", "bytes32"],
+          ["uint256", "uint256", "bytes32"],
           log.data,
         );
       } else if (eventSignature === TOKENS_RELEASED) {
         eventType = "TOKEN_RELEASE";
         decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-          ["address", "uint256", "uint256", "bytes32"],
+          ["uint256", "uint256", "bytes32"],
           log.data,
         );
       } else if (eventSignature === TOKENS_BURNED) {
         eventType = "TOKEN_BURN";
         decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-          ["address", "uint256", "uint256", "bytes32"],
+          ["uint256", "uint256", "bytes32"],
           log.data,
         );
       } else {
@@ -234,12 +224,12 @@ export class BridgeEventListener {
         eventType,
         transactionHash: log.transactionHash,
         blockNumber: log.blockNumber,
-        logIndex: log.logIndex,
-        tokenAmount: decoded[2] || decoded[1], // Amount is at different indices for different events
-        fromAddress: decoded[0] || log.topics[1],
-        toAddress: decoded[1] || log.topics[2],
-        destinationChainId: decoded[3]?.toString(),
-        destinationAddress: decoded[1] || log.topics[2],
+        logIndex: log.index,
+        tokenAmount: decoded[0],
+        fromAddress: eventType === "TOKEN_RELEASE" ? (log.topics[1] ?? "") : (log.topics[1] ?? ""),
+        toAddress: eventType === "TOKEN_LOCK" ? (log.topics[2] ?? "") : (log.topics[1] ?? ""),
+        destinationChainId: decoded[1]?.toString(),
+        destinationAddress: eventType === "TOKEN_LOCK" ? (log.topics[2] ?? "") : (log.topics[1] ?? ""),
         eventTimestamp: new Date(block.timestamp * 1000),
       };
     } catch (error) {
@@ -278,6 +268,20 @@ export class BridgeEventListener {
           logger.info(
             `[BridgeEventListener] Recorded bridge event ${bridgeEvent.id} (${eventData.eventType})`,
           );
+
+          if (eventData.eventType === "TOKEN_BURN") {
+            await treasuryBurnTracker.recordBurn({
+              chainId: eventData.chainId,
+              transactionHash: eventData.transactionHash,
+              ...(eventData.logIndex !== undefined && { logIndex: eventData.logIndex }),
+              ...(eventData.tokenAddress !== undefined && { tokenAddress: eventData.tokenAddress }),
+              amount: eventData.tokenAmount.toString(),
+              ...(eventData.destinationChainId !== undefined && {
+                destinationChainId: eventData.destinationChainId,
+              }),
+              eventTimestamp: eventData.eventTimestamp,
+            });
+          }
 
           // Verify validator signatures
           const isVerified = await verifyBridgeEventSignatures(bridgeEvent.id);

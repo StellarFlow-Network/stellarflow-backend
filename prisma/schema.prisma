@@ -363,8 +363,50 @@ model Relayer {
   permissionChanges PermissionChange[]
   sessions          UserSession[]
   registry          RelayerRegistry?
+  watchlist         WatchlistItem[]
+  notificationPreference UserNotificationPreference?
+  pushSubscriptions PushSubscription[]
   
   @@index([dekRotationScheduledAt])
+}
+
+model WatchlistItem {
+  id             String   @id @default(uuid())
+  userId         Int
+  user            Relayer  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token          String
+  targetPrice    Decimal  @db.Decimal(38, 18)
+  direction      String   @default("ABOVE")
+  isActive       Boolean  @default(true)
+  lastTriggeredAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, token])
+  @@index([userId, isActive])
+}
+
+model UserNotificationPreference {
+  id        String   @id @default(uuid())
+  userId    Int      @unique
+  user      Relayer  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailEnabled Boolean @default(true)
+  pushEnabled  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    Int
+  user      Relayer  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model RelayerRegistry {
@@ -838,6 +880,64 @@ model BridgeOperation {
   @@index([bridgeEventId])
   @@index([stagedTxHash])
   @@index([stellarTxHash])
+}
+
+model TreasuryBurnEvent {
+  id              String   @id @default(uuid())
+  chainId         Int?
+  transactionHash String
+  logIndex        Int
+  tokenAddress    String?
+  amount          Decimal  @db.Decimal(38, 18)
+  destinationChainId String?
+  eventTimestamp  DateTime
+  createdAt       DateTime @default(now())
+
+  @@unique([transactionHash, logIndex])
+  @@index([eventTimestamp])
+}
+
+model TreasuryRevenueAllocation {
+  id                String   @id @default(uuid())
+  periodStart       DateTime
+  periodEnd         DateTime
+  totalRevenue      Decimal  @db.Decimal(38, 18)
+  burnAllocation    Decimal  @db.Decimal(38, 18)
+  treasuryAllocation Decimal @db.Decimal(38, 18)
+  burnPercentage    Decimal  @db.Decimal(5, 2)
+  treasuryPercentage Decimal @db.Decimal(5, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([periodStart, periodEnd])
+  @@index([periodEnd])
+}
+
+model OraclePriceObservation {
+  id         String   @id @default(uuid())
+  poolId     String
+  ledger     Int
+  spotPrice  Decimal  @db.Decimal(38, 18)
+  twapPrice  Decimal  @db.Decimal(38, 18)
+  observedAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@unique([poolId, ledger])
+  @@index([poolId, observedAt])
+}
+
+model OracleManipulationIncident {
+  id               String   @id @default(uuid())
+  poolId           String
+  ledger           Int
+  spotPrice        Decimal  @db.Decimal(38, 18)
+  twapPrice        Decimal  @db.Decimal(38, 18)
+  deviationPercent Decimal  @db.Decimal(12, 6)
+  status           String   @default("PAUSED")
+  detectedAt       DateTime @default(now())
+
+  @@unique([poolId, ledger])
+  @@index([poolId, detectedAt])
 }
 generator client {
   provider = "prisma-client-js"
