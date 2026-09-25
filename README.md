@@ -375,3 +375,12 @@ contract must be connected before merge.
 Do not describe comment sentiment as the sentiment of all voters. Keep text sentiment
 and voting participation/results as separate signals unless a documented product
 formula is approved.
+
+# Issue #1053 — Vault Liquidation Heatmap Scaffold
+
+Includes a pure aggregation module, FastAPI endpoint seam, tests, and integration notes.
+
+The production implementation must connect the loader to the repository's active vault-position store and authoritative risk engine. The scaffold intentionally does not invent a protocol-specific liquidation formula.
+
+Run:
+`pytest tests/analytics/test_liquidation_heatmap.py -v`
