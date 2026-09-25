@@ -1,6 +1,7 @@
 import prisma from "../lib/prisma";
 import { logger } from "../utils/logger";
 import { submitStagedMintTransaction } from "./bridgeMintingService";
+import { BridgeRelayerHealthMonitor } from "./bridgeRelayerHealthMonitor";
 
 export interface BridgeOperationParams {
   bridgeEventId: number;
@@ -23,13 +24,21 @@ export interface QueueStats {
  */
 export class BridgeQueueService {
   private isProcessing: boolean = false;
-  private processingInterval: NodeJS.Timeout | null = null;
+  private processingInterval: ReturnType<typeof setInterval> | null = null;
   private pollIntervalMs: number = 5000; // 5 seconds
+  private readonly healthMonitor: BridgeRelayerHealthMonitor;
 
   constructor(pollIntervalMs?: number) {
     if (pollIntervalMs) {
       this.pollIntervalMs = pollIntervalMs;
     }
+    this.healthMonitor = new BridgeRelayerHealthMonitor({
+      getPendingCount: () => this.getPendingCount(),
+      restartWorker: async () => {
+        this.stop();
+        await this.start();
+      },
+    });
   }
 
   /**
@@ -103,6 +112,7 @@ export class BridgeQueueService {
    */
   private async processQueue(): Promise<void> {
     try {
+      await this.healthMonitor.check();
       // Get the next operation to process (priority-based)
       const operation = await prisma.bridgeOperation.findFirst({
         where: {
@@ -119,6 +129,7 @@ export class BridgeQueueService {
       });
 
       if (!operation) {
+        this.healthMonitor.recordWorkerSuccess();
         return; // No operations to process
       }
 
@@ -130,12 +141,14 @@ export class BridgeQueueService {
       const txHash = await submitStagedMintTransaction(operation.id);
 
       if (txHash) {
+        this.healthMonitor.recordWorkerSuccess();
         logger.info(`[BridgeQueue] Successfully processed operation ${operation.id}: ${txHash}`);
       } else {
         logger.error(`[BridgeQueue] Failed to process operation ${operation.id}`);
       }
     } catch (error) {
       logger.error("[BridgeQueue] Failed to process queue:", error);
+      await this.healthMonitor.recordWorkerFailure(error);
     }
   }
 
@@ -151,6 +164,12 @@ export class BridgeQueueService {
     ]);
 
     return { queued, processing, completed, failed };
+  }
+
+  async getPendingCount(): Promise<number> {
+    return prisma.bridgeOperation.count({
+      where: { queueStatus: { in: ["QUEUED", "PROCESSING"] } },
+    });
   }
 
   /**

@@ -47,6 +47,8 @@ import anchorsRouter from "./routes/anchors";
 import relayerKeysRouter from "./routes/relayerKeys";
 import { sendApiError } from "./lib/apiError.js";
 import metricsRouter from "./routes/metrics";
+import watchlistRouter from "./routes/watchlist";
+import treasuryRouter from "./routes/treasury";
 
 dotenv.config();
 
@@ -142,6 +144,8 @@ app.use("/api/v1/zk", zkRouter);
 app.use("/api/v1/governance", governanceRouter);
 app.use("/api/v1/proof", proofRouter);
 app.use("/api/v1/orders", ordersRouter);
+app.use("/api/v1/users/watchlist", watchlistRouter);
+app.use("/api/v1/treasury", treasuryRouter);
 
 // Issue #815 – Remittance transaction history endpoint
 app.use("/api/v1/remittance", remittanceRouter);
