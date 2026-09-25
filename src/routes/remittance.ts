@@ -321,4 +321,105 @@ router.get("/history", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// GET /savings-comparison
+// ---------------------------------------------------------------------------
+
+/**
+ * @swagger
+ * /api/v1/remittance/savings-comparison:
+ *   get:
+ *     tags:
+ *       - Remittance
+ *     summary: Compare remittance fees with traditional providers
+ *     description: >
+ *       Provides a transparent fee breakdown comparing StellarFlow against major
+ *       remittance channels (e.g. Western Union, Wise) and calculates cost savings percentage.
+ *     parameters:
+ *       - in: query
+ *         name: sourceCurrency
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: USD
+ *         description: Source currency code
+ *       - in: query
+ *         name: targetCurrency
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: NGN
+ *         description: Target currency code
+ *       - in: query
+ *         name: amount
+ *         required: true
+ *         schema:
+ *           type: number
+ *           example: 1000
+ *         description: Transfer amount
+ *     responses:
+ *       '200':
+ *         description: Successful comparison
+ *       '400':
+ *         description: Invalid query parameters
+ *       '500':
+ *         description: Internal server error
+ */
+router.get(
+  "/savings-comparison",
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const sourceCurrency = req.query.sourceCurrency as string;
+      const targetCurrency = req.query.targetCurrency as string;
+      const amount = Number(req.query.amount);
+
+      if (!sourceCurrency || typeof sourceCurrency !== "string") {
+        sendApiError(res, 400, "BAD_REQUEST", "sourceCurrency is required");
+        return;
+      }
+      if (!targetCurrency || typeof targetCurrency !== "string") {
+        sendApiError(res, 400, "BAD_REQUEST", "targetCurrency is required");
+        return;
+      }
+      if (!Number.isFinite(amount) || amount <= 0) {
+        sendApiError(
+          res,
+          400,
+          "BAD_REQUEST",
+          "amount must be a valid positive number"
+        );
+        return;
+      }
+
+      const result = await remittanceService.getSavingsComparison({
+        sourceCurrency,
+        targetCurrency,
+        amount,
+      });
+
+      if (!result.success) {
+        sendApiError(
+          res,
+          500,
+          "INTERNAL_SERVER_ERROR",
+          result.error || "Failed comparison"
+        );
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: result.data,
+      });
+    } catch (error) {
+      sendApiError(
+        res,
+        500,
+        "INTERNAL_SERVER_ERROR",
+        error instanceof Error ? error.message : "Failed to compare savings"
+      );
+    }
+  }
+);
+
 export default router;
