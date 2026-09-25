@@ -1,6 +1,7 @@
 import { Server } from "socket.io";
 import { randomUUID } from "crypto";
 import { encode } from "@msgpack/msgpack";
+import { getApiContentSecurityPolicy } from "../middleware/securityHeadersMiddleware";
 const sessions = new Map();
 const HEARTBEAT_INTERVAL = 30000;
 const HEARTBEAT_TIMEOUT = 10000;
@@ -37,6 +38,11 @@ export function initSocket(server) {
         // Disable built-in heartbeat to use our custom one as requested
         pingInterval: HEARTBEAT_INTERVAL,
         pingTimeout: HEARTBEAT_TIMEOUT,
+    });
+    io.engine.on("initial_headers", (headers) => {
+        headers["content-security-policy"] = getApiContentSecurityPolicy();
+        headers["x-frame-options"] = "DENY";
+        headers["x-content-type-options"] = "nosniff";
     });
     io.on("connection", (socket) => {
         console.log(`🔌 Client connected: ${socket.id}`);
