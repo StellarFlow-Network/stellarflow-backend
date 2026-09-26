@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma";
+import { governanceWebhookBroadcaster } from "./governanceWebhookBroadcaster";
 
 export interface TimelockEntry {
   id: number;
@@ -138,7 +139,22 @@ export class TimelockService {
                 "status", "expiresAt", "transactionHash", "executedAt",
                 "cancelledAt", "createdAt", "updatedAt"
     `;
-    return rows[0] ?? null;
+
+    const cancelled = rows[0] ?? null;
+    if (cancelled) {
+      void governanceWebhookBroadcaster
+        .broadcastProposalCancelled({
+          proposalId: cancelled.proposalId,
+          contractId: cancelled.contractId,
+          status: "Cancelled",
+          actionType: cancelled.actionType,
+          expiresAt: cancelled.expiresAt,
+          cancelledAt: cancelled.cancelledAt,
+        })
+        .catch(() => undefined);
+    }
+
+    return cancelled;
   }
 }
 
