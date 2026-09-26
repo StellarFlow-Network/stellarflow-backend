@@ -332,3 +332,55 @@ See [ROADMAP.md](./ROADMAP.md) for the full product roadmap and milestone struct
 - **v1.0** — Mainnet Launch (Q4 2026)
 
 All open issues are triaged and assigned to a milestone. Contributors can see what is planned, in progress, or blocked.
+
+# Issue #1076 — Nullifier Tree Concurrent Access Lock Guard
+
+This scaffold proposes a Redis-backed distributed lock around spent-nullifier/Merkle-tree writes.
+
+## Important
+
+This is an integration scaffold, not a verified patch against the complete repository. Before merging:
+
+1. Connect the guard to the actual nullifier ingestion/write path.
+2. Reuse the repository's existing async Redis and Celery configuration.
+3. Confirm the database transaction boundary and SQLAlchemy session lifecycle.
+4. Run concurrency tests against PostgreSQL and Redis.
+5. Confirm retry routing and dead-letter behavior.
+
+## Proposed files
+
+- `app/services/nullifier_lock.py` — ownership-safe Redis lock guard.
+- `app/services/nullifier_tree_writer.py` — transaction boundary and lock-protected write orchestration.
+- `app/tasks/nullifier_tree_retry.py` — Celery retry task for lock contention.
+- `tests/services/test_nullifier_lock.py` — lock ownership and timeout tests.
+- `tests/services/test_nullifier_tree_writer.py` — atomicity/concurrency test plan.
+- `docs/nullifier-tree-concurrency.md` — integration and operational guidance.
+
+
+# Issue #1069 — Governance Proposal Sentiment Analysis
+
+This scaffold introduces a proposal-comment sentiment pipeline with:
+- three-class output: POSITIVE, NEUTRAL, NEGATIVE
+- per-comment scores and model metadata
+- proposal-level aggregation
+- time-bucketed sentiment trends
+- API integration guidance for governance overview pages
+
+## Important
+
+This is an integration scaffold, not a verified production patch. The repository's
+actual governance models, comment source, voting schema, API router, and frontend
+contract must be connected before merge.
+
+Do not describe comment sentiment as the sentiment of all voters. Keep text sentiment
+and voting participation/results as separate signals unless a documented product
+formula is approved.
+
+# Issue #1053 — Vault Liquidation Heatmap Scaffold
+
+Includes a pure aggregation module, FastAPI endpoint seam, tests, and integration notes.
+
+The production implementation must connect the loader to the repository's active vault-position store and authoritative risk engine. The scaffold intentionally does not invent a protocol-specific liquidation formula.
+
+Run:
+`pytest tests/analytics/test_liquidation_heatmap.py -v`

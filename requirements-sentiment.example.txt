@@ -1,0 +1,3 @@
+# Optional NLP dependencies; validate versions against the service runtime.
+transformers>=4.40
+torch>=2.0
