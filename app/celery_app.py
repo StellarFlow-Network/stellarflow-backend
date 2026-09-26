@@ -76,5 +76,13 @@ celery_app.conf.update(
             "schedule": crontab(minute="*/5"),
             "kwargs": {"granularity": "HOURLY"},
         },
+        "stake-treasury-idle-balances": {
+            "task": "app.tasks.stake_treasury_idle_balances",
+            "schedule": crontab(minute="0", hour="*/6"),
+        },
+        "generate-treasury-yield-report": {
+            "task": "app.tasks.generate_treasury_yield_report",
+            "schedule": crontab(minute="0", hour="0", day_of_month="1"),
+        },
     },
 )
