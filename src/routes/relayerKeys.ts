@@ -10,14 +10,17 @@ import {
   triggerDekRotation,
   getRelayerPublicKey,
 } from '../controllers/relayerKeyController';
+import { requireKeyManagement } from '../middleware/roleMatrixMiddleware';
 
 const router = Router();
 
 /**
  * Relayer Key Management Routes (Admin Only)
- * 
- * All routes require admin authentication (to be added by auth middleware)
+ *
+ * Issue #1063 – every key management operation is restricted to ADMIN
+ * authenticated sessions and each permission evaluation is audited.
  */
+router.use(requireKeyManagement);
 
 // List all relayer keys
 router.get('/relayers/keys', listAllRelayerKeys);
