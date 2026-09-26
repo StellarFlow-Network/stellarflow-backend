@@ -28,6 +28,10 @@ import {
   transitionDisputeStatus,
   triggerManualRefund,
 } from "../controllers/disputeController";
+import {
+  enforceRoleMatrix,
+  requireAdmin,
+} from "../middleware/roleMatrixMiddleware";
 
 const rateLimitUpdateSchema = Joi.object({
   windowMs: Joi.number().integer().min(1000).max(86400000).optional(),
@@ -36,6 +40,15 @@ const rateLimitUpdateSchema = Joi.object({
 });
 
 const router = Router();
+
+/**
+ * Issue #1063 – RBAC Engine.
+ *
+ * Every administrative endpoint requires an authenticated session with a role
+ * that satisfies the role matrix. Read-only endpoints are available to
+ * OPERATOR/AUDITOR/ADMIN, while mutating endpoints are restricted to ADMIN.
+ */
+router.use(enforceRoleMatrix("read:config"));
 
 /**
  * @swagger
@@ -166,7 +179,7 @@ router.get("/reports/summary", async (req, res) => {
  *       '500':
  *         description: Unexpected error during reload
  */
-router.post("/reload-secret", async (req, res) => {
+router.post("/reload-secret", requireAdmin, async (req, res) => {
   try {
     if (req.body && req.body.secretKey !== undefined) {
       // Caller supplied a key — use it directly
@@ -361,7 +374,7 @@ router.put("/rate-limit", async (req, res) => {
  *       '200':
  *         description: Whitelist refreshed
  */
-router.post("/rate-limit/whitelist/refresh", async (_req, res) => {
+router.post("/rate-limit/whitelist/refresh", requireAdmin, async (_req, res) => {
   try {
     await refreshWhitelistCache();
     return res.json({
@@ -481,7 +494,7 @@ router.get("/dlq/stats", getDLQStats);
  *       '500':
  *         description: Internal server error
  */
-router.post("/dlq/replay", replayDLQEntry);
+router.post("/dlq/replay", requireAdmin, replayDLQEntry);
 
 /**
  * @swagger
@@ -506,7 +519,7 @@ router.post("/dlq/replay", replayDLQEntry);
  *       '500':
  *         description: Internal server error
  */
-router.post("/dlq/replay/all", replayAllDLQEntries);
+router.post("/dlq/replay/all", requireAdmin, replayAllDLQEntries);
 
 // ---------------------------------------------------------------------------
 // KMS Key Rotation Status Endpoint (Issue #718)
@@ -649,7 +662,7 @@ router.get("/remittance/disputes/:id", getDisputeById);
  *       '500':
  *         description: Internal server error
  */
-router.post("/remittance/disputes/:id/status", transitionDisputeStatus);
+router.post("/remittance/disputes/:id/status", requireAdmin, transitionDisputeStatus);
 
 /**
  * @swagger
@@ -696,6 +709,6 @@ router.post("/remittance/disputes/:id/status", transitionDisputeStatus);
  *       '500':
  *         description: Internal server error
  */
-router.post("/remittance/disputes/:id/refund", triggerManualRefund);
+router.post("/remittance/disputes/:id/refund", requireAdmin, triggerManualRefund);
 
 export default router;
