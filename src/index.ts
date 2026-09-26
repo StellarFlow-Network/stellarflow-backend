@@ -21,6 +21,7 @@ import {
   GasBalanceMonitorService,
   getGasBalanceMonitorService,
 } from "./services/gasBalanceMonitorService";
+import { getRelayerGasReserveAllocator } from "./services/relayerGasReserveAllocator";
 import { sanitizeEnvironmentVariables } from "./config/environment";
 import { validateEnv } from "./utils/envValidator";
 import { refreshAllowedOrigins } from "./middleware/corsMiddleware";
@@ -291,6 +292,8 @@ if (liquidityRebalancingWorker) {
 // FIX 1: Typed as nullable — constructor is not called at module level,
 // so a missing secret env var won't crash the process before the server starts.
 let gasBalanceMonitorService: GasBalanceMonitorService | null = null;
+// Issue #1058: relayer gas reserve allocator (opt-in via RELAYER_GAS_RESERVE_ENABLED).
+let relayerGasReserveAllocator: { stop(): void } | null = null;
 const circuitBreakerService = getCircuitBreakerService();
 
 let isShuttingDown = false;
@@ -343,6 +346,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     systemHealthWatchdog.stop();
     // FIX 2: Optional chaining — safe to call even if service never started
     gasBalanceMonitorService?.stop();
+    relayerGasReserveAllocator?.stop();
     circuitBreakerService.stop();
     hourlyAverageService.stop();
     priceAggregatorService.stop();
@@ -581,6 +585,21 @@ httpServer.listen(PORT, async () => {
       "Gas balance monitor service not started:",
       err instanceof Error ? err.message : err,
     );
+  }
+
+  // Relayer Gas Reserve Allocator (Issue #1058): holds back 20% of relayer gas
+  // wallets for emergency operations and monitors each pool's balance
+  // independently. Opt-in via RELAYER_GAS_RESERVE_ENABLED=true.
+  if (process.env.RELAYER_GAS_RESERVE_ENABLED === "true") {
+    getRelayerGasReserveAllocator()
+      .then(async (allocator) => {
+        relayerGasReserveAllocator = allocator;
+        await allocator.start();
+        console.log(`🛡️ Relayer gas reserve allocator started`);
+      })
+      .catch((err: Error) => {
+        console.error("Failed to start relayer gas reserve allocator:", err);
+      });
   }
 
   // Invariant Violation Automated Circuit Breaker (Issue #829):
