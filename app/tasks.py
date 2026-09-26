@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import os
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Dict, Optional
 
 import asyncpg
@@ -394,6 +395,76 @@ def compute_yield_snapshots(
     if granularity not in {"HOURLY", "DAILY"}:
         raise ValueError("granularity must be HOURLY or DAILY")
     return int(asyncio.run(_compute_yield_snapshots(granularity)))
+
+
+# ---------------------------------------------------------------------------
+# Issue #1074 — Protocol treasury yield auto-staking allocation worker
+# ---------------------------------------------------------------------------
+
+
+async def _stake_treasury_idle_balances(treasury_balance: Optional[float] = None) -> int:
+    """Stake idle treasury USDC into low-risk yield vaults.
+
+    The treasury balance is read from the ``TREASURY_USDC_BALANCE`` environment
+    variable when not supplied explicitly. Returns the number of allocations
+    created.
+    """
+    from app.db.session import get_async_session
+    from app.services.nonce_manager import RelayerPool
+    from app.services.treasury_yield_worker import TreasuryYieldWorker
+
+    if treasury_balance is None:
+        raw_balance = os.getenv("TREASURY_USDC_BALANCE", "0")
+        treasury_balance = float(raw_balance)
+
+    worker = TreasuryYieldWorker(relayer_pool=RelayerPool())
+    async with get_async_session() as db:
+        allocation_ids = await worker.stake_idle_balances(
+            db=db, treasury_balance=Decimal(str(treasury_balance))
+        )
+    return len(allocation_ids)
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.stake_treasury_idle_balances",
+    autoretry_for=(OSError, asyncpg.PostgresError),
+    retry_backoff=True,
+    max_retries=3,
+)
+def stake_treasury_idle_balances(
+    self: DatabaseTask,
+    treasury_balance: Optional[float] = None,
+) -> int:
+    """Stake idle protocol treasury USDC into low-risk yield vaults."""
+    DatabaseTask._database_url = os.getenv("DATABASE_URL", os.getenv("DB_URL"))
+    return int(asyncio.run(_stake_treasury_idle_balances(treasury_balance)))
+
+
+async def _generate_treasury_yield_report() -> str:
+    """Generate the monthly treasury yield generation summary for governance."""
+    from app.db.session import get_async_session
+    from app.services.nonce_manager import RelayerPool
+    from app.services.treasury_yield_worker import TreasuryYieldWorker
+
+    worker = TreasuryYieldWorker(relayer_pool=RelayerPool())
+    async with get_async_session() as db:
+        return await worker.generate_monthly_report(db=db)
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.generate_treasury_yield_report",
+    autoretry_for=(OSError, asyncpg.PostgresError),
+    retry_backoff=True,
+    max_retries=3,
+)
+def generate_treasury_yield_report(self: DatabaseTask) -> str:
+    """Generate the monthly treasury yield generation summary for governance."""
+    DatabaseTask._database_url = os.getenv("DATABASE_URL", os.getenv("DB_URL"))
+    return str(asyncio.run(_generate_treasury_yield_report()))
 
 
 # ---------------------------------------------------------------------------
