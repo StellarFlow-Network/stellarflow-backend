@@ -55,5 +55,6 @@ export const CACHE_KEYS = {
   },
   governance: {
     voter: (accountId: string) => `governance:voter:${accountId}`,
+    turnout: (queryString: string) => `governance:turnout:${queryString}`,
   },
 } as const;

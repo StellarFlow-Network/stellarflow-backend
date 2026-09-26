@@ -28,6 +28,7 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
+    "db:governance-turnout": "prisma db execute --file prisma/governance_turnout_aggregate.sql",
     "db:validate": "python3 scripts/validate_migrations.py",
     "verify:keys": "tsx scripts/verify-no-plaintext-keys.ts",
     "test:migrations": "python3 -m pytest tests/test_alembic_migrations.py",
