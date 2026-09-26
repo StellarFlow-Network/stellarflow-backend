@@ -43,6 +43,8 @@ import ordersRouter from "./routes/orders";
 import sorobanSimulationRouter from "./routes/sorobanSimulation";
 import sorobanRentEstimateRouter from "./routes/sorobanRentEstimate";
 import remittanceRouter from "./routes/remittance";
+import userConversionsRouter from "./routes/userConversions";
+import paymentRoutingRouter from "./routes/paymentRouting";
 import anchorsRouter from "./routes/anchors";
 import relayerKeysRouter from "./routes/relayerKeys";
 import { sendApiError } from "./lib/apiError.js";
@@ -145,6 +147,8 @@ app.use("/api/v1/orders", ordersRouter);
 
 // Issue #815 – Remittance transaction history endpoint
 app.use("/api/v1/remittance", remittanceRouter);
+app.use("/api/v1/users", userConversionsRouter);
+app.use("/api/v1/payment-routing", paymentRoutingRouter);
 
 // Issue #931 – Anchor SEP-24 / SEP-31 Webhook Ingestion Service
 app.use("/api/v1/anchors", anchorsRouter);
