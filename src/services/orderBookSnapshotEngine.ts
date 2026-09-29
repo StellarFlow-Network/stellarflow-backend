@@ -40,7 +40,7 @@ export interface OrderBookSnapshotEngineConfig {
 }
 
 const DEFAULT_CONFIG: OrderBookSnapshotEngineConfig = {
-  snapshotIntervalLedgers: 100,
+  snapshotIntervalLedgers: 10,
   retentionDays: 7,
   purgeIntervalMs: 60 * 60 * 1000, // 1 hour
   keyPrefix: "stellarflow:orderbook:snapshot",
@@ -192,6 +192,19 @@ export class OrderBookSnapshotEngine {
         `[OrderBookSnapshotEngine] Snapshot captured at ledger ${ledgerSeq} ` +
           `(${this.bids.size} bid levels, ${this.asks.size} ask levels)`,
       );
+
+      try {
+        const { getOrderBookDepthSnapshotExporter } = await import(
+          "./orderBookDepthSnapshotExporter"
+        );
+        await getOrderBookDepthSnapshotExporter().exportSnapshot(snapshot);
+      } catch (error) {
+        logger.warn(
+          "[OrderBookSnapshotEngine] Snapshot export to analytics storage failed:",
+          error,
+        );
+      }
+
       return snapshot;
     } catch (error) {
       this.metrics.captureErrors++;

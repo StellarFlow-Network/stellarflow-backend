@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": false,
+        "amount": 10
+    },
+    "auditLog": "/Users/macbook/stellar_wave_5/stellarflow-backend/logs/.ce1078cb6e6f1394b03767bba70d75afc30c4c45-audit.json",
+    "files": [
+        {
+            "date": 1790704573381,
+            "name": "/Users/macbook/stellar_wave_5/stellarflow-backend/logs/stellar-network-2026-09-29.log",
+            "hash": "f01023fde0ae7729066987619261f6fea1a5e565ae6a7efefa5b1712ac51213d"
+        }
+    ],
+    "hashType": "sha256"
+}

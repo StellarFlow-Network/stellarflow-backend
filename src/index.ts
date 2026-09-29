@@ -42,6 +42,7 @@ import { governanceWebhookBroadcaster } from "./services/governanceWebhookBroadc
 import { getRegionalHealthService } from "./services/regionalHealthService";
 import { storageRentBumpService } from "./services/storageRentBumpService";
 import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
+import { getOrderBookDepthSnapshotExporter } from "./services/orderBookDepthSnapshotExporter";
 import { getRegionalHealthService } from "./services/regionalHealthService";
 import { redisOperationsWorker } from "./services/redisOperationsWorker";
 import { initializeBridgeServices, stopBridgeServices } from "./services/bridgeIntegration";
@@ -351,6 +352,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     storageRentBumpService.stop();
     redisOperationsWorker.stop();
     complianceScreeningWorker.stop();
+    getOrderBookDepthSnapshotExporter().stopDailyHealthCheck();
     getOrderBookSnapshotEngine().stop();
     VolatilityService.stop();
     ArbitrageScanner.stop();
@@ -421,6 +423,16 @@ httpServer.listen(PORT, async () => {
   } catch (err) {
     console.warn(
       "Storage monitor service not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  try {
+    getOrderBookDepthSnapshotExporter().startDailyHealthCheck();
+    console.log(`📦 Order book analytics exporter started`);
+  } catch (err) {
+    console.warn(
+      "Order book analytics exporter not started:",
       err instanceof Error ? err.message : err,
     );
   }
