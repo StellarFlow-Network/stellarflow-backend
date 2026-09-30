@@ -92,6 +92,31 @@ export interface RemittanceHistoryResult {
   error?: string;
 }
 
+export interface SavingsComparisonRequest {
+  sourceCurrency: string;
+  targetCurrency: string;
+  amount: number;
+}
+
+export interface ProviderComparison {
+  provider: string;
+  feeAmount: number;
+  savingsPercentage: number;
+  savingsAmount: number;
+}
+
+export interface SavingsComparisonResult {
+  success: boolean;
+  data?: {
+    sourceCurrency: string;
+    targetCurrency: string;
+    amount: number;
+    stellarflowFee: number;
+    comparisons: ProviderComparison[];
+  };
+  error?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Cursor helpers
 // ---------------------------------------------------------------------------
@@ -319,4 +344,75 @@ export class RemittanceService {
       };
     }
   }
+
+  /**
+   * Compare StellarFlow remittance fees with traditional providers.
+   */
+  async getSavingsComparison(
+    req: SavingsComparisonRequest
+  ): Promise<SavingsComparisonResult> {
+    try {
+      if (req.amount <= 0) {
+        return { success: false, error: "Amount must be greater than zero" };
+      }
+
+      // Import fxEngine dynamically or initialize it to get stellarflow fee
+      const { RemittanceFxEngine } = await import("./remittance/fxEngine.js");
+      const fxEngine = new RemittanceFxEngine();
+
+      const quote = await fxEngine.getQuote({
+        sourceCurrency: req.sourceCurrency,
+        targetCurrency: req.targetCurrency,
+        sourceAmount: req.amount,
+      });
+
+      const stellarflowFee = quote.feeAmount;
+
+      // Mock traditional providers' fees
+      // Western Union: ~5% + 5 fixed
+      // Wise: ~0.8% + 1 fixed
+      // MoneyGram: ~4% + 3 fixed
+      const providers = [
+        { name: "Western Union", percent: 0.05, fixed: 5 },
+        { name: "Wise", percent: 0.008, fixed: 1 },
+        { name: "MoneyGram", percent: 0.04, fixed: 3 },
+      ];
+
+      const comparisons: ProviderComparison[] = providers.map((p) => {
+        const feeTraditional = req.amount * p.percent + p.fixed;
+        let savingsPercentage = 0;
+        
+        if (feeTraditional > 0) {
+          savingsPercentage = ((feeTraditional - stellarflowFee) / feeTraditional) * 100;
+        }
+
+        // Clamp to 0 if we somehow are more expensive (unlikely with our fee structure)
+        savingsPercentage = Math.max(0, savingsPercentage);
+
+        return {
+          provider: p.name,
+          feeAmount: Number(feeTraditional.toFixed(4)),
+          savingsPercentage: Number(savingsPercentage.toFixed(2)),
+          savingsAmount: Number(Math.max(0, feeTraditional - stellarflowFee).toFixed(4)),
+        };
+      });
+
+      return {
+        success: true,
+        data: {
+          sourceCurrency: req.sourceCurrency.toUpperCase(),
+          targetCurrency: req.targetCurrency.toUpperCase(),
+          amount: req.amount,
+          stellarflowFee: Number(stellarflowFee.toFixed(4)),
+          comparisons,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to calculate savings comparison",
+      };
+    }
+  }
 }
+
