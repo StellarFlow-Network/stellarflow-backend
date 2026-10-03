@@ -522,6 +522,16 @@ httpServer.listen(PORT, async () => {
     );
   }
 
+  try {
+    getOrderBookDepthSnapshotExporter().startDailyHealthCheck();
+    console.log(`📦 Order book analytics exporter started`);
+  } catch (err) {
+    console.warn(
+      "Order book analytics exporter not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   // Start the order book snapshot engine (Issue #796)
   try {
     getOrderBookSnapshotEngine()
