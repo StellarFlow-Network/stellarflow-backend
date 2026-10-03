@@ -36,12 +36,9 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
-
-class _PartitionBase(DeclarativeBase):
-    """Shared declarative base for all StellarFlow ORM models."""
-    pass
+from app.db.base import Base as _PartitionBase
 
 
 class LedgerEvent(_PartitionBase):

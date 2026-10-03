@@ -1,3 +1,4 @@
+
 """app/routers/audit.py — API router for compliance auditors to search audit logs.
 
 Provides REST API endpoints for internal compliance teams to search and retrieve

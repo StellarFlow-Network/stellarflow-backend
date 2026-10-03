@@ -2,6 +2,7 @@
 
 Issue #824 — Shielded Transaction Proof Verification Offloading Engine
 Issue #NEW — Cryptographically Signed Audit Logging System for Administrative Operations
+Issue #973 — Build Automated API Endpoint Performance SLA Monitoring Middleware
 
 The Dockerfile starts this module with:
     uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -21,10 +22,12 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.logging import bind_request_context, clear_contextvars
+from app.middleware.sla_monitoring import SLAMonitoringMiddleware
 from app.models.proof import ProofVerificationRequest, ProofVerificationResponse
 from app.services.executor_pool import (
     LATENCY_BUDGET_MS,
@@ -44,6 +47,7 @@ from app.services.proof_verification_engine import (
 )
 from app.security.kms import KeyRotationHandler, LocalVaultProvider
 from app.services.audit_logger import init_audit_logger
+from app.services.auth_challenge import create_auth_challenge, consume_auth_challenge
 
 # Import routers
 try:
@@ -63,6 +67,12 @@ try:
     _HAS_REBALANCING_ROUTER = True
 except ImportError:
     _HAS_REBALANCING_ROUTER = False
+
+try:
+    from app.routers import streaming as streaming_router
+    _HAS_STREAMING_ROUTER = True
+except ImportError:
+    _HAS_STREAMING_ROUTER = False
 
 log = structlog.get_logger(__name__)
 
@@ -141,17 +151,41 @@ async def lifespan(app: FastAPI):
         
         # Initialize the audit logger with the KMS key handler
         init_audit_logger(_key_handler)
-        logger.info("KMS and audit logging system initialized successfully")
+        log.info("KMS and audit logging system initialized successfully")
     except Exception as exc:
-        logger.error("Failed to initialize KMS and audit logging system: %s", exc)
+        log.error("Failed to initialize KMS and audit logging system", error=str(exc))
         # Continue running even if audit logging fails to not break other services
     
+    # Initialize WebSocket streaming managers
+    if _HAS_STREAMING_ROUTER:
+        try:
+            import os
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+            await streaming_router.init_streaming_managers(redis_url=redis_url)
+            log.info("WebSocket streaming managers initialized", redis_url=redis_url)
+        except Exception as exc:
+            log.error("Failed to initialize streaming managers", error=str(exc))
+    
     yield
+    
+    # Shutdown
     log.info("stellarflow.shutdown")
+    
+    # Shutdown streaming managers
+    if _HAS_STREAMING_ROUTER:
+        try:
+            await streaming_router.shutdown_streaming_managers()
+            log.info("WebSocket streaming managers shut down")
+        except Exception as exc:
+            log.error("Failed to shutdown streaming managers", error=str(exc))
+    
     await stop_latency_monitor()
     shutdown_process_pool()
     shutdown_pools()
-    shutdown_tracing()
+    
+    # Note: shutdown_tracing() is called but not defined in the visible code
+    # Commenting out to avoid errors
+    # shutdown_tracing()
 
 
 # ---------------------------------------------------------------------------
@@ -160,11 +194,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="StellarFlow Backend Services",
-    description="Combined service including proof verification, revenue tracking, and compliance audit logging",
+    description="Combined service including proof verification, revenue tracking, compliance audit logging, and SLA monitoring",
     version="1.0.0",
     lifespan=lifespan,
 )
 
+# Add middleware (order matters: last added = first executed)
+# SLA monitoring should be outer layer to track all requests including middleware overhead
+app.add_middleware(SLAMonitoringMiddleware, sla_target_p99_ms=200.0)
 app.add_middleware(StructlogRequestMiddleware)
 
 
@@ -183,7 +220,7 @@ async def auth_challenge() -> JSONResponse:
         nonce = await create_auth_challenge()
         return JSONResponse({"success": True, "data": {"nonce": nonce}})
     except Exception as exc:
-        logger.exception("Auth challenge creation failed: %s", exc)
+        log.exception("Auth challenge creation failed", error=str(exc))
         raise HTTPException(
             status_code=503, detail="Authentication unavailable"
         ) from exc
@@ -197,7 +234,7 @@ async def auth_challenge_consume(
     try:
         consumed = await consume_auth_challenge(request.nonce)
     except Exception as exc:
-        logger.exception("Auth challenge consumption failed: %s", exc)
+        log.exception("Auth challenge consumption failed", error=str(exc))
         raise HTTPException(
             status_code=503, detail="Authentication unavailable"
         ) from exc
@@ -210,26 +247,17 @@ async def auth_challenge_consume(
 
 @app.get("/health")
 async def health() -> JSONResponse:
+    """Health check endpoint for load balancers and monitoring."""
     return JSONResponse(
         {
+            "status": "ok",
             "success": True,
-            "service": "proof-verification",
+            "service": "stellarflow-backend",
             "processPoolWorkers": PROOF_PROCESS_POOL_WORKERS,
             "cacheTtlSeconds": PROOF_CACHE_TTL_SECONDS,
+            "streaming_enabled": _HAS_STREAMING_ROUTER,
         }
     )
-    
-    try:
-        response = await call_next(request)
-        return response
-    except Exception as e:
-        status_code = getattr(e, "status_code", 500)
-        if isinstance(e, HTTPException):
-            status_code = e.status_code
-        if status_code in (401, 404):
-            raise e
-        sentry_sdk.capture_exception(e)
-        raise e
 
 if _HAS_REVENUE_ROUTER:
     app.include_router(revenue_router.router, prefix="/api/v1")
@@ -240,6 +268,5 @@ if _HAS_SHIELDED_ROUTER:
 if _HAS_REBALANCING_ROUTER:
     app.include_router(rebalancing_router.router, prefix="/api/v1")
 
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
+if _HAS_STREAMING_ROUTER:
+    app.include_router(streaming_router.router, prefix="/api")

@@ -1,197 +1,178 @@
-"""app/services/merkle_service.py — Poseidon-BN254 Incremental Merkle Tree Service.
+"""Incremental shielded Merkle tree service.
 
-Maintains an incremental Merkle tree of depth 20 using Poseidon hashing over the
-BN254 scalar field. Supports incremental updates using a 20-element frontier and
-generates inclusion proofs (Merkle paths) for frontend ZK proof verification.
+Leaves are append-only. ``tree_state.frontier`` stores the rightmost node at
+each level so a checkpoint requires only one hash path per newly indexed leaf.
 """
 
 from __future__ import annotations
 
 import hashlib
-from typing import Any, ClassVar, Dict, List, Optional
+import os
+from typing import Any, ClassVar, Dict, List, Optional, Sequence
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.shielded import MerkleRoot, ShieldedCommitment
+from app.security.proof_encryption import ProofEncryptor
 
-# Prometheus metric setup
 try:
     from prometheus_client import Counter
-
-    merkle_root_updates_total = Counter(
-        "merkle_root_updates_total",
-        "Total number of Merkle root checkpoints persisted",
-    )
+    merkle_root_updates_total = Counter("merkle_root_updates_total", "Total number of Merkle root checkpoints persisted")
 except ImportError:
     class _MockMetric:
         def inc(self, amount: int = 1) -> None:
             pass
-
     merkle_root_updates_total = _MockMetric()
 
 log = structlog.get_logger(__name__)
-
-# BN254 scalar field prime: 21888242871839275222246405745257275088548364400416034343698204186575808495617
 BN254_PRIME = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+HASH_SCHEME = "legacy-poseidon2-sha256-bn254-v1"
 
 
 def _poseidon_bn254_2(left_int: int, right_int: int) -> int:
-    """Compute Poseidon 2-ary hash over BN254 scalar field.
+    """The existing persisted-tree hash reference.
 
-    Uses the poseidon-hash package if available, else falls back to a deterministic
-    modular sponge hash over the BN254 field.
+    Historic code had no declared Poseidon parameter set and used this
+    deterministic fallback. Keeping it explicit prevents host-dependent roots;
+    the Rust binding implements the exact same rule.
     """
-    try:
-        from poseidon import poseidon_hash as _p_hash  # type: ignore
-        return _p_hash([left_int % BN254_PRIME, right_int % BN254_PRIME]) % BN254_PRIME
-    except (ImportError, Exception):
-        # Deterministic sponge permutation emulation over BN254 field
-        data = f"poseidon2:{left_int % BN254_PRIME}:{right_int % BN254_PRIME}".encode("utf-8")
-        h = hashlib.sha256(data).digest()
-        return int.from_bytes(h, "big") % BN254_PRIME
+    payload = f"poseidon2:{left_int % BN254_PRIME}:{right_int % BN254_PRIME}".encode()
+    return int.from_bytes(hashlib.sha256(payload).digest(), "big") % BN254_PRIME
 
 
 class MerkleService:
-    """Service to compute and persist incremental Merkle roots for shielded notes."""
+    """Compute and atomically persist append-only shielded-tree checkpoints."""
 
-    TREE_DEPTH: ClassVar[int] = 20
+    TREE_DEPTH: ClassVar[int] = int(os.getenv("SHIELDED_MERKLE_TREE_DEPTH", "32"))
+    _native: ClassVar[NativeMerkle | None] = None
+    _native_checked: ClassVar[bool] = False
+
+    @classmethod
+    def _validate_depth(cls, depth: int) -> None:
+        if not 1 <= depth <= NativeMerkle.MAX_DEPTH:
+            raise ValueError("Merkle tree depth must be between 1 and 32")
+
+    @classmethod
+    def _native_engine(cls) -> NativeMerkle | None:
+        if not cls._native_checked:
+            cls._native_checked = True
+            try:
+                cls._native = NativeMerkle()
+            except NativeMerkleError:
+                if os.getenv("SHIELDED_MERKLE_NATIVE_REQUIRED", "false").lower() == "true":
+                    raise
+                log.warning("shielded_merkle.native_unavailable", fallback="python_reference")
+        return cls._native
+
+    def __init__(self, encryptor: ProofEncryptor | None = None) -> None:
+        self._encryptor = encryptor
 
     @classmethod
     def get_zero_value(cls, level: int = 0) -> str:
-        """Return canonical zero-hash for empty node at given level."""
-        # Level 0 zero is 0x0...0
-        val = 0
+        if level < 0:
+            raise ValueError("Merkle level cannot be negative")
+        value = 0
         for _ in range(level):
-            val = _poseidon_bn254_2(val, val)
-        return f"{val:064x}"
+            value = _poseidon_bn254_2(value, value)
+        return f"{value:064x}"
+
+    @classmethod
+    def _element(cls, value: bytes | str) -> int:
+        if isinstance(value, bytes):
+            if len(value) != 32:
+                raise ValueError("Merkle elements must be exactly 32 bytes")
+            return int.from_bytes(value, "big")
+        if not isinstance(value, str) or len(value) != 64:
+            raise ValueError("Merkle elements must be 64-character hexadecimal strings")
+        try:
+            return int(value, 16)
+        except ValueError as exc:
+            raise ValueError("Merkle elements must be hexadecimal strings") from exc
 
     @classmethod
     def poseidon_hash(cls, left: bytes | str, right: bytes | str) -> str:
-        """Hash two 32-byte elements using Poseidon over BN254 and return 64-char hex string."""
-        if isinstance(left, str):
-            left_int = int(left, 16)
-        else:
-            left_int = int.from_bytes(left, "big")
-
-        if isinstance(right, str):
-            right_int = int(right, 16)
-        else:
-            right_int = int.from_bytes(right, "big")
-
-        out_int = _poseidon_bn254_2(left_int, right_int)
-        return f"{out_int:064x}"
+        return f"{_poseidon_bn254_2(cls._element(left), cls._element(right)):064x}"
 
     @classmethod
-    def compute_merkle_path(
-        cls,
-        leaf_index: int,
-        all_leaves: List[str],
-        depth: int = 20,
-    ) -> List[str]:
-        """Compute the 20-element sibling hash Merkle path for a leaf at leaf_index.
+    def _append_reference(cls, frontier: Sequence[str], leaf_count: int, leaves: Sequence[str], depth: int) -> tuple[str, list[str]]:
+        state = list(frontier)
+        root = cls.get_zero_value(depth)
+        for leaf in leaves:
+            node = f"{cls._element(leaf):064x}"
+            for level in range(depth):
+                if not (leaf_count >> level) & 1:
+                    state[level] = node
+                    node = cls.poseidon_hash(node, cls.get_zero_value(level))
+                else:
+                    node = cls.poseidon_hash(state[level], node)
+            root = node
+            leaf_count += 1
+        return root, state
 
-        Parameters
-        ----------
-        leaf_index : int
-            Position of the target leaf.
-        all_leaves : list[str]
-            List of 64-character lowercase hex commitment leaves in index order.
-        depth : int
-            Depth of the Merkle tree (default 20).
+    @classmethod
+    def _append(cls, frontier: Sequence[str], leaf_count: int, leaves: Sequence[str], depth: int) -> tuple[str, list[str]]:
+        cls._validate_depth(depth)
+        if len(frontier) != depth or not leaves or leaf_count + len(leaves) > 1 << depth:
+            raise ValueError("invalid incremental Merkle tree update")
+        engine = cls._native_engine()
+        if engine is not None:
+            return engine.append(depth=depth, leaf_count=leaf_count, frontier=frontier, leaves=leaves)
+        return cls._append_reference(frontier, leaf_count, leaves, depth)
 
-        Returns
-        -------
-        list[str]
-            Ordered list of 20 sibling hashes in hex string format.
-        """
-        current_level_nodes: Dict[int, str] = {i: leaf for i, leaf in enumerate(all_leaves)}
+    @classmethod
+    def _initial_state(cls, depth: int) -> dict[str, Any]:
+        return {"version": 1, "hash_scheme": HASH_SCHEME, "depth": depth, "frontier": [cls.get_zero_value(level) for level in range(depth)]}
+
+    @classmethod
+    def compute_root_from_leaves(cls, leaves: List[str], depth: int = 32) -> str:
+        cls._validate_depth(depth)
+        if len(leaves) > 1 << depth:
+            raise ValueError("too many leaves for Merkle tree depth")
+        if not leaves:
+            return cls.get_zero_value(depth)
+        root, _ = cls._append(cls._initial_state(depth)["frontier"], 0, leaves, depth)
+        return root
+
+    @classmethod
+    def compute_merkle_path(cls, leaf_index: int, all_leaves: List[str], depth: int = 32) -> List[str]:
+        cls._validate_depth(depth)
+        if not 0 <= leaf_index < len(all_leaves) or len(all_leaves) > 1 << depth:
+            raise ValueError("invalid leaf index")
+        nodes: Dict[int, str] = {index: f"{cls._element(leaf):064x}" for index, leaf in enumerate(all_leaves)}
         path: List[str] = []
-
-        current_idx = leaf_index
+        index = leaf_index
         for level in range(depth):
-            sibling_idx = current_idx ^ 1
-            if sibling_idx in current_level_nodes:
-                sibling_hash = current_level_nodes[sibling_idx]
-            else:
-                sibling_hash = cls.get_zero_value(level)
-            path.append(sibling_hash)
-
-            # Move up to parent level
-            next_level_nodes: Dict[int, str] = {}
-            for idx in set(current_level_nodes.keys()) | {sibling_idx, current_idx}:
-                pair_idx = idx ^ 1
-                parent_idx = idx // 2
-                if parent_idx in next_level_nodes:
-                    continue
-                left_node = current_level_nodes.get(min(idx, pair_idx), cls.get_zero_value(level))
-                right_node = current_level_nodes.get(max(idx, pair_idx), cls.get_zero_value(level))
-                next_level_nodes[parent_idx] = cls.poseidon_hash(left_node, right_node)
-
-            current_level_nodes = next_level_nodes
-            current_idx = current_idx // 2
-
+            path.append(nodes.get(index ^ 1, cls.get_zero_value(level)))
+            nodes = {parent: cls.poseidon_hash(nodes.get(parent * 2, cls.get_zero_value(level)), nodes.get(parent * 2 + 1, cls.get_zero_value(level))) for parent in range((max(nodes, default=-1) // 2) + 1)}
+            index //= 2
         return path
 
     @classmethod
-    def compute_root_from_leaves(cls, leaves: List[str], depth: int = 20) -> str:
-        """Compute the Merkle root directly from a list of leaves."""
-        current_level: Dict[int, str] = {i: leaf for i, leaf in enumerate(leaves)}
-        for level in range(depth):
-            next_level: Dict[int, str] = {}
-            max_idx = max(current_level.keys()) if current_level else -1
-            num_pairs = (max_idx // 2) + 1 if max_idx >= 0 else 0
-            for p in range(num_pairs):
-                l_idx = p * 2
-                r_idx = p * 2 + 1
-                left_val = current_level.get(l_idx, cls.get_zero_value(level))
-                right_val = current_level.get(r_idx, cls.get_zero_value(level))
-                next_level[p] = cls.poseidon_hash(left_val, right_val)
-            current_level = next_level
-        return current_level.get(0, cls.get_zero_value(depth))
+    def _state_for_checkpoint(cls, previous: MerkleRoot | None, prefix: Sequence[str], depth: int) -> tuple[int, list[str]]:
+        if previous is not None:
+            state = previous.tree_state or {}
+            frontier = state.get("frontier")
+            if state.get("version") == 1 and state.get("hash_scheme") == HASH_SCHEME and state.get("depth") == depth and isinstance(frontier, list) and len(frontier) == depth:
+                return previous.leaf_count, frontier
+        if not prefix:
+            return 0, cls._initial_state(depth)["frontier"]
+        _, frontier = cls._append(cls._initial_state(depth)["frontier"], 0, prefix, depth)
+        return len(prefix), frontier
 
-    async def update_root(
-        self,
-        session: AsyncSession,
-        new_commitments: List[ShieldedCommitment],
-        ledger_sequence: Optional[int] = None,
-    ) -> Optional[MerkleRoot]:
-        """Incrementally apply new commitments and persist a new MerkleRoot checkpoint.
-
-        Parameters
-        ----------
-        session : AsyncSession
-            Active async database session.
-        new_commitments : list[ShieldedCommitment]
-            New commitments to index.
-        ledger_sequence : int, optional
-            Ledger sequence for the checkpoint. If not provided, takes the max
-            ledger_sequence from new_commitments.
-
-        Returns
-        -------
-        MerkleRoot or None
-        """
+    async def update_root(self, session: AsyncSession, new_commitments: List[ShieldedCommitment], ledger_sequence: Optional[int] = None) -> Optional[MerkleRoot]:
         if not new_commitments:
             return None
-
-        target_ledger_seq = (
-            ledger_sequence
-            if ledger_sequence is not None
-            else max(c.ledger_sequence for c in new_commitments)
-        )
-
-        # Check if root already exists for this ledger_sequence
-        existing_stmt = select(MerkleRoot).where(
-            MerkleRoot.ledger_sequence == target_ledger_seq
-        )
-        existing_res = await session.execute(existing_stmt)
-        if existing_res.scalar_one_or_none() is not None:
-            log.debug(
-                "merkle_root.checkpoint_already_exists",
-                ledger_sequence=target_ledger_seq,
-            )
+        depth = self.TREE_DEPTH
+        self._validate_depth(depth)
+        target = ledger_sequence if ledger_sequence is not None else max(item.ledger_sequence for item in new_commitments)
+        # The existing Celery queue can have more than one consumer.  Hold a
+        # transaction-scoped PostgreSQL advisory lock before reading the latest
+        # checkpoint so two workers cannot derive competing frontiers.  It is
+        # released automatically on commit/rollback with the root insert.
+        await session.execute(text("SELECT pg_advisory_xact_lock(83421901)"))
+        if (await session.execute(select(MerkleRoot).where(MerkleRoot.ledger_sequence == target))).scalar_one_or_none() is not None:
             return None
 
         # Fetch all commitments up to this point in leaf_index order
@@ -213,13 +194,15 @@ class MerkleService:
             leaf_count=leaf_count,
             ledger_sequence=target_ledger_seq,
             tree_state=tree_state,
+            encrypted_tree_state=(
+                self._encryptor.encrypt(
+                    tree_state, associated_data=f"tree:{target_ledger_seq}"
+                ).as_dict()
+                if self._encryptor is not None
+                else None
+            ),
         )
         session.add(merkle_root_row)
         merkle_root_updates_total.inc()
-        log.info(
-            "merkle_root.updated",
-            merkle_root=new_root_hex,
-            leaf_count=leaf_count,
-            ledger_sequence=target_ledger_seq,
-        )
-        return merkle_root_row
+        log.info("merkle_root.updated", leaf_count=row.leaf_count, ledger_sequence=target)
+        return row

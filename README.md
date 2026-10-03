@@ -384,3 +384,18 @@ The production implementation must connect the loader to the repository's active
 
 Run:
 `pytest tests/analytics/test_liquidation_heatmap.py -v`
+
+# Shielded Merkle synchronization worker
+
+Shielded note tree synchronization reuses the Celery `index-shielded-notes`
+queue. Its CPU Rust shared library is in `native/shielded_merkle` and is built
+into the Python Docker image. The library receives packed 32-byte field
+elements through a small `ctypes` ABI and updates only the 32-node append path.
+No GPU implementation or GPU dependency is provided.
+
+Set `SHIELDED_TREE_SYNC_TOKEN`, then internal workers can queue ledger ranges
+with `POST /api/v1/shielded/sync`, an `X-Internal-Token` header, and
+`{"start_ledger": 100, "end_ledger": 101}`. The RPC returns an accepted task
+id and never accepts deposits, roots, or internal tree state. Build and measure
+locally with `cargo build --release` and `cargo run --release --bin benchmark`
+from `native/shielded_merkle`.

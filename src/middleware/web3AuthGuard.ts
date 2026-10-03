@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { Keypair } from "@stellar/stellar-sdk";
 import { verifyToken, getActiveSession } from "../utils/jwt.js";
 import { cryptographicNonceStore } from "../services/nonceStoreService.js";
+import { webauthnService } from "../services/webauthnService.js";
 import { sendApiError } from "../lib/apiError.js";
 import { normalizeHexString } from "./signatureVerificationMiddleware.js";
 import nacl from "tweetnacl";
@@ -19,6 +20,7 @@ declare global {
     interface Request {
       user?: AuthenticatedUser;
       web3Authenticated?: boolean;
+      webauthnAuthenticated?: boolean;
     }
   }
 }
@@ -37,6 +39,10 @@ export const web3AuthGuard = (allowedRoles: string[] = []) => {
       const signatureHeader = req.headers["x-stellar-signature"] as string | undefined;
       const publicKeyHeader = req.headers["x-stellar-publickey"] as string | undefined;
       const nonceHeader = req.headers["x-stellar-nonce"] as string | undefined;
+      const webauthnCredentialId = req.headers["x-webauthn-credential-id"] as string | undefined;
+      const webauthnAuthenticatorData = req.headers["x-webauthn-authenticator-data"] as string | undefined;
+      const webauthnClientDataJson = req.headers["x-webauthn-client-data-json"] as string | undefined;
+      const webauthnSignature = req.headers["x-webauthn-signature"] as string | undefined;
 
       // ── Method 1: JWT Bearer Token Authentication ────────────────────────────
       if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -146,12 +152,75 @@ export const web3AuthGuard = (allowedRoles: string[] = []) => {
         return;
       }
 
+      // ── Method 3: WebAuthn / Passkey Authentication ─────────────────────────
+      if (webauthnCredentialId && webauthnAuthenticatorData && webauthnClientDataJson && webauthnSignature) {
+        const isAdminRoute = allowedRoles.length === 0 || allowedRoles.includes("ADMIN");
+
+        if (!isAdminRoute) {
+          res.status(403).json({
+            success: false,
+            error: {
+              code: "FORBIDDEN",
+              message: "WebAuthn authentication is only permitted for administrative endpoints",
+            },
+          });
+          return;
+        }
+
+        let verificationResult: { verified: boolean; publicKey?: string; reason?: string };
+        try {
+          verificationResult = await webauthnService.verifyAssertion({
+            credentialId: webauthnCredentialId.trim(),
+            authenticatorData: webauthnAuthenticatorData,
+            clientDataJson: webauthnClientDataJson,
+            signature: webauthnSignature,
+          });
+        } catch (err) {
+          console.error("[web3AuthGuard] WebAuthn verification error:", err);
+          verificationResult = { verified: false, reason: "verification_error" };
+        }
+
+        if (!verificationResult.verified) {
+          res.status(401).json({
+            success: false,
+            error: {
+              code: "INVALID_WEBAUTHN_ASSERTION",
+              message: `WebAuthn attestation signature verification failed${
+                verificationResult.reason ? `: ${verificationResult.reason}` : ""
+              }`,
+            },
+          });
+          return;
+        }
+
+        req.user = {
+          publicKey: verificationResult.publicKey,
+          role: "ADMIN",
+        };
+        req.web3Authenticated = true;
+        req.webauthnAuthenticated = true;
+
+        if (allowedRoles.length > 0 && !allowedRoles.includes(req.user.role)) {
+          res.status(403).json({
+            success: false,
+            error: {
+              code: "FORBIDDEN",
+              message: "Role authorization failed for WebAuthn account",
+            },
+          });
+          return;
+        }
+
+        next();
+        return;
+      }
+
       // If neither valid JWT nor valid Web3 signature headers provided:
       res.status(401).json({
         success: false,
         error: {
           code: "UNAUTHORIZED",
-          message: "Authentication required. Provide a valid Bearer token or Web3 signature headers (X-Stellar-Signature, X-Stellar-PublicKey, X-Stellar-Nonce)",
+          message: "Authentication required. Provide a valid Bearer token, Web3 signature headers (X-Stellar-Signature, X-Stellar-PublicKey, X-Stellar-Nonce), or WebAuthn assertion headers (X-WebAuthn-Credential-Id, X-WebAuthn-Authenticator-Data, X-WebAuthn-Client-Data-Json, X-WebAuthn-Signature)",
         },
       });
     } catch (error) {

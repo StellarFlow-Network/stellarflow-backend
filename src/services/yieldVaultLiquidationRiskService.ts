@@ -6,6 +6,8 @@ export interface VaultPosition {
   healthFactor: number;
   collateralAsset: string;
   collateralAmount: number;
+  /** Estimated profit in stroops used to cap fee-bumped liquidation calls. */
+  estimatedProfitStroops?: number;
 }
 
 export interface VaultPositionScanner {

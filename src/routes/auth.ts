@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { Keypair } from "@stellar/stellar-sdk";
 import crypto from "crypto";
+import { URLSearchParams } from "url";
 import { cryptographicNonceStore } from "../services/nonceStoreService.js";
 import { normalizeHexString } from "../middleware/signatureVerificationMiddleware.js";
 import {
@@ -29,6 +30,192 @@ import { sendApiError } from "../lib/apiError.js";
 import { storeEncryptedSession, revokeSessionByToken } from "../utils/jwt.js";
 
 const router = express.Router();
+
+// ── OIDC / OAuth2 SSO Configuration ─────────────────────────────────────────
+type OidcProvider = "google" | "okta" | "github";
+
+interface OidcProviderConfig {
+  clientId: string;
+  clientSecret: string;
+  authorizeUrl: string;
+  tokenUrl: string;
+  userInfoUrl: string;
+  scopes: string[];
+  emailClaim: string;
+  domainClaim?: string;
+}
+
+const OIDC_PROVIDERS: Record<OidcProvider, OidcProviderConfig> = {
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || "",
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+    authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+    userInfoUrl: "https://openidconnect.googleapis.com/v1/userinfo",
+    scopes: ["openid", "email", "profile"],
+    emailClaim: "email",
+    domainClaim: "hd",
+  },
+  okta: {
+    clientId: process.env.OKTA_CLIENT_ID || "",
+    clientSecret: process.env.OKTA_CLIENT_SECRET || "",
+    authorizeUrl: `${process.env.OKTA_ISSUER || ""}/v1/authorize`,
+    tokenUrl: `${process.env.OKTA_ISSUER || ""}/v1/token`,
+    userInfoUrl: `${process.env.OKTA_ISSUER || ""}/v1/userinfo`,
+    scopes: ["openid", "email", "profile"],
+    emailClaim: "email",
+    domainClaim: "email",
+  },
+  github: {
+    clientId: process.env.GITHUB_CLIENT_ID || "",
+    clientSecret: process.env.GITHUB_CLIENT_SECRET || "",
+    authorizeUrl: "https://github.com/login/oauth/authorize",
+    tokenUrl: "https://github.com/login/oauth/access_token",
+    userInfoUrl: "https://api.github.com/user",
+    scopes: ["read:user", "user:email"],
+    emailClaim: "email",
+  },
+};
+
+const ADMIN_ALLOWED_DOMAINS = (process.env.ADMIN_ALLOWED_DOMAINS || "")
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+const OIDC_STATE_COOKIE = "oidc_state";
+const OIDC_STATE_TTL_MS = 10 * 60 * 1000;
+
+function isAllowedAdminEmail(email: string | undefined | null): boolean {
+  if (!email) return false;
+  const normalized = email.trim().toLowerCase();
+  if (ADMIN_ALLOWED_DOMAINS.length === 0) return false;
+  const domain = normalized.split("@")[1];
+  if (!domain) return false;
+  return ADMIN_ALLOWED_DOMAINS.includes(domain);
+}
+
+function buildAuthorizeUrl(
+  provider: OidcProvider,
+  redirectUri: string,
+  state: string,
+): string {
+  const cfg = OIDC_PROVIDERS[provider];
+  const params = new URLSearchParams({
+    client_id: cfg.clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: cfg.scopes.join(" "),
+    state,
+  });
+  if (provider === "google") {
+    params.set("access_type", "online");
+    params.set("prompt", "select_account");
+  }
+  return `${cfg.authorizeUrl}?${params.toString()}`;
+}
+
+async function exchangeCodeForTokens(
+  provider: OidcProvider,
+  code: string,
+  redirectUri: string,
+): Promise<{ accessToken: string; idToken?: string }> {
+  const cfg = OIDC_PROVIDERS[provider];
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: redirectUri,
+    client_id: cfg.clientId,
+    client_secret: cfg.clientSecret,
+  });
+
+  const resp = await fetch(cfg.tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: body.toString(),
+  });
+
+  if (!resp.ok) {
+    throw new Error(`Token exchange failed with status ${resp.status}`);
+  }
+
+  const json = (await resp.json()) as {
+    access_token?: string;
+    id_token?: string;
+    error?: string;
+  };
+
+  if (!json.access_token) {
+    throw new Error(json.error || "No access_token returned from provider");
+  }
+
+  return { accessToken: json.access_token, idToken: json.id_token };
+}
+
+async function fetchUserInfo(
+  provider: OidcProvider,
+  accessToken: string,
+): Promise<{ email?: string; name?: string; sub?: string; hd?: string }> {
+  const cfg = OIDC_PROVIDERS[provider];
+  const resp = await fetch(cfg.userInfoUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+      "User-Agent": "stellar-admin-sso",
+    },
+  });
+
+  if (!resp.ok) {
+    throw new Error(`UserInfo fetch failed with status ${resp.status}`);
+  }
+
+  const json = (await resp.json()) as {
+    email?: string;
+    name?: string;
+    login?: string;
+    sub?: string;
+    id?: number;
+    hd?: string;
+  };
+
+  return {
+    email: json.email,
+    name: json.name || json.login,
+    sub: json.sub || (json.id !== undefined ? String(json.id) : undefined),
+    hd: json.hd,
+  };
+}
+
+function setAdminSessionCookie(
+  res: express.Response,
+  name: string,
+  value: string,
+  maxAgeMs: number,
+): void {
+  res.cookie(name, value, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+    maxAge: maxAgeMs,
+  });
+}
+
+function clearAdminSessionCookie(res: express.Response, name: string): void {
+  res.clearCookie(name, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+  });
+}
+
+const ADMIN_ACCESS_COOKIE = "admin_access_token";
+const ADMIN_REFRESH_COOKIE = "admin_refresh_token";
+const ADMIN_ACCESS_TTL_MS = 15 * 60 * 1000;
+const ADMIN_REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 router.post(
   "/login",
@@ -156,6 +343,14 @@ router.post(
         req.headers["user-agent"] || "unknown",
       );
 
+      setAdminSessionCookie(res, ADMIN_ACCESS_COOKIE, token, ADMIN_ACCESS_TTL_MS);
+      setAdminSessionCookie(
+        res,
+        ADMIN_REFRESH_COOKIE,
+        refreshTokenData.token,
+        ADMIN_REFRESH_TTL_MS,
+      );
+
       res.json({
         success: true,
         data: {
@@ -207,6 +402,9 @@ router.post(
 
       await invalidateSession(token);
       await revokeSessionByToken(token);
+
+      clearAdminSessionCookie(res, ADMIN_ACCESS_COOKIE);
+      clearAdminSessionCookie(res, ADMIN_REFRESH_COOKIE);
 
       const userId = (req as any).user?.userId;
 
@@ -291,6 +489,14 @@ router.post(
 
       const newRefreshTokenData = generateRefreshToken(relayer.id);
 
+      setAdminSessionCookie(res, ADMIN_ACCESS_COOKIE, accessToken, ADMIN_ACCESS_TTL_MS);
+      setAdminSessionCookie(
+        res,
+        ADMIN_REFRESH_COOKIE,
+        newRefreshTokenData.token,
+        ADMIN_REFRESH_TTL_MS,
+      );
+
       res.json({
         success: true,
         data: {
@@ -307,6 +513,197 @@ router.post(
       });
     }
   }
+);
+
+// ── OIDC / OAuth2 SSO Routes ─────────────────────────────────────────────────
+router.get(
+  "/oidc/:provider/start",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const provider = req.params.provider as OidcProvider;
+      if (!OIDC_PROVIDERS[provider]) {
+        res.status(400).json({
+          success: false,
+          error: { code: "UNSUPPORTED_PROVIDER", message: "Unsupported OIDC provider" },
+        });
+        return;
+      }
+
+      const cfg = OIDC_PROVIDERS[provider];
+      if (!cfg.clientId || !cfg.clientSecret) {
+        res.status(503).json({
+          success: false,
+          error: { code: "PROVIDER_NOT_CONFIGURED", message: "Provider is not configured" },
+        });
+        return;
+      }
+
+      const state = crypto.randomBytes(32).toString("hex");
+      const redirectUri =
+        (req.query.redirect_uri as string) ||
+        `${req.protocol}://${req.get("host")}/api/auth/oidc/${provider}/callback`;
+
+      setAdminSessionCookie(res, OIDC_STATE_COOKIE, state, OIDC_STATE_TTL_MS);
+
+      const authorizeUrl = buildAuthorizeUrl(provider, redirectUri, state);
+      res.json({ success: true, data: { authorizeUrl, state } });
+    } catch (error) {
+      console.error("[AUTH] OIDC start error:", error);
+      res.status(500).json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "Failed to start OIDC flow" },
+      });
+    }
+  },
+);
+
+router.get(
+  "/oidc/:provider/callback",
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const provider = req.params.provider as OidcProvider;
+      const cfg = OIDC_PROVIDERS[provider];
+      if (!cfg) {
+        res.status(400).json({
+          success: false,
+          error: { code: "UNSUPPORTED_PROVIDER", message: "Unsupported OIDC provider" },
+        });
+        return;
+      }
+
+      const { code, state } = req.query as { code?: string; state?: string };
+      const expectedState = req.cookies?.[OIDC_STATE_COOKIE];
+
+      clearAdminSessionCookie(res, OIDC_STATE_COOKIE);
+
+      if (!code || !state || !expectedState || state !== expectedState) {
+        res.status(401).json({
+          success: false,
+          error: { code: "INVALID_STATE", message: "OIDC state validation failed" },
+        });
+        return;
+      }
+
+      const redirectUri =
+        (req.query.redirect_uri as string) ||
+        `${req.protocol}://${req.get("host")}/api/auth/oidc/${provider}/callback`;
+
+      const { accessToken: providerAccessToken } = await exchangeCodeForTokens(
+        provider,
+        code,
+        redirectUri,
+      );
+
+      const profile = await fetchUserInfo(provider, providerAccessToken);
+
+      if (!isAllowedAdminEmail(profile.email)) {
+        const clientIp = req.ip || "unknown";
+        await logLoginFailed(
+          profile.email || "unknown",
+          clientIp,
+          req.headers["user-agent"] || "unknown",
+          `OIDC domain not authorized (${provider})`,
+        );
+        res.status(403).json({
+          success: false,
+          error: {
+            code: "DOMAIN_NOT_AUTHORIZED",
+            message: "Account domain is not authorized for admin access",
+          },
+        });
+        return;
+      }
+
+      const email = profile.email!.trim().toLowerCase();
+      let relayer = await prisma.relayer.findUnique({ where: { email } });
+
+      if (!relayer) {
+        relayer = await prisma.relayer.create({
+          data: {
+            email,
+            name: profile.name || email,
+            role: "ADMIN",
+            isActive: true,
+          },
+        });
+      }
+
+      if (!relayer.isActive) {
+        res.status(403).json({
+          success: false,
+          error: { code: "ACCOUNT_DISABLED", message: "Account is disabled" },
+        });
+        return;
+      }
+
+      const sessionId = crypto.randomUUID();
+      const clientIp = req.ip || "unknown";
+      const userAgent = req.headers["user-agent"] || "unknown";
+
+      const token = generateToken(
+        {
+          userId: relayer.id,
+          email: relayer.email!,
+          role: relayer.role || "ADMIN",
+          sid: sessionId,
+        },
+        "15m",
+      );
+
+      const refreshTokenData = generateRefreshToken(relayer.id);
+
+      await storeEncryptedSession(
+        {
+          userId: relayer.id,
+          email: relayer.email!,
+          role: relayer.role || "ADMIN",
+          sid: sessionId,
+          ipAddress: clientIp,
+          userAgent,
+          expiresAt: new Date(Date.now() + ADMIN_ACCESS_TTL_MS).toISOString(),
+          exp: Math.floor((Date.now() + ADMIN_ACCESS_TTL_MS) / 1000),
+        },
+        15 * 60,
+      );
+
+      await createUserSession(relayer.id, token, clientIp, userAgent);
+
+      await prisma.relayer.update({
+        where: { id: relayer.id },
+        data: { lastLoginAt: new Date() },
+      });
+
+      await logLoginSuccess(relayer.id, clientIp, userAgent);
+
+      setAdminSessionCookie(res, ADMIN_ACCESS_COOKIE, token, ADMIN_ACCESS_TTL_MS);
+      setAdminSessionCookie(
+        res,
+        ADMIN_REFRESH_COOKIE,
+        refreshTokenData.token,
+        ADMIN_REFRESH_TTL_MS,
+      );
+
+      res.json({
+        success: true,
+        data: {
+          token,
+          refreshToken: refreshTokenData.token,
+          user: {
+            id: relayer.id,
+            email: relayer.email,
+            name: relayer.name,
+            role: relayer.role,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("[AUTH] OIDC callback error:", error);
+      res.status(500).json({
+        success: false,
+        error: { code: "INTERNAL_ERROR", message: "OIDC callback failed" },
+      });
+    }
+  },
 );
 
 // ── Web3 Challenge Nonce Generation Route (Issue #749) ───────────────────────

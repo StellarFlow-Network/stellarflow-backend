@@ -31,8 +31,20 @@ import { registerTracingShutdownHandlers } from "./utils/shutdownTracing";
 import { providerSecretRotationService } from "./services/providerSecretRotationService";
 import { priceAggregatorService } from "./services/priceAggregatorService";
 import { contractSanityCheckService } from "./services/contractSanityCheckService";
+import { getCircuitBreakerService } from "./services/circuitBreakerService";
 import { governanceTimelockService } from "./services/governanceTimelockService";
+import { governanceWebhookBroadcaster } from "./services/governanceWebhookBroadcaster";
+import { getRegionalHealthService } from "./services/regionalHealthService";
 import { storageRentBumpService } from "./services/storageRentBumpService";
+import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
+import { redisOperationsWorker } from "./services/redisOperationsWorker";
+import { initializeBridgeServices, stopBridgeServices } from "./services/bridgeIntegration";
+import { VolatilityService } from "./services/volatility.service";
+import { ArbitrageScanner } from "./services/arbitrageScanner";
+import { storageMonitorService } from "./services/storageMonitorService";
+import { complianceScreeningWorker } from "./services/complianceScreeningWorker";
+import { startDekRotationJob } from "./jobs/dekRotationJob";
+import { ledgerEventStreamWorker } from "./services/ledgerEventStreamWorker";
 // Load environment variables
 dotenv.config();
 // Normalize safe startup environment strings before runtime storage.
@@ -225,6 +237,7 @@ systemHealthWatchdog.registerWorker({
     heartbeatTimeoutMs: redisOperationsWorker.getHeartbeatTimeoutMs(),
     restart: () => {
         redisOperationsWorker.stop();
+        await ledgerEventStreamWorker.stop();
         redisOperationsWorker.start();
     },
 });
@@ -277,6 +290,7 @@ const shutdown = async (signal) => {
         sorobanEventListener?.stop();
         multiSigSubmissionService.stop();
         governanceTimelockService.stop();
+        governanceWebhookBroadcaster.stop();
         liquidityRebalancingWorker?.stop();
         apyWorker.stop();
         storageMonitorService.stop(); // <--- ADDED
@@ -331,6 +345,10 @@ httpServer.listen(PORT, async () => {
     console.log(`🔌 Socket.io ready for dashboard connections`);
     redisOperationsWorker.start();
     console.log(`🧹 Redis operations worker started`);
+    void ledgerEventStreamWorker.start().catch((err) => {
+        console.error("Failed to start ledger event stream worker:", err);
+    });
+    console.log(`📡 Ledger event stream worker started`);
     complianceScreeningWorker.start();
     console.log(`🛡️ Compliance screening worker started`);
     // Start PostgreSQL storage footprint monitor (Issue #813)
@@ -425,6 +443,15 @@ httpServer.listen(PORT, async () => {
     }
     catch (err) {
         console.warn("Governance timelock service not started:", err instanceof Error ? err.message : err);
+    }
+    try {
+        governanceWebhookBroadcaster.start().catch((err) => {
+            console.error("Failed to start governance webhook broadcaster:", err);
+        });
+        console.log("Governance webhook broadcaster started");
+    }
+    catch (err) {
+        console.warn("Governance webhook broadcaster not started:", err instanceof Error ? err.message : err);
     }
     // Start background hourly average job
     try {

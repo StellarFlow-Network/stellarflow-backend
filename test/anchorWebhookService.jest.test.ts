@@ -10,23 +10,38 @@
  */
 
 import crypto from "crypto";
-import {
-  anchorWebhookService,
-  AnchorWebhookPayload,
-} from "../src/services/anchorWebhookService";
-import prisma from "../src/lib/prisma";
-
+import { jest, describe, it, expect, beforeEach } from "@jest/globals";
+import type { AnchorWebhookPayload } from "../src/services/anchorWebhookService";
 // Mock Prisma
-jest.mock("../src/lib/prisma", () => ({
+jest.unstable_mockModule("../src/lib/prisma", () => ({
   __esModule: true,
   default: {
     remittanceTransaction: {
       findUnique: jest.fn(),
-      update: jest.fn(),
+      updateMany: jest.fn(),
     },
   },
 }));
 
+jest.unstable_mockModule("../src/services/sep31Service", () => ({
+  dispatchSep31CompletionCallback: async () => {},
+}));
+jest.unstable_mockModule(
+  "../src/services/anchorSettlementNotificationService",
+  () => ({
+    anchorSettlementNotificationService: { handleStatusChange: async () => [] },
+  }),
+);
+jest.unstable_mockModule("../src/utils/logger", () => ({
+  createFetcherLogger: () => ({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+  }),
+}));
+const { anchorWebhookService } =
+  await import("../src/services/anchorWebhookService");
+const { default: prisma } = await import("../src/lib/prisma");
 describe("AnchorWebhookService", () => {
   const mockPrisma = prisma as jest.Mocked<typeof prisma>;
   const testSecret = "test-webhook-secret-12345";
@@ -140,9 +155,8 @@ describe("AnchorWebhookService", () => {
         userId: "user-1",
       } as any);
 
-      mockPrisma.remittanceTransaction.update.mockResolvedValue({
-        id: transactionId,
-        status: "COMPLETED",
+      mockPrisma.remittanceTransaction.updateMany.mockResolvedValue({
+        count: 1,
       } as any);
 
       const result = await anchorWebhookService.processWebhook(
@@ -157,13 +171,12 @@ describe("AnchorWebhookService", () => {
       expect(result.newStatus).toBe("COMPLETED");
 
       // Verify database was updated
-      expect(mockPrisma.remittanceTransaction.update).toHaveBeenCalledWith({
-        where: { id: transactionId },
+      expect(mockPrisma.remittanceTransaction.updateMany).toHaveBeenCalledWith({
+        where: { id: transactionId, status: "pending_user_transfer" },
         data: {
           status: "COMPLETED",
           updatedAt: expect.any(Date),
         },
-        select: { id: true, status: true },
       });
     });
 
@@ -254,7 +267,7 @@ describe("AnchorWebhookService", () => {
         { input: "settled", expected: "COMPLETED" },
         { input: "success", expected: "COMPLETED" },
         { input: "COMPLETED", expected: "COMPLETED" },
-        { input: "pending_user_transfer", expected: "pending_user_transfer" },
+        { input: "pending_user_transfer", expected: "PENDING_USER_TRANSFER" },
         { input: "PENDING", expected: "PENDING" },
       ];
 
@@ -272,9 +285,8 @@ describe("AnchorWebhookService", () => {
           userId: "user-1",
         } as any);
 
-        mockPrisma.remittanceTransaction.update.mockResolvedValue({
-          id: "tx-test",
-          status: testCase.expected,
+        mockPrisma.remittanceTransaction.updateMany.mockResolvedValue({
+          count: 1,
         } as any);
 
         const result = await anchorWebhookService.processWebhook(
@@ -313,7 +325,9 @@ describe("AnchorWebhookService", () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toContain("Status update not applied");
-      expect(mockPrisma.remittanceTransaction.update).not.toHaveBeenCalled();
+      expect(
+        mockPrisma.remittanceTransaction.updateMany,
+      ).not.toHaveBeenCalled();
     });
 
     it("should handle database errors gracefully", async () => {
@@ -352,9 +366,8 @@ describe("AnchorWebhookService", () => {
         userId: "user-1",
       } as any);
 
-      mockPrisma.remittanceTransaction.update.mockResolvedValue({
-        id: "tx-whitespace",
-        status: "COMPLETED",
+      mockPrisma.remittanceTransaction.updateMany.mockResolvedValue({
+        count: 1,
       } as any);
 
       const result = await anchorWebhookService.processWebhook(
@@ -383,9 +396,8 @@ describe("AnchorWebhookService", () => {
         userId: "user-1",
       } as any);
 
-      mockPrisma.remittanceTransaction.update.mockResolvedValue({
-        id: "tx-1",
-        status: "COMPLETED",
+      mockPrisma.remittanceTransaction.updateMany.mockResolvedValue({
+        count: 1,
       } as any);
 
       const result = await anchorWebhookService.processWebhook(
@@ -412,9 +424,8 @@ describe("AnchorWebhookService", () => {
         userId: "user-1",
       } as any);
 
-      mockPrisma.remittanceTransaction.update.mockResolvedValue({
-        id: "tx-2",
-        status: "COMPLETED",
+      mockPrisma.remittanceTransaction.updateMany.mockResolvedValue({
+        count: 1,
       } as any);
 
       const result = await anchorWebhookService.processWebhook(
@@ -446,9 +457,8 @@ describe("AnchorWebhookService", () => {
         userId: "user-1",
       } as any);
 
-      mockPrisma.remittanceTransaction.update.mockResolvedValue({
-        id: "tx-with-extras",
-        status: "COMPLETED",
+      mockPrisma.remittanceTransaction.updateMany.mockResolvedValue({
+        count: 1,
       } as any);
 
       const result = await anchorWebhookService.processWebhook(

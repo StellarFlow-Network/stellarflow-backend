@@ -6,8 +6,315 @@ import {
   sanitizeMultiSigRequest,
   sanitizeSignatureRequest,
 } from "../middleware/payloadSanitizer";
+import { WebSocketServer, WebSocket } from "ws";
+import { priceFeedService } from "../services/priceFeedService";
+import { orderBookService } from "../services/orderBookService";
+import { volumeService } from "../services/volumeService";
 
 const router = express.Router();
+
+/**
+ * Combined WebSocket market stream route.
+ * Connection URL: ws://.../v1/market-stream?pairs=USDC-XLM,BTC-USDC
+ */
+export const marketStreamPath = "/v1/market-stream";
+
+export interface MarketStreamEvent {
+  type: "price" | "volume" | "orderbook";
+  pair: string;
+  timestamp: number;
+  data: unknown;
+}
+
+export interface MarketStreamClient {
+  ws: WebSocket;
+  pairs: Set<string>;
+  format: "json" | "msgpack";
+  isAlive: boolean;
+  lastPing: number;
+}
+
+const clients = new Set<MarketStreamClient>();
+
+const MAX_PAIRS = 50;
+const MAX_CONNECTIONS = 10_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
+function parsePairs(raw: unknown): string[] {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return [];
+  }
+  const pairs = raw
+    .split(",")
+    .map((p) => p.trim().toUpperCase())
+    .filter((p) => /^[A-Z0-9]+-[A-Z0-9]+$/.test(p));
+  return Array.from(new Set(pairs)).slice(0, MAX_PAIRS);
+}
+
+function encodeEvent(client: MarketStreamClient, event: MarketStreamEvent): Buffer | string {
+  if (client.format === "msgpack") {
+    return Buffer.from(encodeMsgPack(event));
+  }
+  return JSON.stringify(event);
+}
+
+/**
+ * Minimal MsgPack encoder for the market stream event shape.
+ * Supports string, number, boolean, null, arrays and plain objects.
+ */
+export function encodeMsgPack(value: unknown): Uint8Array {
+  const chunks: number[] = [];
+  const textEncoder = new TextEncoder();
+
+  const pushUint8 = (n?: number) => {
+    chunks.push(n === undefined ? 0 : n & 0xff);
+  };
+
+  const pushUint16 = (n: number) => {
+    chunks.push((n >> 8) & 0xff, n & 0xff);
+  };
+
+  const pushUint32 = (number) => {
+    chunks.push((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n >>> 0 & 0xff);
+  };
+
+  const pushInt64 = (n: bigint) => {
+    const big = BigInt(n.toString());
+    for (let i = 7; i >= 0; i--) {
+      chunks.push(Number((big >> BigInt(i * 8)) & 0nffn));
+    }
+  };
+
+  const pushFloat64 = (number) => {
+    const buf = new ArrayBuffer(8);
+    new DataView(buf).setFloat64(0, n, false);
+    for (const b of new Uint8Array(buf)) chunks.push(b);
+  };
+
+  const pushString = (s: string) => {
+    const bytes = textEncoder.encode(s);
+    const len = bytes.length;
+    if (len < 32) {
+      pushUint8(0xa0 | len);
+    } else if (len < 256) {
+      pushUint8(0xd9);
+      pushUint8(len);
+    } else if (len < 65536) {
+      pushUint8(0xda);
+      pushUint16(len);
+    } else {
+      pushUint8(0xbd);
+      pushUint32(len);
+    }
+    for (const b of bytes) chunks.push(b);
+  };
+
+  const pushArray = (arr: unknown[]) => {
+    const len = arr.length;
+    if (len < 16) {
+      pushUint8(0x90 | len);
+    } else if (len < 65536) {
+      pushUint8(0xdc);
+      pushUint16(len);
+    } else {
+      pushUint8(0xdd);
+      pushUint32(len);
+    }
+    for (const item of arr) encode(item);
+  };
+
+  const pushMap = (obj: Record<string, unknown>) => {
+    const keys = Object.keys(obj);
+    const len = keys.length;
+    if (len < 16) {
+      pushUint8(0x80 | len);
+    } else if (len < 65536) {
+      pushUint8(0xde);
+      pushUint16(len);
+    } else {
+      pushUint8(0xdf);
+      pushUint32(len);
+    }
+    for (const key of keys) {
+      pushString(key);
+      encode(obj[key]);
+    }
+  };
+
+  const encode = (v: unknown) => {
+    if (v === null || v === undefined) {
+      pushUint8(0xc0);
+    } else if (typeof v === "boolean") {
+      pushUint8(v ? 0xc3 : 0xc2);
+    } else if (typeof v === "number") {
+      if (Number.isInteger(v)) {
+        if (v >= 0 && v < 256) {
+          pushUint8(0xcc);
+          pushUint8(v);
+        } else if (v >= 0 && v < 65536) {
+          pushUint8(0xcd);
+          pushUint16(v);
+        } else if (v >= 0 && v < 4294967296) {
+          pushUint8(0xce);
+          pushUint32(v);
+        } else {
+          pushUint8(0xd3);
+          pushInt64(BigInt(v));
+        }
+      } else {
+        pushUint8(0xcb);
+        pushFloat64(v);
+      }
+    } else if (typeof v === "string") {
+      pushString(v);
+    } else if (Array.isArray(v)) {
+      pushArray(v);
+    } else if (typeof v === "object") {
+      pushMap(v as Record<string, unknown>);
+    } else {
+      pushUint8(0xc0);
+    }
+  };
+
+  encode(value);
+  return new Uint8Array(chunks);
+}
+
+function broadcastEvent(event: MarketStreamEvent): void {
+  for (const client of clients) {
+    if (!client.pairs.has(event.pair)) continue;
+    if (client.ws.readyState !== WebSocket.OPEN) continue;
+    try {
+      client.ws.send(encodeEvent(client, event));
+    } catch (err) {
+      console.error("[WS] Failed to send market event:", err);
+    }
+  }
+}
+
+export function attachMarketStreamServer(server: any): WebSocketServer {
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+
+  wss.on("connection", (ws: WebSocket, req: any) => {
+    if (clients.size >= MAX_CONNECTIONS) {
+      ws.close(1013, "Server at capacity");
+      return;
+    }
+
+    const url = new URL(req.url || "", "http://localhost");
+    const pairs = parsPairs(url.searchParams.get("pairs"));
+    if (pairs.length === 0) {
+      ws.close(1008, "Missing or invalid pairs parameter");
+      return;
+    }
+
+    const formatParam = (url.searchParams.get("format") || "json").toLowerCase();
+    const format: "json" | "msgpack" = formatParam === "msgpack" ? "msgpack" : "json";
+
+    const client: MarketStreamClient = {
+      ws,
+      pairs: new Set(pairs),
+      format,
+      isAlive: true,
+      lastPing: Date.now(),
+    };
+    clients.add(client);
+
+    ws.send(
+      encodeEvent(client, {
+        type: "price",
+        pair: pairs[0],
+        timestamp: Date.now(),
+        data: { subscribed: pairs, format },
+      }),
+    );
+
+    ws.on("p", () => {
+      client.lastPing = Date.now();
+    });
+
+    ws.on("message", (msg: Buffer) => {
+      try {
+        const parsed = JSON.parse(msg.toString()) as { pairs?: string[] };
+        if (Array.isArray(parsed.pairs)) {
+          const next = parsPairs(parsed.pairs.join(","));
+          if (next.length > 0) {
+            client.pairs = new Set(next);
+          }
+        }
+      } catch {
+        // ignore non-JSON control messages
+      }
+    });
+
+    ws.on("close", () => {
+      clients.delete(client);
+    });
+
+    ws.on("error", (err) => {
+      console.error("[WS] Market stream client error:", err);
+      clients.delete(client);
+    });
+  });
+
+  const heartbeat = setInterval(() => {
+    const now = Date.now();
+    for (const client of clients) {
+      if (now - client.lastPing > HEARTBEAT_INTERVAL_MS * 2) {
+        client.ws.terminate();
+        clients.delete(client);
+        continue;
+      }
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.ping();
+      }
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+  heartbeat.unref();
+
+  priceFeedService.on("price", (payload: { pair: string; price: number; timestamp?: number }) => {
+    broadcastEvent({
+      type: "price",
+      pair: payload.pair,
+      timestamp: payload.timestamp ?? Date.now(),
+      data: { price: payload.price },
+    });
+  });
+
+  volumeService.on("volume", (payload: { pair: string; volume: number; timestamp?: number }) => {
+    broadcastEvent({
+      type: "volume",
+      pair: payload.pair,
+      timestamp: payload.timestamp ?? Date.now(),
+      data: { volume: payload.volume },
+    });
+  });
+
+  orderBookService.on("orderbook", (payload: { pair: string; bids: unknown[]; asks: unknown[]; timestamp?: number }) => {
+    broadcastEvent({
+      type: "orderbook",
+      pair: payload.pair,
+      timestamp: payload.timestamp ?? Date.now(),
+      data: { bids: payload.bids, asks: payload.asks },
+    });
+  });
+
+  server.on("upgrade", (req: any, socket: any, head: Buffer) => {
+    const url = new URL(req.url || "", "http://localhost");
+    if (url.pathname === marketStreamPath) {
+      wss.handleUpgrade(req, socket, head);
+    }
+  });
+
+  return wss;
+}
+
+export function getMarketStreamMetrics() {
+  return {
+    activeConnections: clients.size,
+    maxConnections: MAX_CONNECTIONS,
+  };
+}
 
 /**
  * POST /api/v1/price-updates/multi-sig/request
@@ -287,7 +594,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const multiSigPriceId = req.params.multiSigPriceId;
-      const { memoId, stellarTxHash } = req.body;
+      const { memoId, stellarTyHash } = req.body;
 
       if (
         !multiSigPriceId ||

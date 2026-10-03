@@ -20,10 +20,12 @@ export enum AlertType {
   SECURITY_ALERT = "security_alert",
   INVARIANT_BREACH = "invariant_breach",
   POOL_RESERVE_DEVIATION = "pool_reserve_deviation",
+  AMM_RESERVE_DIVERGENCE = "amm_reserve_divergence",
   REDIS_MEMORY_THRESHOLD = "redis_memory_threshold",
   VAULT_LIQUIDATION_RISK = "vault_liquidation_risk",
   SUPPLY_INVARIANT_DRIFT = "supply_invariant_drift",
   GOVERNANCE_TIMELOCK_READY = "governance_timelock_ready",
+  ORDER_CANCELLATION_ANOMALY = "order_cancellation_anomaly",
 }
 
 export interface SystemAlert {

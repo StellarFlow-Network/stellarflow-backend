@@ -213,6 +213,57 @@ Check current allocation drift without executing rebalancing.
 }
 ```
 
+#### `GET /api/v1/rebalancing/plan`
+Preview the ordered re-allocation instructions without executing them. This is
+the same target vector the 6-hourly re-evaluation computes, plus the
+step-by-step `WITHDRAW`/`DEPOSIT` instructions handed to the auto-harvest
+worker. Withdrawals are listed before deposits so capital is freed before it is
+redeployed.
+
+**Response:**
+```json
+{
+  "rebalancing_needed": true,
+  "total_capital": 1000000.0,
+  "max_drift": 0.073,
+  "drift_threshold": 0.05,
+  "current_allocations": {"aave_usdc_lending": 0.377, "compound_eth_lending": 0.623},
+  "target_allocations": {"aave_usdc_lending": 0.45, "compound_eth_lending": 0.55},
+  "instructions": [
+    {
+      "step": 1,
+      "action": "WITHDRAW",
+      "direction": "DECREASE",
+      "strategy_id": "compound_eth_lending",
+      "vault_address": "GDEF0987654321",
+      "risk_score": 0.45,
+      "amount": 73000.0,
+      "delta_amount": -73000.0,
+      "delta_weight": -0.073,
+      "current_weight": 0.623,
+      "target_weight": 0.55
+    },
+    {
+      "step": 2,
+      "action": "DEPOSIT",
+      "direction": "INCREASE",
+      "strategy_id": "aave_usdc_lending",
+      "vault_address": "GABC1234567890",
+      "risk_score": 0.25,
+      "amount": 73000.0,
+      "delta_amount": 73000.0,
+      "delta_weight": 0.073,
+      "current_weight": 0.377,
+      "target_weight": 0.45
+    }
+  ],
+  "expected_apy": 0.0512,
+  "capital_deployed_fraction": 1.0,
+  "portfolio_risk_score": 0.39,
+  "message": "Rebalancing required"
+}
+```
+
 ### Rebalancing Operations
 
 #### `POST /api/v1/rebalancing/trigger`
@@ -290,6 +341,8 @@ Get details of a specific rebalancing operation.
 PORTFOLIO_RISK_AVERSION=0.5          # Risk aversion parameter λ (0-10)
 PORTFOLIO_MAX_SINGLE_ALLOCATION=0.4  # Max weight for single strategy (0-1)
 PORTFOLIO_MIN_ALLOCATION=0.01        # Min allocation to avoid dust
+PORTFOLIO_MAX_STRATEGY_RISK=1.0      # Max risk_score eligible for allocation (0-1)
+PORTFOLIO_MAX_PORTFOLIO_RISK=1.0     # Max capital-weighted portfolio risk score (0-1)
 
 # Rebalancing Thresholds
 REBALANCING_DRIFT_THRESHOLD=0.05     # Trigger rebalancing at 5% drift
@@ -311,7 +364,9 @@ REDLOCK_REDIS_URLS=redis://localhost:6379/0
 
 ### Celery Task
 
-The system includes a Celery task for periodic automated rebalancing:
+The optimal allocation vector is re-evaluated **every 6 hours** by the
+`auto_rebalance_capital` Celery task, which is registered in
+`app/celery_app.py`:
 
 ```python
 from app.tasks import auto_rebalance_capital
@@ -319,13 +374,11 @@ from app.tasks import auto_rebalance_capital
 # Trigger manually
 result = auto_rebalance_capital.delay()
 
-# Or schedule with Celery Beat
-app.conf.beat_schedule = {
-    'auto-rebalance-capital': {
-        'task': 'app.tasks.auto_rebalance_capital',
-        'schedule': crontab(minute='*/30'),  # Every 30 minutes
-    },
-}
+# Registered in app/celery_app.py beat_schedule
+'auto-rebalance-capital': {
+    'task': 'app.tasks.auto_rebalance_capital',
+    'schedule': crontab(minute='0', hour='*/6'),  # Every 6 hours
+},
 ```
 
 ### Task Response
@@ -348,10 +401,12 @@ The portfolio optimizer solves the following convex optimization problem:
 ```
 maximize:   E[R] - λ * Var[R]
 subject to: 
-    - Σ w_i = 1                           (weights sum to 1)
+    - Σ w_i <= 1                          (capital deployed, residual stays liquid)
     - w_i >= min_allocation               (minimum allocation)
     - w_i <= max_single_allocation        (diversification)
     - w_i * total_capital <= capacity_i   (vault capacity)
+    - risk_score_i <= max_strategy_risk   (per-strategy risk gate)
+    - Σ risk_score_i * w_i <= max_portfolio_risk  (risk weight budget)
     - w_i >= 0                            (long-only)
 
 where:
@@ -361,6 +416,13 @@ where:
     λ = risk aversion parameter
 ```
 
+`Σ w_i <= 1` (rather than `== 1`) lets the optimizer leave capital undeployed
+when the available vault capacity, the diversification cap or the risk budget
+cannot absorb all of it. Strategies whose `risk_score` exceeds
+`max_strategy_risk` are excluded before the problem is solved; when the
+portfolio risk budget binds, the target vector is scaled down and the residual
+stays liquid.
+
 ### Fallback Strategy
 
 When CVXPY is unavailable, the system falls back to proportional allocation:
@@ -369,7 +431,11 @@ When CVXPY is unavailable, the system falls back to proportional allocation:
 w_i = APY_i / Σ APY_j
 ```
 
-with capacity constraints applied and weights renormalized.
+The raw proportional weights are then **water-filled** against the per-strategy
+caps (capacity and `max_single_allocation`): any overflow is redistributed only
+to strategies that still have headroom, so a capped strategy is never pushed
+back above its cap. If the caps cannot absorb all the capital, or the portfolio
+risk budget binds, the residual is left undeployed.
 
 ## Installation
 

@@ -1,3 +1,10 @@
+# Native shielded-tree library. CPU only; no GPU runtime is claimed or required.
+FROM rust:1.85-slim AS merkle-native-builder
+WORKDIR /src/native/shielded_merkle
+COPY native/shielded_merkle/Cargo.toml native/shielded_merkle/Cargo.lock ./
+COPY native/shielded_merkle/src ./src
+RUN cargo build --release
+
 # Builder stage: install all deps, generate Prisma client, build TypeScript, then prune dev deps
 FROM node:20-alpine AS builder
 
@@ -84,6 +91,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+
+COPY --from=merkle-native-builder /src/native/shielded_merkle/target/release/libstellarflow_shielded_merkle.so /opt/stellarflow/native/libstellarflow_shielded_merkle.so
+ENV SHIELDED_MERKLE_NATIVE_LIB=/opt/stellarflow/native/libstellarflow_shielded_merkle.so
+ENV SHIELDED_MERKLE_NATIVE_REQUIRED=true
 
 # Copy application source code
 COPY . /app

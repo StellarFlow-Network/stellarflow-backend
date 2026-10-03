@@ -1,0 +1,70 @@
+# Dockerfile.test — containerised Pytest runner (Issue #1085)
+#
+# Dependency installation is deliberately identical to the Python stages of
+# the production `Dockerfile` (same base image, same venv path, same pip
+# invocation) so the suite exercises the exact library set that ships.
+# Only the entrypoint differs: uvicorn here, pytest there.
+
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Compilers are needed to build C-extension wheels (pysimdjson, msgpack,
+# psycopg2, cryptography) that have no manylinux wheel for this platform.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY requirements.txt* pyproject.toml* ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
+
+# ---------------------------------------------------------------------------
+# Test runtime
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim AS test
+
+WORKDIR /app
+
+# Runtime-only C libraries (no toolchain) — mirrors the production runtime
+# stage so optional imports resolve identically in both images.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz0b \
+    libjpeg62-turbo \
+    zlib1g \
+    liblcms2-2 \
+    libffi8 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Non-root by default: a test suite has no reason to hold root.
+RUN useradd --create-home --shell /bin/bash stellarflow
+USER stellarflow
+
+# Source + fixtures. Tests are read-only at runtime; coverage artefacts are
+# written to /app/reports and /app/coverage.xml via the compose volume.
+COPY --chown=stellarflow:stellarflow . /app
+
+# Coverage XML and the E2E release-readiness reports are written here; both
+# paths are bind-mounted by docker-compose.test.yml so the host can read them.
+RUN mkdir -p /app/reports && chown -R stellarflow:stellarflow /app/reports
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app:/app/src \
+    # Signer/test defaults so app modules import without a populated .env.
+    SIGNER_BACKEND=local \
+    STELLAR_SECRET=SDON4BI7DPYRITW7QBJMJ6KOESXAVIYPUXBDDTIEDDN4TTN6YHQTF7QA \
+    ANCHOR_WEBHOOK_SECRET=test-webhook-secret
+
+# Overridden by `make test`; kept here so a bare `docker run` is still useful.
+CMD ["python", "-m", "pytest", "-p", "no:cacheprovider"]

@@ -90,7 +90,10 @@ class StateRegister:
         """Release the lock acquired by :meth:`_acquire_lock`."""
         if token is None:
             return
-        if isinstance(token, multiprocessing.Lock):
+        # ``multiprocessing.Lock`` is a factory function, not a class, so it
+        # cannot be used with isinstance(). Identity is the correct check:
+        # _acquire_lock yields the module-level singleton or a file object.
+        if token is _PROCESS_LOCK:
             token.release()
         else:
             try:

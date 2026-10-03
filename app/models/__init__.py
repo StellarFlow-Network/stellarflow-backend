@@ -592,6 +592,89 @@ class AggregatorStatusResponse(_StrictModel):
 
 
 # ---------------------------------------------------------------------------
+# Portfolio — Multi-Address Wallet Aggregation
+# ---------------------------------------------------------------------------
+
+class WalletGroupRequest(_StrictModel):
+    """Request body for creating a wallet group."""
+
+    name: str = Field(..., description="Human-readable name for the wallet group", examples=["Main Trading Wallets"])
+    description: Optional[str] = Field(default=None, description="Optional description", examples=["My primary trading and staking wallets"])
+    is_default: bool = Field(default=False, description="Whether this is the default wallet group")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Additional configuration")
+
+
+class WalletGroupMemberRequest(_StrictModel):
+    """Request body for adding a member to a wallet group."""
+
+    public_key: str = Field(..., description="Stellar public key (G-prefixed)", examples=["GABC..."])
+    label: Optional[str] = Field(default=None, description="Optional label for this wallet", examples=["Savings Wallet"])
+    is_primary: bool = Field(default=False, description="Whether this is the primary wallet in the group")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Additional configuration")
+
+
+class TokenBalanceItem(_StrictModel):
+    """Token balance for a specific asset."""
+
+    asset_code: str = Field(..., examples=["USDC"])
+    asset_issuer: Optional[str] = Field(default=None, examples=["GABC..."])
+    balance: Decimal = Field(..., examples=[Decimal("1000.50")])
+    usd_value: Optional[Decimal] = Field(default=None, examples=[Decimal("1000.50")])
+
+
+class TradeItem(_StrictModel):
+    """Active trade information."""
+
+    trade_id: str = Field(..., examples=["trade_123"])
+    asset_pair: str = Field(..., examples=["XLM/USDC"])
+    amount: Decimal = Field(..., examples=[Decimal("100.00")])
+    status: str = Field(..., examples=["OPEN"])
+    entered_at: datetime
+
+
+class YieldRewardItem(_StrictModel):
+    """Yield reward information."""
+
+    reward_id: str = Field(..., examples=["reward_456"])
+    vault_address: str = Field(..., examples=["GXYZ..."])
+    amount: Decimal = Field(..., examples=[Decimal("5.25")])
+    asset_code: str = Field(..., examples=["USDC"])
+    earned_at: datetime
+
+
+class WalletSummary(_StrictModel):
+    """Summary for a single wallet in the group."""
+
+    public_key: str = Field(..., examples=["GABC..."])
+    label: Optional[str] = Field(default=None, examples=["Savings Wallet"])
+    token_balances: List[TokenBalanceItem] = Field(default_factory=list)
+    active_trades: List[TradeItem] = Field(default_factory=list)
+    yield_rewards: List[YieldRewardItem] = Field(default_factory=list)
+    total_balance_usd: Optional[Decimal] = Field(default=None, examples=[Decimal("5000.00")])
+
+
+class GroupedPortfolioSummaryData(_StrictModel):
+    """Aggregated portfolio summary for a wallet group."""
+
+    wallet_group_id: str = Field(..., examples=["group_123"])
+    wallet_group_name: str = Field(..., examples=["Main Trading Wallets"])
+    combined_token_balances: List[TokenBalanceItem] = Field(default_factory=list)
+    combined_active_trades: List[TradeItem] = Field(default_factory=list)
+    combined_yield_rewards: List[YieldRewardItem] = Field(default_factory=list)
+    total_balance_usd: Optional[Decimal] = Field(default=None, examples=[Decimal("15000.00")])
+    wallet_count: int = Field(..., examples=[3])
+    wallets: List[WalletSummary] = Field(default_factory=list)
+    calculated_at: datetime
+
+
+class GroupedPortfolioSummaryResponse(_StrictModel):
+    """Response for grouped portfolio summary endpoint."""
+
+    success: Literal[True] = Field(default=True)
+    data: GroupedPortfolioSummaryData
+
+
+# ---------------------------------------------------------------------------
 # Public exports
 # ---------------------------------------------------------------------------
 
@@ -659,10 +742,29 @@ __all__ = [
     "OhlcCandleItem",
     "OhlcResponse",
     "AggregatorStatusResponse",
+    # Portfolio — Multi-Address Wallet Aggregation
+    "WalletGroupRequest",
+    "WalletGroupMemberRequest",
+    "TokenBalanceItem",
+    "TradeItem",
+    "YieldRewardItem",
+    "WalletSummary",
+    "GroupedPortfolioSummaryData",
+    "GroupedPortfolioSummaryResponse",
     # Shielded Note Indexer ORM models
     "ShieldedCommitment",
     "SpentNullifier",
     "MerkleRoot",
+    # Capital Allocation and Rebalancing ORM models
+    "CapitalAllocation",
+    "RebalancingHistory",
+    "VaultStrategy",
+    # Protocol Treasury Yield Auto-Staking ORM models
+    "TreasuryYieldAllocation",
+    "TreasuryYieldReport",
+    # Multi-Address Wallet Aggregation ORM models
+    "WalletGroup",
+    "WalletGroupMember",
 ]
 
 
@@ -679,7 +781,13 @@ from app.models.shielded import MerkleRoot, ShieldedCommitment, SpentNullifier  
 from app.models.allocation import CapitalAllocation, RebalancingHistory, VaultStrategy  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# Protocol Treasury Yield Auto-Staking ORM models
+# Protocol Treasury Yield Auto-Staking and Sweeper ORM models
 # ---------------------------------------------------------------------------
 
 from app.models.treasury import TreasuryYieldAllocation, TreasuryYieldReport  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Multi-Address Wallet Aggregation ORM models
+# ---------------------------------------------------------------------------
+
+from app.models.portfolio import WalletGroup, WalletGroupMember  # noqa: E402

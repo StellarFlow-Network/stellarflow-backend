@@ -1,4 +1,12 @@
+import { RESP_TYPES, type RedisClientType } from "redis";
+
 import { getRedisClient } from "../lib/redis";
+import { logger } from "../utils/logger";
+import {
+  decodeOrderDepth,
+  encodeOrderDepth,
+  isCompressedOrderDepth,
+} from "./orderBookDepthCompression";
 
 export type OrderSide = "bids" | "asks";
 
@@ -20,6 +28,11 @@ export interface OrderDepth {
 interface RedisOrder {
   price: string | number;
   volume: string | number;
+}
+
+/** The subset of the node-redis client used to read binary cache payloads. */
+interface BinaryRedisReader {
+  get(key: string): Promise<Buffer | null>;
 }
 
 const DEFAULT_KEY_PREFIX = "orders:book";
@@ -47,6 +60,17 @@ function parseOrder(member: string): RedisOrder | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * node-redis decodes RESP blob strings as UTF-8 strings, which would mangle a
+ * compressed depth payload. Mapping `RESP_TYPES.BLOB_STRING` to `Buffer` makes
+ * `GET` hand back the exact bytes that were written.
+ */
+function getBinaryRedisReader(redis: RedisClientType): BinaryRedisReader {
+  return redis.withTypeMapping({
+    [RESP_TYPES.BLOB_STRING]: Buffer,
+  }) as unknown as BinaryRedisReader;
 }
 
 class OrderDepthAggregatorService {
@@ -80,6 +104,11 @@ class OrderDepthAggregatorService {
     };
   }
 
+  /**
+   * Persist the aggregated depth for a market. The document is stored as a
+   * compressed binary payload (see `orderBookDepthCompression`) instead of
+   * JSON to cut the Redis footprint of the per-pair depth cache.
+   */
   async updateDepth(
     market: string,
     tickSize: string | number,
@@ -88,8 +117,42 @@ class OrderDepthAggregatorService {
     const redis = getRedisClient();
     if (!redis?.isReady) return;
 
-    const keyPrefix = process.env.ORDER_BOOK_REDIS_PREFIX ?? DEFAULT_KEY_PREFIX;
-    await redis.set(`${keyPrefix}:${market}:depth:cache`, JSON.stringify(depth));
+    await redis.set(this.cacheKey(market), encodeOrderDepth(depth));
+  }
+
+  /**
+   * Read the cached depth for a market, decompressing payloads written by
+   * {@link updateDepth}. Entries persisted before the compressed format shipped
+   * (plain JSON strings) are still readable, so a deploy does not drop the live
+   * cache; unreadable entries are discarded so the caller can rebuild them.
+   */
+  async getCachedDepth(market: string): Promise<OrderDepth | null> {
+    const redis = getRedisClient();
+    if (!redis?.isReady) return null;
+
+    const raw = await getBinaryRedisReader(redis).get(this.cacheKey(market));
+    if (!raw || raw.length === 0) return null;
+
+    try {
+      if (isCompressedOrderDepth(raw)) {
+        return decodeOrderDepth(raw);
+      }
+      return JSON.parse(raw.toString("utf8")) as OrderDepth;
+    } catch (error) {
+      logger.warn(
+        `[OrderDepthAggregatorService] Discarding unreadable depth cache entry for ${market}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  private cacheKey(market: string): string {
+    return `${this.keyPrefix}:${market}:depth:cache`;
+  }
+
+  private get keyPrefix(): string {
+    return process.env.ORDER_BOOK_REDIS_PREFIX ?? DEFAULT_KEY_PREFIX;
   }
 
   private aggregateSide(

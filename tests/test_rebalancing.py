@@ -15,7 +15,10 @@ from app.models.allocation import (
     RebalancingHistory,
 )
 from app.services.portfolio_optimizer import PortfolioOptimizer
-from app.services.capital_rebalancer import CapitalRebalancer
+from app.services.capital_rebalancer import (
+    CapitalRebalancer,
+    build_rebalancing_instructions,
+)
 
 
 class MockRelayerPool:
@@ -178,6 +181,167 @@ class TestPortfolioOptimizer:
 
         # Conservative optimizer should prefer low_risk despite lower APY
         assert allocations["low_risk"] > allocations["high_risk"]
+
+    def test_max_strategy_risk_excludes_high_risk_strategies(
+        self, sample_strategies
+    ):
+        """Strategies above the per-strategy risk budget receive no capital."""
+        optimizer = PortfolioOptimizer(
+            risk_aversion=0.5,
+            max_single_allocation=0.6,
+            min_allocation=0.0,
+            max_strategy_risk=0.5,
+        )
+
+        allocations, _ = optimizer.compute_target_allocations(
+            sample_strategies, Decimal("1000000.0")
+        )
+
+        # anchor_ust has risk_score 0.8 > 0.5 and must be excluded entirely.
+        assert "anchor_ust" not in allocations
+        assert allocations["aave_usdc"] > 0
+        assert allocations["compound_eth"] > 0
+        assert sum(allocations.values()) <= Decimal("1.0001")
+
+    def test_portfolio_risk_budget_scales_down_exposure(self, sample_strategies):
+        """The capital-weighted risk score must stay within the risk budget."""
+        optimizer = PortfolioOptimizer(
+            risk_aversion=0.5,
+            max_single_allocation=1.0,
+            min_allocation=0.0,
+            max_strategy_risk=1.0,
+            max_portfolio_risk=0.4,
+        )
+
+        allocations, metrics = optimizer._fallback_proportional_allocation(
+            sample_strategies, 1000000.0
+        )
+
+        risk_by_id = {s["id"]: s["risk_score"] for s in sample_strategies}
+        exposure = sum(
+            allocations[strategy_id] * risk_by_id[strategy_id]
+            for strategy_id in allocations
+        )
+
+        assert exposure <= 0.4 + 1e-9
+        assert metrics["portfolio_risk_score"] <= 0.4 + 1e-9
+        # The budget binds, so some capital is intentionally left undeployed.
+        assert sum(allocations.values()) < 1.0
+
+    def test_fallback_capping_never_violates_capacity(self):
+        """Regression: renormalising after capping used to exceed vault capacity."""
+        optimizer = PortfolioOptimizer(
+            risk_aversion=0.5, max_single_allocation=1.0, min_allocation=0.0
+        )
+        strategies = [
+            {
+                "id": "big_apy_small_vault",
+                "current_apy": 0.9,
+                "historical_apy_std": 0.01,
+                "tvl": 0.0,
+                "capacity": 5_000_000.0,
+                "risk_score": 0.1,
+                "enabled": True,
+            },
+            {
+                "id": "small_apy_big_vault",
+                "current_apy": 0.1,
+                "historical_apy_std": 0.01,
+                "tvl": 0.0,
+                "capacity": 10_000_000.0,
+                "risk_score": 0.2,
+                "enabled": True,
+            },
+        ]
+        total_capital = 10_000_000.0
+
+        allocations, _ = optimizer._fallback_proportional_allocation(
+            strategies, total_capital
+        )
+
+        for strategy in strategies:
+            allocated_amount = allocations[strategy["id"]] * total_capital
+            assert allocated_amount <= strategy["capacity"] + 1e-6
+        assert sum(allocations.values()) <= 1.0 + 1e-9
+
+    def test_fallback_respects_max_single_allocation(self, sample_strategies):
+        """The diversification cap also binds on the fallback path."""
+        optimizer = PortfolioOptimizer(
+            risk_aversion=0.5, max_single_allocation=0.25, min_allocation=0.0
+        )
+
+        allocations, _ = optimizer._fallback_proportional_allocation(
+            sample_strategies, 1_000_000.0
+        )
+
+        for weight in allocations.values():
+            assert weight <= 0.25 + 1e-9
+
+    def test_optimizer_rejects_invalid_risk_bounds(self):
+        """Risk budgets outside [0, 1] are rejected at construction time."""
+        with pytest.raises(ValueError):
+            PortfolioOptimizer(max_strategy_risk=1.5)
+        with pytest.raises(ValueError):
+            PortfolioOptimizer(max_portfolio_risk=-0.1)
+
+
+class TestRebalancingInstructions:
+    """Tests for the ordered auto-harvest worker instruction builder."""
+
+    @pytest.fixture
+    def vault_strategies(self):
+        return [
+            {
+                "id": "aave_usdc",
+                "vault_address": "GAAVE...",
+                "risk_score": 0.3,
+            },
+            {
+                "id": "compound_eth",
+                "vault_address": "GCOMP...",
+                "risk_score": 0.5,
+            },
+        ]
+
+    def test_instructions_are_ordered_withdrawals_first(self, vault_strategies):
+        current = {"aave_usdc": Decimal("0.6"), "compound_eth": Decimal("0.4")}
+        target = {"aave_usdc": Decimal("0.3"), "compound_eth": Decimal("0.7")}
+
+        instructions = build_rebalancing_instructions(
+            vault_strategies, current, target, Decimal("1000000")
+        )
+
+        assert [i["step"] for i in instructions] == [1, 2]
+        assert instructions[0]["action"] == "WITHDRAW"
+        assert instructions[0]["strategy_id"] == "aave_usdc"
+        assert instructions[0]["vault_address"] == "GAAVE..."
+        assert abs(instructions[0]["amount"] - 300000.0) < 1.0
+        assert instructions[1]["action"] == "DEPOSIT"
+        assert instructions[1]["strategy_id"] == "compound_eth"
+        assert instructions[1]["target_weight"] == 0.7
+
+    def test_instructions_omit_dust_movements(self, vault_strategies):
+        current = {"aave_usdc": Decimal("0.5"), "compound_eth": Decimal("0.5")}
+        target = {"aave_usdc": Decimal("0.50002"), "compound_eth": Decimal("0.49998")}
+
+        instructions = build_rebalancing_instructions(
+            vault_strategies, current, target, Decimal("1000000")
+        )
+
+        assert instructions == []
+
+    def test_instructions_carry_vault_address_and_risk(self, vault_strategies):
+        current = {"aave_usdc": Decimal("0.2"), "compound_eth": Decimal("0.8")}
+        target = {"aave_usdc": Decimal("0.5"), "compound_eth": Decimal("0.5")}
+
+        instructions = build_rebalancing_instructions(
+            vault_strategies, current, target, Decimal("2000000")
+        )
+
+        for instruction in instructions:
+            assert instruction["vault_address"] in {"GAAVE...", "GCOMP..."}
+            assert instruction["risk_score"] is not None
+            assert instruction["amount"] >= 0
 
 
 class TestCapitalRebalancer:

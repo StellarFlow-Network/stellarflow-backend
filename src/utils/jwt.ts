@@ -31,7 +31,7 @@ export interface SessionRedisRecord {
   exp?: number;
 }
 
-const SESSION_PREFIX = "stellarflow:sessions:";
+export const SESSION_KEY_PREFIX = "stellarflow:sessions:";
 const SESSION_REVOCATION_PREFIX = "stellarflow:session:revoked:";
 const SESSION_FALLBACK_STORE = new Map<string, { value: string; expiresAt: number }>();
 
@@ -42,7 +42,26 @@ function getSessionTtlSeconds(): number {
 }
 
 function getSessionKey(userId: number, sid: string): string {
-  return `${SESSION_PREFIX}${userId}:${sid}`;
+  return `${SESSION_KEY_PREFIX}${userId}:${sid}`;
+}
+
+/**
+ * Parse a `stellarflow:sessions:<userId>:<sid>` Redis key back into its parts.
+ * Returns `null` when the key does not follow the session key shape.
+ */
+export function parseSessionKey(
+  key: string,
+): { userId: number; sid: string } | null {
+  if (!key.startsWith(SESSION_KEY_PREFIX)) return null;
+
+  const remainder = key.slice(SESSION_KEY_PREFIX.length);
+  const separator = remainder.indexOf(":");
+  if (separator <= 0 || separator === remainder.length - 1) return null;
+
+  const userId = Number(remainder.slice(0, separator));
+  if (!Number.isInteger(userId)) return null;
+
+  return { userId, sid: remainder.slice(separator + 1) };
 }
 
 function getSessionRevocationKey(userId: number, sid: string): string {

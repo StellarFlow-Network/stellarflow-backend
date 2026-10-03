@@ -1,9 +1,22 @@
 """Pytest fixtures providing Docker test containers for integration tests.
 
+Two execution modes are supported:
+
+**1. Self-provisioned (default).**  When ``TEST_DATABASE_URL`` and
+``TEST_REDIS_URL`` are unset, PostgreSQL 16 and Redis 7 are started with
+``testcontainers`` and torn down at the end of the session.  This is the
+path used by bare-metal developers running ``pytest`` directly.
+
+**2. Compose-provisioned.**  When both variables are set, the fixtures attach
+to services that are already running (e.g. the ``db`` / ``redis`` containers
+from ``docker-compose.test.yml``) instead of starting nested containers.
+This keeps the test runner free of a Docker-socket mount, which is what makes
+``make test`` work identically on a developer laptop and on a CI runner.
+
 Session-scoped fixtures
 -----------------------
-* ``postgres_container`` — PostgreSQL 16 via testcontainers
-* ``redis_container`` — Redis 7 via testcontainers
+* ``postgres_container`` — PostgreSQL 16 (testcontainer or external service)
+* ``redis_container`` — Redis 7 (testcontainer or external service)
 * ``horizon_mock_server`` — In-process FastAPI Horizon mock
 
 Function-scoped fixtures
@@ -26,8 +39,10 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import AsyncGenerator, Generator
+from typing import AsyncGenerator, Generator, Optional
+from urllib.parse import urlparse
 
+import psycopg2
 import pytest
 import redis
 import redis.asyncio as aioredis
@@ -44,17 +59,124 @@ if str(_SRC) not in sys.path:
 
 
 # ---------------------------------------------------------------------------
+# External (compose-provisioned) service support
+# ---------------------------------------------------------------------------
+#
+# ``docker-compose.test.yml`` starts PostgreSQL and Redis alongside the test
+# runner and passes their URLs in.  When those are present we deliberately do
+# NOT start nested testcontainers — a container cannot reach the Docker
+# daemon unless the socket is mounted, and mounting it would let the test
+# suite mutate the host's images.  Compose owns the lifecycle instead.
+
+_EXTERNAL_DB_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
+_EXTERNAL_REDIS_URL = os.environ.get("TEST_REDIS_URL", "").strip()
+
+
+def _using_external_services() -> bool:
+    """Return True when both Postgres and Redis are supplied by the environment."""
+    return bool(_EXTERNAL_DB_URL and _EXTERNAL_REDIS_URL)
+
+
+class _ExternalPostgres:
+    """Adapter that mimics the slice of the testcontainers API the fixtures use.
+
+    Lets the rest of this module stay agnostic about whether the database came
+    from testcontainers or from ``docker-compose.test.yml``.
+    """
+
+    def __init__(self, url: str) -> None:
+        self._url = url
+
+    def get_connection_url(self) -> str:
+        return self._url
+
+    def stop(self) -> None:  # pragma: no cover - nothing to tear down
+        """No-op: compose owns the container lifecycle."""
+
+
+class _ExternalRedis:
+    """Adapter mirroring ``RedisContainer`` for a compose-provisioned Redis."""
+
+    def __init__(self, url: str) -> None:
+        self._url = url
+        parsed = urlparse(url)
+        self._host = parsed.hostname or "localhost"
+        self._port = parsed.port or 6379
+
+    def get_container_host_ip(self) -> str:
+        return self._host
+
+    def get_exposed_port(self, port: int) -> int:
+        return self._port
+
+    def stop(self) -> None:  # pragma: no cover - nothing to tear down
+        """No-op: compose owns the container lifecycle."""
+
+
+def _wait_for_postgres(url: str, timeout: float = 60.0) -> None:
+    """Block until the external PostgreSQL accepts connections.
+
+    Compose gates the runner on a healthcheck, but CI runners and laptop
+    restarts can race, so we poll defensively before failing a test.
+    """
+    deadline = time.monotonic() + timeout
+    last_error: Optional[BaseException] = None
+    while time.monotonic() < deadline:
+        try:
+            conn = psycopg2.connect(_strip_async_driver(url), connect_timeout=3)
+            conn.close()
+            return
+        except Exception as exc:  # pragma: no cover - timing dependent
+            last_error = exc
+            time.sleep(0.5)
+    raise RuntimeError(
+        f"PostgreSQL at {url!r} not ready after {timeout}s: {last_error}"
+    )
+
+
+def _wait_for_redis(url: str, timeout: float = 60.0) -> None:
+    """Block until the external Redis responds to PING."""
+    deadline = time.monotonic() + timeout
+    last_error: Optional[BaseException] = None
+    while time.monotonic() < deadline:
+        try:
+            client = redis.from_url(url, socket_connect_timeout=3)
+            try:
+                if client.ping():
+                    return
+            finally:
+                client.close()
+        except Exception as exc:  # pragma: no cover - timing dependent
+            last_error = exc
+            time.sleep(0.5)
+    raise RuntimeError(f"Redis at {url!r} not ready after {timeout}s: {last_error}")
+
+
+def _strip_async_driver(url: str) -> str:
+    """Return a libpq/psycopg2-compatible URL from any SQLAlchemy URL form."""
+    return url.replace("postgresql+asyncpg://", "postgresql://").replace(
+        "postgresql+psycopg2://", "postgresql://"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Session-scoped containers
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="session")
 def postgres_container():
-    """Start a PostgreSQL 16 Docker container for the test session.
+    """Provide a PostgreSQL 16 server for the test session.
 
-    Yields the testcontainers ``PostgresContainer`` instance.  The container
-    is automatically stopped when the test session ends.
+    Uses ``TEST_DATABASE_URL`` when set (docker-compose.test.yml), otherwise
+    starts a ``testcontainers`` PostgreSQL 16 instance that is stopped when the
+    test session ends.
     """
+    if _using_external_services():
+        _wait_for_postgres(_EXTERNAL_DB_URL)
+        yield _ExternalPostgres(_strip_async_driver(_EXTERNAL_DB_URL))
+        return
+
     try:
         from testcontainers.community.postgres import PostgresContainer
     except ImportError:
@@ -78,11 +200,17 @@ def postgres_container():
 
 @pytest.fixture(scope="session")
 def redis_container():
-    """Start a Redis 7 Docker container for the test session.
+    """Provide a Redis 7 server for the test session.
 
-    Yields the testcontainers ``RedisContainer`` instance.  The container
-    is automatically stopped when the test session ends.
+    Uses ``TEST_REDIS_URL`` when set (docker-compose.test.yml), otherwise
+    starts a ``testcontainers`` Redis 7 instance that is stopped when the
+    test session ends.
     """
+    if _using_external_services():
+        _wait_for_redis(_EXTERNAL_REDIS_URL)
+        yield _ExternalRedis(_EXTERNAL_REDIS_URL)
+        return
+
     try:
         from testcontainers.community.redis import RedisContainer
     except ImportError:

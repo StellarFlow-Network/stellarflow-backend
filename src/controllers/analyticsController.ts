@@ -231,3 +231,43 @@ export async function getOhlcCandles(
     sendApiError(res, 500, "INTERNAL_SERVER_ERROR", typeof (error instanceof Error ? error.message : "Internal server error") === "string" ? String(error instanceof Error ? error.message : "Internal server error") : undefined);
   }
 }
+
+export async function getLeaderboard(req: Request, res: Response): Promise<void> {
+  try {
+    const limitParam = req.query.limit;
+    const pageParam = req.query.page;
+    let limit = limitParam ? parseInt(limitParam as string, 10) : 20;
+    let page = pageParam ? parseInt(pageParam as string, 10) : 1;
+    if (isNaN(limit) || limit < 1) limit = 20;
+    if (isNaN(page) || page < 1) page = 1;
+
+    const offset = (page - 1) * limit;
+
+    const rows = await prisma.\$queryRaw\
+      SELECT "userId", SUM(volume) as total_volume
+      FROM user_volume_leaderboard
+      WHERE bucket >= NOW() - INTERVAL '30 days'
+      GROUP BY "userId"
+      ORDER BY total_volume DESC
+      LIMIT \ OFFSET \
+    \;
+
+    res.json({
+      success: true,
+      data: (rows as any[]).map((r) => ({
+        userId: r.userId,
+        volume: r.total_volume.toString(),
+      })),
+      pagination: { limit, page }
+    });
+  } catch (error) {
+    console.error('[AnalyticsController] getLeaderboard error:', error);
+    sendApiError(
+      res,
+      500,
+      'INTERNAL_SERVER_ERROR',
+      error instanceof Error ? error.message : 'Unable to fetch leaderboard'
+    );
+  }
+}
+

@@ -1,4 +1,5 @@
 import prisma from "../lib/prisma";
+import { Prisma } from "@prisma/client";
 import { governanceWebhookBroadcaster } from "./governanceWebhookBroadcaster";
 
 export interface TimelockEntry {
@@ -31,35 +32,27 @@ export class TimelockService {
   }> {
     const { status, contractId, actionType, limit = 50, offset = 0 } = filters;
 
-    const whereClauses: string[] = [];
-    const params: unknown[] = [];
-    let paramIdx = 1;
-
+    const conditions: Prisma.Sql[] = [];
     if (status) {
-      whereClauses.push(`"status" = $${paramIdx}`);
-      params.push(status);
-      paramIdx++;
+      if (status.toLowerCase() === "expired") {
+        conditions.push(Prisma.sql`"status" IN ('Expired', 'EXPIRED')`);
+      } else {
+        conditions.push(Prisma.sql`"status" = ${status}`);
+      }
     }
-    if (contractId) {
-      whereClauses.push(`"contractId" = $${paramIdx}`);
-      params.push(contractId);
-      paramIdx++;
-    }
-    if (actionType) {
-      whereClauses.push(`"actionType" = $${paramIdx}`);
-      params.push(actionType);
-      paramIdx++;
-    }
+    if (contractId) conditions.push(Prisma.sql`"contractId" = ${contractId}`);
+    if (actionType) conditions.push(Prisma.sql`"actionType" = ${actionType}`);
 
-    const whereSQL =
-      whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    const whereSQL = conditions.length
+      ? Prisma.sql`WHERE ${Prisma.join(conditions, " AND ")}`
+      : Prisma.empty;
 
-    const countResult = await prisma.$queryRaw<{ count: bigint }[]>`
-      SELECT COUNT(*) as count FROM "GovernanceProposal" ${whereSQL}
-    `;
+    const countResult = await prisma.$queryRaw<{ count: bigint }[]>(
+      Prisma.sql`SELECT COUNT(*) as count FROM "GovernanceProposal" ${whereSQL}`,
+    );
     const total = Number(countResult[0]?.count ?? 0);
 
-    const entries = await prisma.$queryRaw<TimelockEntry[]>`
+    const entries = await prisma.$queryRaw<TimelockEntry[]>(Prisma.sql`
       SELECT "id", "proposalId", "contractId", "actionType", "actionData",
              "status", "expiresAt", "transactionHash", "executedAt",
              "cancelledAt", "createdAt", "updatedAt"
@@ -67,7 +60,7 @@ export class TimelockService {
       ${whereSQL}
       ORDER BY "createdAt" DESC
       LIMIT ${limit} OFFSET ${offset}
-    `;
+    `);
 
     return { entries, total };
   }
@@ -88,6 +81,7 @@ export class TimelockService {
     queued: number;
     executed: number;
     cancelled: number;
+    expired: number;
     total: number;
   }> {
     const rows = await prisma.$queryRaw<{ status: string; count: bigint }[]>`
@@ -104,9 +98,10 @@ export class TimelockService {
     }
 
     return {
-      queued: counts["Queued"] ?? 0,
-      executed: counts["Executed"] ?? 0,
-      cancelled: counts["Cancelled"] ?? 0,
+      queued: counts["Queued"] ?? counts["QUEUED"] ?? 0,
+      executed: counts["Executed"] ?? counts["EXECUTED"] ?? 0,
+      cancelled: counts["Cancelled"] ?? counts["CANCELLED"] ?? 0,
+      expired: (counts["Expired"] ?? 0) + (counts["EXPIRED"] ?? 0),
       total,
     };
   }

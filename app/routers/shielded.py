@@ -5,12 +5,13 @@ Issue #798 — Implement Shielded Private Transaction Note Indexer Service
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import List, Optional
 
 import asyncpg
 import structlog
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Header, HTTPException, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.merkle_service import MerkleService
@@ -31,7 +32,7 @@ class NoteResponse(BaseModel):
 
     leaf_index: int = Field(..., description="Zero-based position of the commitment leaf")
     merkle_root: str = Field(..., description="Latest Poseidon-BN254 Merkle tree root hex")
-    merkle_path: List[str] = Field(..., description="Ordered 20-element sibling hashes for ZK proof")
+    merkle_path: List[str] = Field(..., description="Ordered 32-element sibling hashes for ZK proof")
     leaf_count: int = Field(..., description="Current leaf count in the Merkle tree")
     is_spent: bool = Field(..., description="Whether the note's nullifier has been spent on-chain")
 
@@ -46,9 +47,45 @@ class LatestRootResponse(BaseModel):
     ledger_sequence: int = Field(..., description="Stellar ledger sequence of the root checkpoint")
 
 
+class TreeSyncRequest(BaseModel):
+    """Minimal internal RPC request; deposits are read from indexed events."""
+
+    start_ledger: int = Field(..., ge=0)
+    end_ledger: int = Field(..., ge=0)
+
+
+class TreeSyncResponse(BaseModel):
+    accepted: bool
+    task_id: str
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@router.post(
+    "/sync",
+    response_model=TreeSyncResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue an internal shielded-tree synchronization range",
+)
+async def queue_tree_sync(
+    payload: TreeSyncRequest,
+    x_internal_token: Optional[str] = Header(default=None),
+) -> TreeSyncResponse:
+    """Queue ordered ledger processing through the existing Celery worker."""
+    if payload.end_ledger < payload.start_ledger:
+        raise HTTPException(status_code=422, detail="end_ledger must not precede start_ledger")
+    configured_token = os.getenv("SHIELDED_TREE_SYNC_TOKEN")
+    if not configured_token or not x_internal_token or not hmac.compare_digest(configured_token, x_internal_token):
+        raise HTTPException(status_code=403, detail="internal worker authentication failed")
+    try:
+        from app.tasks import index_shielded_notes_range
+        result = index_shielded_notes_range.delay(payload.start_ledger, payload.end_ledger)
+        return TreeSyncResponse(accepted=True, task_id=result.id)
+    except Exception as exc:
+        log.exception("shielded.queue_tree_sync_error", error=str(exc))
+        raise HTTPException(status_code=503, detail="tree synchronization is unavailable") from exc
 
 @router.get(
     "/note/{commitment}",

@@ -224,7 +224,7 @@ class DLQEntry:
         tb_str: str = "",
         trace_context: Optional[Dict[str, str]] = None,
     ) -> "DLQEntry":
-            """Factory method to build a ``DLQEntry`` from an ingestion exception."""
+        """Factory method to build a ``DLQEntry`` from an ingestion exception."""
         now = datetime.now(timezone.utc)
         enqueued_at = now.isoformat()
         perm_failed = policy.exhausted(attempt)

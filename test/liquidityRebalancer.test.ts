@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculateRebalancingPlan } from "../src/services/liquidity/calculation";
+import {
+  calculateRebalancingPlan,
+  suggestConcentratedLiquidityRebalance,
+} from "../src/services/liquidity/calculation";
 import {
   FIVE_MINUTES_MS,
   LiquidityRebalancingWorker,
@@ -20,6 +23,38 @@ const pool: LiquidityPoolConfig = {
 
 test("uses a five-minute polling interval", () => {
   assert.equal(FIVE_MINUTES_MS, 300_000);
+});
+
+test("does not suggest a new range while the active tick is in range", () => {
+  const suggestion = suggestConcentratedLiquidityRebalance({
+    positionId: "position-1",
+    ownerId: "owner-1",
+    poolKey: "pool-1",
+    currentTick: 0,
+    tickLower: -100,
+    tickUpper: 100,
+    currentPrice: 1,
+  });
+
+  assert.equal(suggestion, null);
+});
+
+test("suggests an outward-rounded ten-percent range when price exits a position", () => {
+  const suggestion = suggestConcentratedLiquidityRebalance({
+    positionId: "position-1",
+    ownerId: "owner-1",
+    poolKey: "pool-1",
+    currentTick: 100,
+    tickLower: -100,
+    tickUpper: 100,
+    currentPrice: 1,
+  });
+
+  assert.ok(suggestion);
+  assert.equal(suggestion.recommendedLowerPrice, 0.9);
+  assert.equal(suggestion.recommendedUpperPrice, 1.1);
+  assert.ok(1.0001 ** suggestion.recommendedTickLower <= 0.9);
+  assert.ok(1.0001 ** suggestion.recommendedTickUpper >= 1.1);
 });
 
 test("does not rebalance reserves inside the 70/30 boundary", () => {

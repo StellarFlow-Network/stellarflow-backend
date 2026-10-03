@@ -33,6 +33,64 @@ class RebalancingError(RuntimeError):
     """Raised when capital rebalancing fails."""
 
 
+def build_rebalancing_instructions(
+    strategies: List[Dict[str, Any]],
+    current_allocations: Dict[str, Decimal],
+    target_allocations: Dict[str, Decimal],
+    total_capital: Decimal,
+) -> List[Dict[str, Any]]:
+    """Build ordered step-by-step transaction instructions for the harvest worker.
+
+    Each instruction is self-contained so a worker can execute it without
+    re-deriving anything: it names the target vault, the action to take
+    (``WITHDRAW`` or ``DEPOSIT``), the absolute amount and the resulting target
+    weight.  Instructions are ordered so every ``WITHDRAW`` leg precedes every
+    ``DEPOSIT`` leg, which frees capital before it is redeployed and avoids a
+    transient funding shortfall on the deposit legs.  Movements below the dust
+    threshold (1e-4 of total capital) are omitted.
+    """
+    vault_by_strategy = {s["id"]: s.get("vault_address") for s in strategies}
+    risk_by_strategy = {
+        s["id"]: float(s.get("risk_score", 0.0)) for s in strategies
+    }
+
+    all_strategies = set(current_allocations.keys()) | set(target_allocations.keys())
+
+    instructions: List[Dict[str, Any]] = []
+    for strategy_id in sorted(all_strategies):
+        current_weight = current_allocations.get(strategy_id, Decimal("0"))
+        target_weight = target_allocations.get(strategy_id, Decimal("0"))
+        delta_weight = target_weight - current_weight
+
+        if abs(delta_weight) <= Decimal("0.0001"):  # Ignore dust
+            continue
+
+        delta_amount = delta_weight * total_capital
+        direction = "INCREASE" if delta_amount > 0 else "DECREASE"
+
+        instructions.append(
+            {
+                "strategy_id": strategy_id,
+                "vault_address": vault_by_strategy.get(strategy_id),
+                "risk_score": risk_by_strategy.get(strategy_id),
+                "direction": direction,
+                "action": "DEPOSIT" if direction == "INCREASE" else "WITHDRAW",
+                "delta_weight": float(delta_weight),
+                "delta_amount": float(delta_amount),
+                "amount": abs(float(delta_amount)),
+                "current_weight": float(current_weight),
+                "target_weight": float(target_weight),
+            }
+        )
+
+    # Withdrawals first so capital is available before the deposit legs run.
+    instructions.sort(key=lambda m: (m["direction"] != "DECREASE", m["strategy_id"]))
+    for step, instruction in enumerate(instructions, start=1):
+        instruction["step"] = step
+
+    return instructions
+
+
 class CapitalRebalancer:
     """Orchestrates automated capital rebalancing across vault strategies.
 
@@ -51,7 +109,7 @@ class CapitalRebalancer:
     def __init__(
         self,
         optimizer: PortfolioOptimizer,
-        relayer_pool: RelayerPool,
+        relayer_pool: Optional[RelayerPool] = None,
         drift_threshold: Decimal = Decimal("0.05"),
         treasury_account: Optional[str] = None,
     ) -> None:
@@ -144,6 +202,87 @@ class CapitalRebalancer:
             bound.info("no_rebalancing_needed", max_drift=float(max_drift))
             return None
 
+    async def plan_rebalancing(self, db: AsyncSession) -> Dict[str, Any]:
+        """Compute target allocations and ordered instructions *without* executing.
+
+        Read-only counterpart to :meth:`check_and_rebalance`.  It returns the
+        step-by-step transaction instructions the auto-harvest worker must run,
+        so the exact re-allocation can be inspected (or handed off) before any
+        capital moves on-chain.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Plan with ``rebalancing_needed``, current/target weights, maximum
+            drift and an ordered ``instructions`` list.
+        """
+        bound = log.bind(component="CapitalRebalancer", method="plan_rebalancing")
+
+        strategies = await self._fetch_strategies(db)
+        if not strategies:
+            bound.warning("no_strategies_found")
+            return self._empty_plan("No enabled strategies found")
+
+        total_capital = await self._compute_total_capital(db)
+        if total_capital <= 0:
+            bound.warning("zero_total_capital")
+            return self._empty_plan("Zero total capital under management")
+
+        current_allocations = await self._fetch_current_allocations(db)
+
+        target_allocations, metrics = self.optimizer.compute_target_allocations(
+            strategies, total_capital
+        )
+        max_drift, _ = self.optimizer.check_drift(
+            current_allocations, target_allocations
+        )
+
+        instructions = build_rebalancing_instructions(
+            strategies, current_allocations, target_allocations, total_capital
+        )
+        rebalancing_needed = max_drift > self.drift_threshold
+
+        bound.info(
+            "rebalancing_plan_computed",
+            max_drift=float(max_drift),
+            instruction_count=len(instructions),
+            rebalancing_needed=rebalancing_needed,
+        )
+
+        return {
+            "rebalancing_needed": rebalancing_needed,
+            "total_capital": float(total_capital),
+            "max_drift": float(max_drift),
+            "drift_threshold": float(self.drift_threshold),
+            "current_allocations": {
+                k: float(v) for k, v in current_allocations.items()
+            },
+            "target_allocations": {
+                k: float(v) for k, v in target_allocations.items()
+            },
+            "instructions": instructions,
+            "metrics": metrics,
+            "message": (
+                "Rebalancing required"
+                if rebalancing_needed
+                else "Allocation drift within threshold"
+            ),
+        }
+
+    def _empty_plan(self, message: str) -> Dict[str, Any]:
+        """Return an empty plan payload for the no-work cases."""
+        return {
+            "rebalancing_needed": False,
+            "total_capital": 0.0,
+            "max_drift": 0.0,
+            "drift_threshold": float(self.drift_threshold),
+            "current_allocations": {},
+            "target_allocations": {},
+            "instructions": [],
+            "metrics": {},
+            "message": message,
+        }
+
     async def _fetch_strategies(self, db: AsyncSession) -> List[Dict[str, Any]]:
         """Fetch all enabled vault strategies."""
         stmt = select(VaultStrategy).where(VaultStrategy.enabled == True)
@@ -199,9 +338,9 @@ class CapitalRebalancer:
         # Generate rebalancing ID
         rebalancing_id = self._generate_rebalancing_id()
 
-        # Compute capital movements
+        # Compute the ordered, executable capital movements/instructions
         movements = self._compute_movements(
-            current_allocations, target_allocations, total_capital
+            current_allocations, target_allocations, total_capital, strategies
         )
 
         # Compute aggregate APY before rebalancing
@@ -282,31 +421,20 @@ class CapitalRebalancer:
         current_allocations: Dict[str, Decimal],
         target_allocations: Dict[str, Decimal],
         total_capital: Decimal,
+        strategies: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
-        """Compute capital movements needed to reach target allocations."""
-        movements = []
+        """Compute ordered capital movements needed to reach target allocations.
 
-        all_strategies = set(current_allocations.keys()) | set(
-            target_allocations.keys()
+        Thin wrapper around :func:`build_rebalancing_instructions`; ``strategies``
+        is optional so the pure movement math can be exercised without vault
+        metadata.
+        """
+        return build_rebalancing_instructions(
+            strategies or [],
+            current_allocations,
+            target_allocations,
+            total_capital,
         )
-
-        for strategy_id in all_strategies:
-            current_weight = current_allocations.get(strategy_id, Decimal("0"))
-            target_weight = target_allocations.get(strategy_id, Decimal("0"))
-            delta_weight = target_weight - current_weight
-
-            if abs(delta_weight) > Decimal("0.0001"):  # Ignore dust
-                delta_amount = delta_weight * total_capital
-                movements.append(
-                    {
-                        "strategy_id": strategy_id,
-                        "delta_weight": float(delta_weight),
-                        "delta_amount": float(delta_amount),
-                        "direction": "INCREASE" if delta_amount > 0 else "DECREASE",
-                    }
-                )
-
-        return movements
 
     async def _execute_movement(
         self, movement: Dict[str, Any]
@@ -414,7 +542,7 @@ class CapitalRebalancer:
 
 async def create_capital_rebalancer(
     optimizer: PortfolioOptimizer,
-    relayer_pool: RelayerPool,
+    relayer_pool: Optional[RelayerPool] = None,
 ) -> CapitalRebalancer:
     """Factory for creating CapitalRebalancer instance.
 
@@ -422,8 +550,9 @@ async def create_capital_rebalancer(
     ----------
     optimizer : PortfolioOptimizer
         Portfolio optimizer instance.
-    relayer_pool : RelayerPool
-        Relayer pool for transaction execution.
+    relayer_pool : Optional[RelayerPool]
+        Relayer pool for transaction execution.  May be omitted for read-only
+        planning (``plan_rebalancing``), which never submits transactions.
 
     Returns
     -------

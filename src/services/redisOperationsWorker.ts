@@ -4,6 +4,10 @@ import {
   AlertType,
   NotificationService,
 } from "./notificationService";
+import {
+  parseRedisUsedMemory,
+  redisMemoryUsedBytes,
+} from "./redisMemoryMetric";
 
 const DEFAULT_STREAM_MAX_LENGTH = 100_000;
 
@@ -127,9 +131,12 @@ export class RedisOperationsWorker {
     const redis = getRedisClient();
     if (!redis?.isOpen) return;
     const info = await redis.sendCommand(["INFO", "memory"]);
-    const metrics = Object.fromEntries(
+    const used = parseRedisUsedMemory(String(info));
+    if (used === null) return;
+    redisMemoryUsedBytes.set(used);
+    const infoMetrics = Object.fromEntries(
       String(info)
-        .split("\r\n")
+        .split(/\r?\n/)
         .flatMap((line) => {
           const index = line.indexOf(":");
           return index < 0
@@ -137,11 +144,10 @@ export class RedisOperationsWorker {
             : [[line.slice(0, index), line.slice(index + 1)]];
         }),
     );
-    const used = Number(metrics.used_memory ?? 0);
     const capacity =
-      Number(metrics.maxmemory ?? 0) ||
+      Number(infoMetrics.maxmemory ?? 0) ||
       Number(process.env.REDIS_MEMORY_CAPACITY_BYTES ?? 0);
-    if (!capacity) return;
+    if (!Number.isFinite(capacity) || capacity <= 0) return;
     const usagePercent = (used / capacity) * 100;
     if (usagePercent >= this.memoryThresholdPercent && !this.alertActive) {
       this.alertActive = true;

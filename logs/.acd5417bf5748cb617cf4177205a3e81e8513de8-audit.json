@@ -1,15 +1,20 @@
 {
-  "keep": {
-    "days": false,
-    "amount": 10
-  },
-  "auditLog": "/workspaces/stellarflow-backend/logs/.acd5417bf5748cb617cf4177205a3e81e8513de8-audit.json",
-  "files": [
-    {
-      "date": 1782496071840,
-      "name": "/workspaces/stellarflow-backend/logs/stellar-network-2026-06-26.log",
-      "hash": "74822467abcf28154a005e8078a5dbc031a6279ac8cecf62e842e262eddc6ea6"
-    }
-  ],
-  "hashType": "sha256"
+    "keep": {
+        "days": false,
+        "amount": 10
+    },
+    "auditLog": "/workspaces/stellarflow-backend/logs/.acd5417bf5748cb617cf4177205a3e81e8513de8-audit.json",
+    "files": [
+        {
+            "date": 1782496071840,
+            "name": "/workspaces/stellarflow-backend/logs/stellar-network-2026-06-26.log",
+            "hash": "74822467abcf28154a005e8078a5dbc031a6279ac8cecf62e842e262eddc6ea6"
+        },
+        {
+            "date": 1790708882337,
+            "name": "/workspaces/stellarflow-backend/logs/stellar-network-2026-09-29.log",
+            "hash": "801c34b4d01240b360190bd2ff1b355e20c2224693f94781967c1a5ca1a56776"
+        }
+    ],
+    "hashType": "sha256"
 }

@@ -1,11 +1,14 @@
 import { Request, Response, NextFunction } from "express";
 import promClient from "prom-client";
 import prisma from "../lib/prisma";
+import { redisMemoryUsedBytes } from "../services/redisMemoryMetric";
 
 // Create a Registry which registers the metrics
 export const register = new promClient.Registry();
 
 const environment = process.env.NODE_ENV || "development";
+
+register.registerMetric(redisMemoryUsedBytes);
 
 // Add default metrics (e.g., memory, CPU)
 promClient.collectDefaultMetrics({

@@ -198,6 +198,27 @@ class TestMerkleService(unittest.IsolatedAsyncioTestCase):
         root_batch = MerkleService.compute_root_from_leaves(leaves[:4] + leaves[4:], depth=20)
         self.assertEqual(root_all, root_batch)
 
+    def test_incremental_32_depth_matches_reference_root(self):
+        """A 32-depth append touches only its path yet matches batch hashing."""
+        leaves = [f"{index:064x}" for index in range(1, 9)]
+        state = MerkleService._initial_state(32)
+        _, frontier = MerkleService._append(state["frontier"], 0, leaves[:4], 32)
+        root, _ = MerkleService._append(frontier, 4, leaves[4:], 32)
+        self.assertEqual(root, MerkleService.compute_root_from_leaves(leaves, depth=32))
+
+    def test_empty_32_depth_root_and_invalid_leaf_index(self):
+        self.assertEqual(MerkleService.compute_root_from_leaves([], depth=32), MerkleService.get_zero_value(32))
+        with self.assertRaises(ValueError):
+            MerkleService.compute_merkle_path(0, [], depth=32)
+        with self.assertRaises(ValueError):
+            MerkleService.compute_merkle_path(1 << 32, ["0" * 64], depth=32)
+
+    def test_invalid_merkle_elements_are_rejected(self):
+        with self.assertRaises(ValueError):
+            MerkleService.poseidon_hash("not-hex", "0" * 64)
+        with self.assertRaises(ValueError):
+            MerkleService.compute_root_from_leaves(["0" * 63], depth=32)
+
     async def test_update_root_skips_existing_ledger(self):
         mock_session = AsyncMock()
         mock_res = MagicMock()

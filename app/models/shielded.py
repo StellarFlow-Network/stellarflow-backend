@@ -122,6 +122,14 @@ class ShieldedCommitment(_PartitionBase):
         comment="LedgerEvent.event_hash — dedup key for idempotent re-processing",
     )
 
+    # Optional encrypted copy of private proof inputs carried by the source
+    # event. Public commitments remain queryable; witness material never does.
+    encrypted_proof_inputs: Mapped[Dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="AES-256-GCM envelope for private proof inputs; plaintext is never persisted",
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -207,6 +215,12 @@ class SpentNullifier(_PartitionBase):
         comment="LedgerEvent.event_hash — dedup key for idempotent re-processing",
     )
 
+    encrypted_proof_inputs: Mapped[Dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="AES-256-GCM envelope for private spend inputs; plaintext is never persisted",
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -234,7 +248,7 @@ class MerkleRoot(_PartitionBase):
     """Incremental Poseidon-BN254 Merkle tree root checkpoint.
 
     One row per ledger sequence at which the Merkle tree was updated.  The
-    ``tree_state`` column stores the 20-element frontier array (ordered list
+    ``tree_state`` column stores the 32-element frontier array (ordered list
     of right-most path nodes) as a JSON array of 64-char hex strings, enabling
     O(depth) incremental root updates without re-hashing all prior leaves.
 
@@ -250,7 +264,7 @@ class MerkleRoot(_PartitionBase):
         Stellar ledger sequence at which this root was computed.  Unique —
         at most one root checkpoint per ledger sequence.
     tree_state : dict
-        Full 20-level intermediate node array (the incremental tree frontier),
+        Full 32-level intermediate node array (the incremental tree frontier),
         stored as JSONB.  Not exposed in REST API responses.
     computed_at : datetime
         Wall-clock timestamp at which the root was computed (TIMESTAMPTZ).
@@ -290,9 +304,15 @@ class MerkleRoot(_PartitionBase):
         JSONB,
         nullable=False,
         comment=(
-            "20-element incremental tree frontier stored as JSONB array of "
+            "32-element incremental tree frontier stored as JSONB array of "
             "64-char hex strings; used by MerkleService for O(depth) updates"
         ),
+    )
+
+    encrypted_tree_state: Mapped[Dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="AES-256-GCM envelope for the private nullifier-tree frontier",
     )
 
     computed_at: Mapped[datetime] = mapped_column(

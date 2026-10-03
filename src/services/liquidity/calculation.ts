@@ -2,6 +2,71 @@ import type { RebalancingPlan, ValuedReserve } from "./types";
 
 export const RESERVE_RATIO_UPPER_BOUND = 0.7;
 
+export const CONCENTRATED_LIQUIDITY_RANGE_PERCENT = 0.1;
+const TICK_BASE = 1.0001;
+
+export interface ConcentratedLiquidityPositionSnapshot {
+  positionId: string;
+  ownerId: string;
+  poolKey: string;
+  currentTick: number;
+  tickLower: number;
+  tickUpper: number;
+  currentPrice: number;
+}
+
+export interface ConcentratedLiquidityRebalancingSuggestion {
+  positionId: string;
+  ownerId: string;
+  poolKey: string;
+  currentPrice: number;
+  recommendedLowerPrice: number;
+  recommendedUpperPrice: number;
+  recommendedTickLower: number;
+  recommendedTickUpper: number;
+}
+
+/** Return a new price range when a concentrated-liquidity position is out of range. */
+export function suggestConcentratedLiquidityRebalance(
+  position: ConcentratedLiquidityPositionSnapshot,
+): ConcentratedLiquidityRebalancingSuggestion | null {
+  const { currentPrice, currentTick, tickLower, tickUpper } = position;
+  if (
+    !Number.isFinite(currentPrice) ||
+    currentPrice <= 0 ||
+    !Number.isInteger(currentTick) ||
+    !Number.isInteger(tickLower) ||
+    !Number.isInteger(tickUpper) ||
+    tickLower >= tickUpper
+  ) {
+    throw new Error(`Position ${position.positionId} has invalid price or ticks`);
+  }
+
+  if (currentTick >= tickLower && currentTick < tickUpper) return null;
+
+  const recommendedLowerPrice =
+    currentPrice * (1 - CONCENTRATED_LIQUIDITY_RANGE_PERCENT);
+  const recommendedUpperPrice =
+    currentPrice * (1 + CONCENTRATED_LIQUIDITY_RANGE_PERCENT);
+  const recommendedTickLower = Math.floor(
+    Math.log(recommendedLowerPrice) / Math.log(TICK_BASE),
+  );
+  const recommendedTickUpper = Math.ceil(
+    Math.log(recommendedUpperPrice) / Math.log(TICK_BASE),
+  );
+
+  return {
+    positionId: position.positionId,
+    ownerId: position.ownerId,
+    poolKey: position.poolKey,
+    currentPrice,
+    recommendedLowerPrice,
+    recommendedUpperPrice,
+    recommendedTickLower,
+    recommendedTickUpper,
+  };
+}
+
 /**
  * Returns the swap required to bring a breached reserve pair back to 50/50.
  * Reserve values must be normalized into the same unit (XLM in production).

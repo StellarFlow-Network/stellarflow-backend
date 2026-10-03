@@ -99,6 +99,34 @@ class AllocationDriftResponse(BaseModel):
     target_allocations: Dict[str, float]
 
 
+class RebalancingInstruction(BaseModel):
+    step: int
+    action: str
+    direction: str
+    strategy_id: str
+    vault_address: Optional[str] = None
+    risk_score: Optional[float] = None
+    amount: float
+    delta_amount: float
+    delta_weight: float
+    current_weight: float
+    target_weight: float
+
+
+class RebalancingPlanResponse(BaseModel):
+    rebalancing_needed: bool
+    total_capital: float
+    max_drift: float
+    drift_threshold: float
+    current_allocations: Dict[str, float]
+    target_allocations: Dict[str, float]
+    instructions: List[RebalancingInstruction]
+    expected_apy: Optional[float] = None
+    capital_deployed_fraction: Optional[float] = None
+    portfolio_risk_score: Optional[float] = None
+    message: str
+
+
 class CreateStrategyRequest(BaseModel):
     id: str
     vault_address: str
@@ -377,6 +405,53 @@ async def check_allocation_drift(
         raise
     except Exception as exc:
         bound.exception("check_drift_error", error=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/plan", response_model=RebalancingPlanResponse)
+async def plan_rebalancing(
+    db: AsyncSession = Depends(get_async_db),
+) -> RebalancingPlanResponse:
+    """Preview the ordered re-allocation instructions without executing them.
+
+    Returns the same target vector the automatic 6-hourly re-evaluation would
+    compute, together with the step-by-step ``WITHDRAW``/``DEPOSIT`` instructions
+    handed to the auto-harvest worker.  No capital is moved.
+    """
+    bound = log.bind(endpoint="plan_rebalancing")
+
+    try:
+        optimizer = create_portfolio_optimizer()
+        rebalancer = await create_capital_rebalancer(optimizer)
+        plan = await rebalancer.plan_rebalancing(db)
+        metrics = plan.get("metrics") or {}
+
+        bound.info(
+            "rebalancing_plan_retrieved",
+            rebalancing_needed=plan["rebalancing_needed"],
+            instruction_count=len(plan["instructions"]),
+        )
+
+        return RebalancingPlanResponse(
+            rebalancing_needed=plan["rebalancing_needed"],
+            total_capital=plan["total_capital"],
+            max_drift=plan["max_drift"],
+            drift_threshold=plan["drift_threshold"],
+            current_allocations=plan["current_allocations"],
+            target_allocations=plan["target_allocations"],
+            instructions=[
+                RebalancingInstruction(**instruction)
+                for instruction in plan["instructions"]
+            ],
+            expected_apy=metrics.get("expected_apy"),
+            capital_deployed_fraction=metrics.get("capital_deployed_fraction"),
+            portfolio_risk_score=metrics.get("portfolio_risk_score"),
+            message=plan["message"],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        bound.exception("plan_rebalancing_error", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

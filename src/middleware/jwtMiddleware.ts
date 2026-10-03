@@ -16,6 +16,26 @@ declare global {
   }
 }
 
+const ADMIN_DOMAIN_ENV = "sso_admin_domains";
+
+function getAuthorizedDomains(): string[] {
+  const raw = process.env[ADMIN_DOMAIN_ENV];
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function isAuthorizedDomain(email: string): boolean {
+  const domains = getAuthorizedDomains();
+  if (domains.length === 0) return false;
+  const at = email.lastIndexOf("@");
+  if (at === -1) return false;
+  const domain = email.slice(at + 1).toLowerCase();
+  return domains.some((allowed) => domain === allowed || domain.endsWith("." + allowed));
+}
+
 let sessionCleanupTimer: NodeJS.Timeout | null = null;
 
 function startSessionCleanup(): void {
@@ -38,17 +58,24 @@ export const jwtMiddleware = async (
     startSessionCleanup();
   }
 
+  const cookieToken = req.cookies?.admin_session;
   const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7).trim() : undefined;
+  const token = bearerToken || cookieToken;
 
-  if (!authHeader?.startsWith("Bearer ")) {
+  if (!token) {
     next();
     return;
   }
 
-  const token = authHeader.substring(7);
   const payload = verifyToken(token);
 
   if (!payload) {
+    next();
+    return;
+  }
+
+  if (!isAuthorizedDomain(payload.email)) {
     next();
     return;
   }

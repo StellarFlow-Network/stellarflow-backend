@@ -22,13 +22,13 @@ export async function listTimelocks(
     const offset = Math.max(isNaN(offsetRaw) ? 0 : offsetRaw, 0);
 
     if (status) {
-      const validStatuses = ["Queued", "Executed", "Cancelled"];
+      const validStatuses = ["Queued", "Executed", "Cancelled", "Expired", "EXPIRED"];
       if (!validStatuses.includes(status)) {
         return sendApiError(
           res,
           400,
           "BAD_REQUEST",
-          `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+          `Invalid status. Must be one of: Queued, Executed, Cancelled, Expired`,
         );
       }
     }

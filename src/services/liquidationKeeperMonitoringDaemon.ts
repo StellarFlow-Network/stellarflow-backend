@@ -13,6 +13,7 @@ import { signer } from "../signer";
 import stellarProvider from "../lib/stellarProvider";
 import { getStellarNetworkPassphrase } from "../lib/stellarNetwork";
 import type { VaultPosition } from "./yieldVaultLiquidationRiskService";
+import { LiquidationFeeBumpEngine } from "./liquidationFeeBumpEngine";
 
 export interface VaultLedgerSnapshot {
   ledger: number;
@@ -38,6 +39,11 @@ export interface LiquidationTransactionBroadcaster {
     payload: LiquidationContractCallPayload,
     position: VaultPosition,
   ): Promise<string>;
+}
+
+/** Supplies the highest fee observed for matching pending liquidation calls. */
+export interface PendingLiquidationFeeProvider {
+  getHighestPendingFee(payload: LiquidationContractCallPayload): Promise<number | null>;
 }
 
 export interface LiquidationKeeperDaemonOptions {
@@ -131,25 +137,43 @@ export class SorobanLiquidationPayloadBuilder implements LiquidationContractPayl
 
 /** Signs with the configured keeper signer, submits through Soroban RPC, and waits for finality. */
 export class StellarLiquidationTransactionBroadcaster implements LiquidationTransactionBroadcaster {
+  private readonly feeBumpEngine = new LiquidationFeeBumpEngine();
+
   constructor(
     private readonly rpcServer: SorobanRpc.Server = stellarProvider.getRpcServer(),
     private readonly networkPassphrase = getStellarNetworkPassphrase(),
+    private readonly pendingFeeProvider?: PendingLiquidationFeeProvider,
   ) {}
 
   async broadcast(
     payload: LiquidationContractCallPayload,
-    _position: VaultPosition,
+    position: VaultPosition,
   ): Promise<string> {
     await assertSigningAllowed();
     const publicKey = await signer.getPublicKey();
     const account = await this.rpcServer.getAccount(publicKey);
+    const estimatedProfitStroops = (position as VaultPosition & {
+      estimatedProfitStroops?: number;
+    }).estimatedProfitStroops;
+    const competingFeeStroops = this.pendingFeeProvider
+      ? await this.pendingFeeProvider.getHighestPendingFee(payload)
+      : null;
+    const fee =
+      competingFeeStroops !== null && estimatedProfitStroops !== undefined
+        ? this.feeBumpEngine.quote({
+            competingFeeStroops,
+            estimatedProfitStroops,
+            baseFeeStroops: 100,
+          })
+        : 100;
+
     const transaction = new TransactionBuilder(
       new Account(
         (account as any).accountId ?? (account as any).id,
         (account as any).sequenceNumber ?? (account as any).sequence,
       ),
       {
-        fee: "100",
+        fee: fee.toString(),
         networkPassphrase: this.networkPassphrase,
       },
     )

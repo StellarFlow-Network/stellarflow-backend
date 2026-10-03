@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import hashlib
+import base64
 from typing import Optional, Set
 import websockets
 from app.tasks.ingestion_tasks import dispatch_backfill_job
@@ -10,9 +11,33 @@ from app.models.events import LedgerEvent
 
 logger = logging.getLogger(__name__)
 
+def _compute_xdr_symbol_hash(symbol: str) -> str:
+    """Computes the SHA-256 hash of the XDR representation of a symbol."""
+    encoded = symbol.encode("utf-8")
+    length = len(encoded)
+    pad_len = (4 - (length % 4)) % 4
+    xdr_bytes = b'\x00\x00\x00\x0e' + length.to_bytes(4, "big") + encoded + b'\x00' * pad_len
+    return hashlib.sha256(xdr_bytes).hexdigest()
 
 class SorobanListener:
     """Live WebSocket stream listener with sequence gap detection and duplicate prevention."""
+
+    ALLOWED_TOPIC_HASHES: Set[str] = {
+        _compute_xdr_symbol_hash("Swap"),
+        _compute_xdr_symbol_hash("swap"),
+        _compute_xdr_symbol_hash("Deposit"),
+        _compute_xdr_symbol_hash("deposit"),
+        _compute_xdr_symbol_hash("Liquidation"),
+        _compute_xdr_symbol_hash("liquidation"),
+        _compute_xdr_symbol_hash("GovernanceVoted"),
+        hashlib.sha256(b"Swap").hexdigest(),
+        hashlib.sha256(b"swap").hexdigest(),
+        hashlib.sha256(b"Deposit").hexdigest(),
+        hashlib.sha256(b"deposit").hexdigest(),
+        hashlib.sha256(b"Liquidation").hexdigest(),
+        hashlib.sha256(b"liquidation").hexdigest(),
+        hashlib.sha256(b"GovernanceVoted").hexdigest(),
+    }
 
     def __init__(self, ws_url: str, rpc_url: str):
         self.ws_url = ws_url
@@ -59,6 +84,32 @@ class SorobanListener:
             event_data = data.get("result")
             if not event_data or "ledger" not in event_data:
                 return
+
+            topics = event_data.get("topic") or event_data.get("topics") or []
+            if not isinstance(topics, list):
+                topics = [topics]
+
+            # Pre-filter using binary topic hash matching
+            if topics:
+                topic_matched = False
+                for t in topics:
+                    if not isinstance(t, str):
+                        continue
+                    try:
+                        if t.startswith("A") or len(t) > 32:
+                            raw_bytes = base64.b64decode(t)
+                        else:
+                            raw_bytes = t.encode("utf-8")
+                        
+                        t_hash = hashlib.sha256(raw_bytes).hexdigest()
+                        if t_hash in self.ALLOWED_TOPIC_HASHES:
+                            topic_matched = True
+                            break
+                    except Exception:
+                        pass
+                
+                if not topic_matched:
+                    return
 
             current_sequence = int(event_data["ledger"])
 

@@ -22,6 +22,7 @@
 import { Router, Request, Response, json, raw } from "express";
 import { sendApiError } from "../lib/apiError.js";
 import { anchorWebhookService } from "../services/anchorWebhookService.js";
+import { anchorSettlementNotificationService } from "../services/anchorSettlementNotificationService.js";
 
 const router = Router();
 
@@ -224,6 +225,58 @@ router.post("/webhook", async (req: Request, res: Response) => {
       500,
       "INTERNAL_SERVER_ERROR",
       "An unexpected error occurred while processing the webhook",
+    );
+  }
+});
+
+/**
+ * @swagger
+ * /api/v1/anchors/notifications/metrics:
+ *   get:
+ *     tags:
+ *       - Anchors
+ *       - Notifications
+ *     summary: Get anchor notification delivery success rate metrics
+ *     description: >
+ *       Returns aggregate delivery success rate metrics, latency, and failure
+ *       breakdowns for SMS (Twilio) and Email (SendGrid) push notifications across
+ *       settlement status events (READY_FOR_PICKUP, COMPLETED).
+ *     parameters:
+ *       - in: query
+ *         name: timeRangeMinutes
+ *         schema:
+ *           type: integer
+ *           default: 1440
+ *         description: Time window in minutes (default 24 hours).
+ *     responses:
+ *       '200':
+ *         description: Metrics retrieved successfully
+ *       '500':
+ *         description: Internal server error
+ */
+router.get("/notifications/metrics", async (req: Request, res: Response) => {
+  try {
+    const timeRangeMinutes = req.query.timeRangeMinutes
+      ? parseInt(req.query.timeRangeMinutes as string, 10)
+      : 1440;
+
+    const metrics =
+      await anchorSettlementNotificationService.getDeliverySuccessRateMetrics({
+        timeRangeMinutes,
+      });
+
+    res.status(200).json({
+      success: true,
+      data: metrics,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[Anchor Notifications] Metrics error:", message, error);
+    return sendApiError(
+      res,
+      500,
+      "INTERNAL_SERVER_ERROR",
+      "Failed to fetch notification delivery metrics",
     );
   }
 });

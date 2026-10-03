@@ -28,6 +28,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   METHOD_NOT_ALLOWED: "This HTTP method is not allowed for the endpoint.",
   CONFLICT: "The request conflicts with the current state.",
   RATE_LIMITED: "Too many requests. Please try again later.",
+  ORDER_ANOMALY_THROTTLED:
+    "This account is temporarily throttled due to suspicious order cancellation activity.",
   INTERNAL_SERVER_ERROR: "An unexpected error occurred.",
   SERVICE_UNAVAILABLE: "The service is temporarily unavailable.",
   DEPENDENCY_UNAVAILABLE: "A core dependency failed its readiness probe.",
@@ -44,6 +46,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   CURRENCY_REQUIRED: "Currency parameter is required.",
   CURRENCY_NOT_FOUND: "No rate is available for the requested currency.",
   ASSET_NOT_FOUND: "The requested asset was not found.",
+  POOL_NOT_FOUND: "The requested liquidity pool was not found.",
   PRICE_NOT_FOUND: "No recent price was found for comparison.",
   EXTERNAL_PRICE_UNAVAILABLE:
     "Unable to fetch an external price for comparison.",

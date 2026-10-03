@@ -36,6 +36,10 @@ jobs:
           npx tsx test/ghsFetcher.test.ts
           npx tsx test/ngnFetcher.test.ts
           npx tsx test/sorobanEventListener.test.ts
+          # Issue #1047 – pure concentrated liquidity fee projection maths
+          npx tsx --test test/feeProjection.test.ts
+          npx tsx test/circuitBreakerService.test.ts
+          npx tsx test/auctionPrice.test.ts
 
       - uses: actions/setup-python@v5
         with:
@@ -96,4 +100,3 @@ jobs:
           path: |
             coverage.xml
             coverage-integration.xml
-          npx tsx test/circuitBreakerService.test.ts

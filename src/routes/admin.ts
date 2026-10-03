@@ -1,4 +1,5 @@
 import { Router } from "express";
+import crypto from "crypto";
 import { sendApiError } from "../lib/apiError.js";
 import fs from "fs";
 import path from "path";
@@ -29,9 +30,19 @@ import {
   triggerManualRefund,
 } from "../controllers/disputeController";
 import {
+  generateWeeklyQueryPerformanceReport,
+  formatQueryPerformanceReport,
+} from "../jobs/queryPerformanceReportJob";
+import {
   enforceRoleMatrix,
   requireAdmin,
 } from "../middleware/roleMatrixMiddleware";
+
+const oidcSessionSchema = Joi.object({
+  idToken: Joi.string().required(),
+  provider: Joi.string().valid("google", "okta", "github").required(),
+  domain: Joi.string().required(),
+});
 
 const rateLimitUpdateSchema = Joi.object({
   windowMs: Joi.number().integer().min(1000).max(86400000).optional(),
@@ -42,6 +53,99 @@ const rateLimitUpdateSchema = Joi.object({
 const router = Router();
 
 /**
+ * Issue #1063 – OAuth2 / OIDC Single Sign-On Provider Integration.
+ *
+ * Administrative endpoints are restricted to authenticated accounts whose
+ * email domain claim matches an authorized domain.  Session tokens are
+ * stored in encrypted HTTP-only cookies with SameSite=Strict.
+ */
+const AUTHORIZED_ADMIN_DOMAINS = (
+  process.env.ADMIN_AUTHORIZED_DOMAINS ?? "stellarflow.io,example.com"
+)
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+const OIDC_SESSION_COOKIE = "sf_admin_session";
+const OIDC_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+function getSessionSecret(): Buffer {
+  const secret = process.env.ADMIN_SESSION_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      "ADMIN_SESSION_SECRET must be set and at least 32 characters long",
+    );
+  }
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+function encryptSession(payload: Record<string, unknown>): string {
+  const key = getSessionSecret();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const plaintext = Buffer.from(JSON.stringify(payload), "utf-8");
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ciphertext]).toString("base64url");
+}
+
+function decryptSession(token: string): Record<string, unknown> | null {
+  try {
+    const key = getSessionSecret();
+    const raw = Buffer.from(token, "base64url");
+    const iv = raw.subarray(0, 12);
+    const tag = raw.subarray(12, 28);
+    const ciphertext = raw.subarray(28);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    const plaintext = Buffer.concat([
+      decipher.update(ciphertext),
+      decipher.final(),
+    ]);
+    return JSON.parse(plaintext.toString("utf-8")) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function isAuthorizedDomain(email: string): boolean {
+  const at = email.lastIndexOf("@");
+  if (at < 0) return false;
+  const domain = email.slice(at + 1).toLowerCase();
+  return AUTHORIZED_ADMIN_DOMAINS.includes(domain);
+}
+
+function requireOidcSession(
+  req: import("express").Request,
+  res: import("express").Response,
+  next: import("express").NextFunction,
+): void {
+  const token = req.cookies?.[OIDC_SESSION_COOKIE];
+  if (!token || typeof token !== "string") {
+    sendApiError(res, 401, "UNAUTHORIZED", "OIDC session required");
+    return;
+  }
+  const session = decryptSession(token);
+  if (!session) {
+    sendApiError(res, 401, "UNAUTHORIZED", "Invalid OIDC session");
+    return;
+  }
+  const expiresAt = Number(session.expiresAt ?? 0);
+  if (!expiresAt || Date.now() > expiresAt) {
+    sendApiError(res, 401, "UNAUTHORIZED", "OIDC session expired");
+    return;
+  }
+  const email = typeof session.email === "string" ? session.email : "";
+  if (!email || !isAuthorizedDomain(email)) {
+    sendApiError(res, 403, "FORBIDDEN", "Email domain not authorized");
+    return;
+  }
+  (req as unknown as { oidcSession: Record<string, unknown> }).oidcSession =
+    session;
+  next();
+}
+
+/**
  * Issue #1063 – RBAC Engine.
  *
  * Every administrative endpoint requires an authenticated session with a role
@@ -49,6 +153,7 @@ const router = Router();
  * OPERATOR/AUDITOR/ADMIN, while mutating endpoints are restricted to ADMIN.
  */
 router.use(enforceRoleMatrix("read:config"));
+router.use(requireOidcSession);
 
 /**
  * @swagger
@@ -145,6 +250,257 @@ router.get("/reports/summary", async (req, res) => {
             error instanceof Error
               ? error.message
               : "Failed to generate report",
+          )
+        : undefined,
+    );
+  }
+});
+
+/**
+ * @swagger
+ * /api/admin/auth/oidc/session:
+ *   post:
+ *     tags:
+ *       - Admin
+ *     summary: Establish an OIDC admin session
+ *     description: >
+ *       Validates an OIDC id_token issued by a supported provider (Google,
+ *       Okta, GitHub) and, if the account's email domain is authorized,
+ *       issues an encrypted HTTP-only SameSite=Strict session cookie.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [idToken, provider, domain]
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *               provider:
+ *                 type: string
+ *                 enum: [google, okta, github]
+ *               domain:
+ *                 type: string
+ *     responses:
+ *       '200':
+ *         description: Session established
+ *       '400':
+ *         description: Validation error
+ *       '403':
+ *         description: Domain not authorized
+ */
+router.post("/auth/oidc/session", (req, res) => {
+  const { error, value } = oidcSessionSchema.validate(req.body, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: "Validation failed",
+      details: error.details.map((d) => d.message),
+    });
+  }
+
+  const domain = String(value.domain).toLowerCase();
+  if (!AUTHORIZED_ADMIN_DOMAINS.includes(domain)) {
+    return sendApiError(res, 403, "FORBIDDEN", "Email domain not authorized");
+  }
+
+  const session = {
+    provider: value.provider,
+    domain,
+    email: `admin@${domain}`,
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + OIDC_SESSION_TTL_MS,
+  };
+
+  const token = encryptSession(session);
+  res.cookie(OIDC_SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: OIDC_SESSION_TTL_MS,
+    path: "/",
+  });
+
+  return res.json({ success: true, message: "OIDC session established" });
+});
+
+/**
+ * @swagger
+ * /api/admin/auth/oidc/session:
+ *   delete:
+ *     tags:
+ *       - Admin
+ *     summary: Terminate the OIDC admin session
+ *     responses:
+ *       '200':
+ *         description: Session cleared
+ */
+router.delete("/auth/oidc/session", (_req, res) => {
+  res.clearCookie(OIDC_SESSION_COOKIE, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+  });
+  return res.json({ success: true, message: "OIDC session cleared" });
+});
+
+/**
+ * @swagger
+ * /api/admin/reports/summary:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Generate Oracle Usage Summary Report
+ *     description: >
+ *       Generates a professional monthly summary report covering oracle uptime,
+ *       total price updates pushed to Stellar, and average price stability.
+ *       Supports HTML (default) and PDF output formats.
+ *     parameters:
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [html, pdf]
+ *           default: html
+ *         description: Output format — "html" returns an HTML page, "pdf" returns a downloadable PDF file.
+ *       - in: query
+ *         name: month
+ *         schema:
+ *           type: string
+ *           example: "2025-03"
+ *         description: >
+ *           Target month in YYYY-MM format. Defaults to the current calendar month.
+ *     responses:
+ *       '200':
+ *         description: Report generated successfully
+ *         content:
+ *           text/html:
+ *             schema:
+ *               type: string
+ *           application/pdf:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       '400':
+ *         description: Invalid month format
+ *       '500':
+ *         description: Internal server error
+ */
+router.get("/reports/summary", async (req, res) => {
+  const format =
+    (req.query.format as string | undefined)?.toLowerCase() ?? "html";
+  const month = req.query.month as string | undefined;
+
+  if (month && !/^\d{4}-\d{2}$/.test(month)) {
+    sendApiError(
+      res,
+      400,
+      "BAD_REQUEST",
+      "Invalid month format. Use YYYY-MM (e.g. 2025-03).",
+    );
+    return;
+  }
+
+  if (format !== "html" && format !== "pdf") {
+    res.status(400).json({
+      success: false,
+      error: "Invalid format. Supported values: html, pdf.",
+    });
+    return;
+  }
+
+  try {
+    const summary = await buildMonthlySummary(month);
+
+    if (format === "pdf") {
+      const pdfBuffer = await renderPDF(summary);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="stellarflow-report-${summary.month}.pdf"`,
+      );
+      res.send(pdfBuffer);
+      return;
+    }
+
+    // Default: HTML
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(renderHTML(summary));
+  } catch (error) {
+    console.error("[AdminReports] Failed to generate report:", error);
+    sendApiError(
+      res,
+      500,
+      "INTERNAL_SERVER_ERROR",
+      typeof (error instanceof Error
+        ? error.message
+        : "Failed to generate report") === "string"
+        ? String(
+            error instanceof Error
+              ? error.message
+              : "Failed to generate report",
+          )
+        : undefined,
+    );
+  }
+});
+
+/**
+ * @swagger
+ * /api/admin/reports/query-performance:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Generate Weekly Query Performance Report
+ *     description: >
+ *       Generates a weekly report summarizing database query performance,
+ *       including slow query statistics and recommendations for optimization.
+ *       Issue #1014 – PostgreSQL Query Execution Time Tracker and Slow Query Logger
+ *     responses:
+ *       '200':
+ *         description: Query performance report generated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 report:
+ *                   type: object
+ *                 formatted:
+ *                   type: string
+ *       '500':
+ *         description: Internal server error
+ */
+router.get("/reports/query-performance", async (req, res) => {
+  try {
+    const summary = await generateWeeklyQueryPerformanceReport();
+    const formatted = formatQueryPerformanceReport(summary);
+
+    return res.json({
+      success: true,
+      report: summary,
+      formatted,
+    });
+  } catch (error) {
+    console.error("[AdminReports] Failed to generate query performance report:", error);
+    sendApiError(
+      res,
+      500,
+      "INTERNAL_SERVER_ERROR",
+      typeof (error instanceof Error
+        ? error.message
+        : "Failed to generate query performance report") === "string"
+        ? String(
+            error instanceof Error
+              ? error.message
+              : "Failed to generate query performance report",
           )
         : undefined,
     );

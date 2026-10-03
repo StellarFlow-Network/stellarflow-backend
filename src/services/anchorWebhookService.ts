@@ -24,6 +24,8 @@
 import crypto from "crypto";
 import prisma from "../lib/prisma";
 import { createFetcherLogger } from "../utils/logger";
+import { dispatchSep31CompletionCallback } from "./sep31Service";
+import { anchorSettlementNotificationService } from "./anchorSettlementNotificationService";
 
 export interface AnchorWebhookPayload {
   transaction?: {
@@ -53,10 +55,21 @@ const COMPLETED_STATUSES = new Set([
   "dispatched",
 ]);
 
+// Valid states that indicate funds ready for pickup
+const READY_FOR_PICKUP_STATUSES = new Set([
+  "ready_for_pickup",
+  "ready_for_cash_pickup",
+  "pickup_ready",
+  "pending_receiver",
+]);
+
 // States from which we can transition to COMPLETED
 const TRANSITIONABLE_FROM_STATES = new Set([
   "PENDING",
   "pending_user_transfer",
+  "pending_receiver",
+  "READY_FOR_PICKUP",
+  "ready_for_pickup",
   "payout_relayed",
   "screening",
   "compliance_cleared",
@@ -108,9 +121,11 @@ export class AnchorWebhookService {
   /**
    * Extracts and validates transaction ID and status from webhook payload.
    */
-  private extractTransactionInfo(
-    payload: AnchorWebhookPayload,
-  ): { transactionId?: string; status?: string; error?: string } {
+  private extractTransactionInfo(payload: AnchorWebhookPayload): {
+    transactionId?: string;
+    status?: string;
+    error?: string;
+  } {
     const transaction = payload.transaction;
 
     if (!transaction || typeof transaction !== "object") {
@@ -145,11 +160,17 @@ export class AnchorWebhookService {
       return "COMPLETED";
     }
 
+    if (READY_FOR_PICKUP_STATUSES.has(normalized)) {
+      return "READY_FOR_PICKUP";
+    }
+
     // Pass through known internal statuses
     const upperStatus = anchorStatus.toUpperCase();
     if (
       [
         "PENDING",
+        "READY_FOR_PICKUP",
+        "COMPLETED",
         "FAILED",
         "REVERSED",
         "pending_screening",
@@ -161,11 +182,6 @@ export class AnchorWebhookService {
       ].includes(upperStatus)
     ) {
       return upperStatus;
-    }
-
-    // Default: return COMPLETED if recognized as success-like status
-    if (COMPLETED_STATUSES.has(normalized)) {
-      return "COMPLETED";
     }
 
     // Fallback: return normalized uppercase
@@ -205,29 +221,60 @@ export class AnchorWebhookService {
       }
 
       // Ensure we can transition to the new status
-      if (newStatus === "COMPLETED" && !TRANSITIONABLE_FROM_STATES.has(currentStatus)) {
-        this.logger.warn("Cannot transition to COMPLETED from current state", {
-          transactionId,
-          currentStatus,
-          newStatus,
-        });
+      if (
+        (newStatus === "COMPLETED" || newStatus === "READY_FOR_PICKUP") &&
+        !TRANSITIONABLE_FROM_STATES.has(currentStatus)
+      ) {
+        this.logger.warn(
+          "Cannot apply settlement transition from current state",
+          {
+            transactionId,
+            currentStatus,
+            newStatus,
+          },
+        );
         return { previousStatus: currentStatus, updated: false };
       }
 
       // Update the transaction status
-      const updated = await prisma.remittanceTransaction.update({
-        where: { id: transactionId },
+      const updated = await prisma.remittanceTransaction.updateMany({
+        where: { id: transactionId, status: currentStatus },
         data: {
           status: newStatus,
           updatedAt: new Date(),
         },
-        select: { id: true, status: true },
       });
+      if (updated.count === 0)
+        return { previousStatus: currentStatus, updated: false };
+
+      if (newStatus === "COMPLETED") {
+        void dispatchSep31CompletionCallback(transactionId, "completed").catch(
+          (error) => {
+            this.logger.error("SEP-31 completion callback failed", {
+              transactionId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          },
+        );
+      }
+
+      // Trigger Multi-Anchor Settlement Push Notifications (Issue #1002)
+      if (newStatus === "READY_FOR_PICKUP" || newStatus === "COMPLETED") {
+        void anchorSettlementNotificationService
+          .handleStatusChange(transactionId, newStatus, currentStatus)
+          .catch((error) => {
+            this.logger.error("Settlement push notification dispatch failed", {
+              transactionId,
+              status: newStatus,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+      }
 
       this.logger.info("Transaction status transitioned", {
         transactionId,
         previousStatus: currentStatus,
-        newStatus: updated.status,
+        newStatus: newStatus,
       });
 
       return { previousStatus: currentStatus, updated: true };
@@ -259,8 +306,11 @@ export class AnchorWebhookService {
     }
 
     // Extract transaction info
-    const { transactionId, status: rawStatus, error: extractError } =
-      this.extractTransactionInfo(payload as AnchorWebhookPayload);
+    const {
+      transactionId,
+      status: rawStatus,
+      error: extractError,
+    } = this.extractTransactionInfo(payload as AnchorWebhookPayload);
 
     if (extractError) {
       return { success: false, error: extractError };

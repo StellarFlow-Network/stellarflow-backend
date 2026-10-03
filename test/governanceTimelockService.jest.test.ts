@@ -24,9 +24,9 @@ const mockPrismaTimelockEventFindFirst = jest.fn<() => Promise<any>>();
 const mockPrismaGovernanceProposalUpsert = jest.fn<() => Promise<any>>();
 const mockPrismaGovernanceProposalUpdate = jest.fn<() => Promise<any>>();
 const mockPrismaExecuteRaw = jest.fn<() => Promise<any>>();
-const mockPrismaQueryRaw = jest.fn<() => Promise<any>>();
+const mockPrismaQueryRaw = jest.fn<(...args: any[]) => Promise<any>>();
 
-jest.mock("../src/lib/prisma", () => ({
+jest.unstable_mockModule("../src/lib/prisma", () => ({
   __esModule: true,
   default: {
     timelockEvent: {
@@ -48,7 +48,7 @@ jest.mock("../src/lib/prisma", () => ({
 const mockGetEvents = jest.fn<() => Promise<any>>();
 const mockGetServer = jest.fn();
 
-jest.mock("../src/lib/stellarProvider", () => ({
+jest.unstable_mockModule("../src/lib/stellarProvider", () => ({
   __esModule: true,
   default: {
     getRpcServer: () => ({ getEvents: mockGetEvents }),
@@ -62,7 +62,7 @@ jest.mock("../src/lib/stellarProvider", () => ({
 // ---------------------------------------------------------------------------
 const mockExecuteGovernanceProposal = jest.fn<() => Promise<string>>();
 
-jest.mock("../src/services/stellarService", () => ({
+jest.unstable_mockModule("../src/services/stellarService", () => ({
   __esModule: true,
   StellarService: jest.fn(() => ({
     executeGovernanceProposal: mockExecuteGovernanceProposal,
@@ -74,7 +74,7 @@ jest.mock("../src/services/stellarService", () => ({
 // ---------------------------------------------------------------------------
 const mockSendGovernanceTimelockReadyAlert = jest.fn<() => Promise<boolean>>();
 
-jest.mock("../src/services/notificationService", () => ({
+jest.unstable_mockModule("../src/services/notificationService", () => ({
   __esModule: true,
   notificationService: {
     sendGovernanceTimelockReadyAlert: mockSendGovernanceTimelockReadyAlert,
@@ -84,9 +84,28 @@ jest.mock("../src/services/notificationService", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock GovernanceWebhookBroadcaster
+// ---------------------------------------------------------------------------
+const mockBroadcastProposalExecuted = jest.fn<() => Promise<any>>();
+const mockBroadcastProposalExpired = jest.fn<() => Promise<any>>();
+const mockBroadcastProposalCancelled = jest.fn<() => Promise<any>>();
+
+jest.unstable_mockModule(
+  "../src/services/governanceWebhookBroadcaster",
+  () => ({
+    __esModule: true,
+    governanceWebhookBroadcaster: {
+      broadcastProposalExecuted: mockBroadcastProposalExecuted,
+      broadcastProposalExpired: mockBroadcastProposalExpired,
+      broadcastProposalCancelled: mockBroadcastProposalCancelled,
+    },
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Mock logger
 // ---------------------------------------------------------------------------
-jest.mock("../src/utils/logger", () => ({
+jest.unstable_mockModule("../src/utils/logger", () => ({
   logger: {
     info: jest.fn(),
     warn: jest.fn(),
@@ -98,7 +117,8 @@ jest.mock("../src/utils/logger", () => ({
 // ---------------------------------------------------------------------------
 // Import subject under test
 // ---------------------------------------------------------------------------
-import { GovernanceTimelockService } from "../src/services/governanceTimelockService";
+const { GovernanceTimelockService } =
+  await import("../src/services/governanceTimelockService");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -130,9 +150,7 @@ function makeEvent(
     txHash: opts.txHash ?? "abc123",
     contractId: "CONTRACT_A",
     topic: [encodeSymbol(eventName), encodeSymbol(proposalId)],
-    value: opts.expiresAt
-      ? JSON.stringify({ expiresAt: opts.expiresAt })
-      : null,
+    value: opts.expiresAt ? { expiresAt: opts.expiresAt } : null,
   };
 }
 
@@ -141,10 +159,22 @@ function makeEvent(
 // ---------------------------------------------------------------------------
 
 describe("GovernanceTimelockService", () => {
-  let service: GovernanceTimelockService;
+  let service: InstanceType<typeof GovernanceTimelockService>;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.replaceProperty(process, "env", {
+      ...process.env,
+      GOVERNANCE_CONTRACT_ID: "CONTRACT_A",
+    });
+    const ledgerQuery: any = {
+      order: () => ledgerQuery,
+      limit: () => ledgerQuery,
+      call: async () => ({
+        records: [{ closed_at: new Date().toISOString() }],
+      }),
+    };
+    mockGetServer.mockReturnValue({ ledgers: () => ledgerQuery });
 
     // Default: no prior indexed events
     mockPrismaTimelockEventFindFirst.mockResolvedValue(null);
@@ -161,6 +191,9 @@ describe("GovernanceTimelockService", () => {
 
     // Default: notification sends succeed
     mockSendGovernanceTimelockReadyAlert.mockResolvedValue(true);
+    mockBroadcastProposalExecuted.mockResolvedValue(["delivery-exec"]);
+    mockBroadcastProposalExpired.mockResolvedValue(["delivery-exp"]);
+    mockBroadcastProposalCancelled.mockResolvedValue(["delivery-cancel"]);
 
     service = new GovernanceTimelockService(
       60_000,
@@ -170,6 +203,8 @@ describe("GovernanceTimelockService", () => {
 
   afterEach(() => {
     service.stop();
+    jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
   // -------------------------------------------------------------------------
@@ -518,6 +553,213 @@ describe("GovernanceTimelockService", () => {
       expect(
         Math.abs(expiresAt.getTime() - futureEpochSec * 1000),
       ).toBeLessThan(5000);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Timelock Execution Expiry Cleaner (Issue #1032)
+  // -------------------------------------------------------------------------
+
+  describe("execution window guards", () => {
+    it("skips stale proposals left after a cleanup backlog or failure", async () => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-09-30T12:00:00Z"));
+      const stale = {
+        id: 1,
+        proposalId: "stale",
+        contractId: "GOV",
+        expiresAt: new Date("2026-09-22T12:00:00Z"),
+      };
+      const boundary = {
+        id: 2,
+        proposalId: "boundary",
+        contractId: "GOV",
+        expiresAt: new Date("2026-09-23T12:00:00Z"),
+      };
+      mockPrismaQueryRaw.mockResolvedValue([stale, boundary]);
+      const ledgerQuery: any = {
+        order: () => ledgerQuery,
+        limit: () => ledgerQuery,
+        call: async () => ({
+          records: [{ closed_at: "2026-09-30T12:00:00Z" }],
+        }),
+      };
+      mockGetServer.mockReturnValue({ ledgers: () => ledgerQuery });
+      mockExecuteGovernanceProposal.mockResolvedValue("tx");
+
+      await service.notifyReadyProposals();
+      await (service as any).checkAndExecute("GOV");
+
+      expect(mockSendGovernanceTimelockReadyAlert).toHaveBeenCalledTimes(1);
+      expect(mockSendGovernanceTimelockReadyAlert).toHaveBeenCalledWith({
+        proposalId: boundary.proposalId,
+        contractId: boundary.contractId,
+        expiresAt: boundary.expiresAt,
+      });
+      expect(mockExecuteGovernanceProposal).toHaveBeenCalledTimes(1);
+      expect(mockExecuteGovernanceProposal).toHaveBeenCalledWith(
+        "GOV",
+        "boundary",
+      );
+      for (const [sql, ...values] of mockPrismaQueryRaw.mock.calls) {
+        expect(sql.join("?")).toContain('"expiresAt" >= ?');
+        expect(values).toContainEqual(new Date("2026-09-23T12:00:00Z"));
+      }
+    });
+  });
+
+  describe("cleanExpiredProposals", () => {
+    it("uses a strict cutoff computed from the supplied grace period", async () => {
+      jest.useFakeTimers().setSystemTime(new Date("2026-09-30T12:00:00Z"));
+      await service.cleanExpiredProposals(3_600_000);
+      const [sql, cutoff] = mockPrismaQueryRaw.mock.calls[0]!;
+      expect(sql.join("?")).toContain('"expiresAt" < ?');
+      expect(cutoff).toEqual(new Date("2026-09-30T11:00:00Z"));
+    });
+
+    it("emits no audit or webhook if another worker already changed the status", async () => {
+      mockPrismaQueryRaw.mockResolvedValue([
+        {
+          id: 1,
+          proposalId: "raced",
+          contractId: "GOV",
+          expiresAt: new Date(0),
+        },
+      ]);
+      mockPrismaExecuteRaw.mockResolvedValueOnce(0);
+      expect((await service.cleanExpiredProposals()).expiredIds).toEqual([]);
+      expect(mockPrismaTimelockEventUpsert).not.toHaveBeenCalled();
+      expect(mockBroadcastProposalExpired).not.toHaveBeenCalled();
+    });
+
+    it("does nothing when no proposals are past grace period", async () => {
+      mockPrismaQueryRaw.mockResolvedValue([]);
+
+      const result = await service.cleanExpiredProposals();
+
+      expect(result.processed).toBe(0);
+      expect(result.expiredIds).toEqual([]);
+      expect(mockPrismaExecuteRaw).not.toHaveBeenCalled();
+      expect(mockBroadcastProposalExpired).not.toHaveBeenCalled();
+    });
+
+    it("marks queued proposals past grace period as Expired and emits ProposalExecutionExpired", async () => {
+      // 8 days ago (past default 7-day grace period)
+      const pastGracePeriod = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+
+      mockPrismaQueryRaw.mockResolvedValue([
+        {
+          id: 101,
+          proposalId: "prop-expired-1",
+          contractId: "CONTRACT_GOV",
+          expiresAt: pastGracePeriod,
+        },
+        {
+          id: 102,
+          proposalId: "prop-expired-2",
+          contractId: "CONTRACT_GOV",
+          expiresAt: pastGracePeriod,
+        },
+      ]);
+
+      const result = await service.cleanExpiredProposals();
+
+      expect(result.processed).toBe(2);
+      expect(result.expiredIds).toEqual(["prop-expired-1", "prop-expired-2"]);
+      expect(mockPrismaExecuteRaw).toHaveBeenCalledTimes(2);
+
+      // TimelockEvent recorded for both
+      expect(mockPrismaTimelockEventUpsert).toHaveBeenCalledTimes(2);
+      const firstEventUpsert = mockPrismaTimelockEventUpsert.mock
+        .calls[0]![0] as any;
+      expect(firstEventUpsert.create.eventType).toBe(
+        "ProposalExecutionExpired",
+      );
+      expect(firstEventUpsert.create.proposalId).toBe("prop-expired-1");
+
+      // Webhook broadcast
+      expect(mockBroadcastProposalExpired).toHaveBeenCalledTimes(2);
+      expect(mockBroadcastProposalExpired).toHaveBeenCalledWith(
+        expect.objectContaining({
+          proposalId: "prop-expired-1",
+          status: "Expired",
+          reason: "timelock_execution_window_expired",
+        }),
+      );
+    });
+
+    it("does not expire proposals that are within the grace period window", async () => {
+      // Query filter ensures only proposals with expiresAt < threshold are returned.
+      // If DB returns empty array because expiresAt is within grace period:
+      mockPrismaQueryRaw.mockResolvedValue([]);
+
+      const result = await service.cleanExpiredProposals(
+        7 * 24 * 60 * 60 * 1000,
+      );
+
+      expect(result.processed).toBe(0);
+      expect(result.expiredIds).toEqual([]);
+      expect(mockPrismaExecuteRaw).not.toHaveBeenCalled();
+    });
+
+    it("respects custom grace period parameter", async () => {
+      // 2 hours ago
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+      mockPrismaQueryRaw.mockResolvedValue([
+        {
+          id: 105,
+          proposalId: "prop-custom-grace",
+          contractId: "CONTRACT_GOV",
+          expiresAt: twoHoursAgo,
+        },
+      ]);
+
+      // 1 hour grace period (so 2 hours ago is expired)
+      const customGraceMs = 1 * 60 * 60 * 1000;
+      const result = await service.cleanExpiredProposals(customGraceMs);
+
+      expect(result.processed).toBe(1);
+      expect(result.expiredIds).toEqual(["prop-custom-grace"]);
+      expect(mockPrismaExecuteRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it("handles failure of one proposal DB update and continues processing remaining", async () => {
+      const pastDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+
+      mockPrismaQueryRaw.mockResolvedValue([
+        {
+          id: 201,
+          proposalId: "prop-err-1",
+          contractId: "CONTRACT_GOV",
+          expiresAt: pastDate,
+        },
+        {
+          id: 202,
+          proposalId: "prop-ok-2",
+          contractId: "CONTRACT_GOV",
+          expiresAt: pastDate,
+        },
+      ]);
+
+      mockPrismaExecuteRaw
+        .mockRejectedValueOnce(new Error("DB deadlock"))
+        .mockResolvedValueOnce(1);
+
+      const result = await service.cleanExpiredProposals();
+
+      expect(result.processed).toBe(2);
+      expect(result.expiredIds).toEqual(["prop-ok-2"]);
+    });
+
+    it("is safe when queryRaw throws an error", async () => {
+      mockPrismaQueryRaw.mockRejectedValue(
+        new Error("Database connection lost"),
+      );
+
+      const result = await service.cleanExpiredProposals();
+
+      expect(result.processed).toBe(0);
+      expect(result.expiredIds).toEqual([]);
     });
   });
 });

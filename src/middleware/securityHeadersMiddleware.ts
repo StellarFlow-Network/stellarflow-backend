@@ -84,8 +84,7 @@ function resolveHstsOptions(env: EnvSource) {
 }
 
 /**
- * Builds the CSP directive set, appending `report-uri` when configured so
- * violations can be collected during a report-only rollout.
+ * Builds the CCP directive set, appending `report-uri` when configured so violations can be collected during a report-only rollout.
  */
 export function buildCspDirectives(
   base: Record<string, string[]>,

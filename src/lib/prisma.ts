@@ -3,9 +3,18 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import dotenv from "dotenv";
 import { publishDatabaseChange } from "../cache/CacheInvalidationManager";
+import { logger } from "../config/logger";
+import {
+  dbSlowQueriesTotal,
+  dbQueryDuration,
+  dbQueriesTotal,
+} from "../metrics/queryMetrics";
 
 // Ensure environment variables are loaded
 dotenv.config();
+
+// Slow query threshold in milliseconds (configurable via environment variable)
+const SLOW_QUERY_THRESHOLD_MS = Number(process.env.SLOW_QUERY_THRESHOLD_MS ?? 100);
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -51,11 +60,42 @@ export const prisma = new Proxy({} as PrismaClient, {
       // database modifications so stale Redis response caches are purged as soon
       // as the underlying data changes. The extension is non-blocking and never
       // throws into the caller: any notification failure is swallowed and logged.
+      // Issue #1014 – PostgreSQL Query Execution Time Tracker and Slow Query Logger
       globalForPrisma.prisma = baseClient.$extends({
         query: {
           $allModels: {
             async $allOperations({ model, operation, args, query }) {
+              const startTime = Date.now();
               const result = await query(args);
+              const durationMs = Date.now() - startTime;
+
+              // Track query duration in Prometheus histogram
+              dbQueryDuration.observe(
+                {
+                  model: String(model),
+                  operation: operation as string,
+                },
+                durationMs,
+              );
+
+              // Increment total query counter
+              dbQueriesTotal.inc({
+                model: String(model),
+                operation: operation as string,
+              });
+
+              // Log slow queries that exceed the threshold
+              if (durationMs > SLOW_QUERY_THRESHOLD_MS) {
+                logger.warn(
+                  `[Slow Query] Model: ${String(model)}, Operation: ${operation}, Duration: ${durationMs}ms, Args: ${JSON.stringify(args)}`,
+                );
+                // Increment Prometheus counter for slow queries
+                dbSlowQueriesTotal.inc({
+                  model: String(model),
+                  operation: operation as string,
+                });
+              }
+
               if (CACHE_RELEVANT_MODELS.has(String(model))) {
                 try {
                   void publishDatabaseChange({

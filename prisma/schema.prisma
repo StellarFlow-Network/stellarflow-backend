@@ -5,6 +5,109 @@ datasource db {
   provider = "postgresql"
 }
 
+// WebAuthn / Passkey Authentication for Relayer Wallet Management
+// Stores registered passkey credentials (public keys) per relayer admin.
+// The credential public key is used to verify WebAuthn attestation
+// signatures on sensitive relayer administration commands (e.g. wallet
+// transfers). Challenge seeds are stored separately in WebAuthnChallenge
+// and are single-use with a short TTL.
+model WebAuthnCredential {
+  id              String   @id @default(uuid())
+  relayerId       Int
+  relayer         Relayer  @relation(fields: [relayerId], references: [id], onDelete: Cascade)
+
+  // WebAuthn credential identifier (base64url-encoded raw credential ID)
+  credentialId    String   @unique @db.VarChar(512)
+
+  // COSE-encoded public key (base64url) used to verify assertions
+  publicKey       String   @db.Text
+
+  // Signature counter for clone detection / replay protection
+  counter         BigInt   @default(0)
+
+  // Authenticator metadata
+  transports      String[] // e.g. ["usb", "nfc", "ble", "internal", "hybrid"]
+  aaguid          String?  @db.VarChar(64)
+  attestationFmt  String?  @db.VarChar(64)
+
+  // Human-friendly label for the passkey (e.g. "YubiKey 5C", "MacBook Touch ID")
+  label           String?  @db.VarChar(100)
+
+  // Lifecycle
+  isActive        Boolean  @default(true)
+  lastUsedAt      DateTime? @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([relayerId, isActive])
+  @@index([credentialId])
+}
+
+// WebAuthn challenge seed storage.
+// Each challenge is single-use, bound to a relayer + operation, and expires
+// quickly (typically <= 5 minutes). Consumed challenges are deleted or marked
+// consumed to prevent replay.
+model WebAuthnChallenge {
+  id           String   @id @default(uuid())
+  relayerId    Int
+  relayer      Relayer  @relation(fields: [relayerId], references: [id], onDelete: Cascade)
+
+  // Random challenge bytes (base64url) that the authenticator must sign over
+  challenge    String   @unique @db.VarChar(512)
+
+  // Operation the challenge is bound to (e.g. "WALLET_TRANSFER", "REGISTER")
+  operation    String   @db.VarChar(50)
+
+  // Optional binding to a specific resource (e.g. target wallet id)
+  relatedId    String?  @db.VarChar(128)
+
+  // Request context for audit / anti-CSRF
+  ipAddress    String?  @db.VarChar(45)
+  userAgent    String?  @db.VarChar(500)
+
+  // Lifecycle
+  consumedAt   DateTime? @db.Timestamptz(3)
+  expiresAt    DateTime  @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([relayerId, operation, expiresAt])
+  @@index([expiresAt])
+}
+
+// Audit trail for WebAuthn-attested relayer administration commands.
+// Records the verified credential + challenge used to authorize a sensitive
+// action (e.g. wallet transfer) so that administrative operations can be
+// independently audited and replayed assertions rejected.
+model WebAuthnAttestation {
+  id             String   @id @default(uuid())
+  relayerId      Int
+  relayer        Relayer  @relation(fields: [relayerId], references: [id], onDelete: Cascade)
+  credentialId   String   @db.VarChar(512)
+  challengeId    String   @db.VarChar(64)
+
+  // Operation authorized by this attestation
+  operation      String   @db.VarChar(50)
+  relatedId      String?  @db.VarChar(128)
+
+  // Raw assertion payload (clientDataJSON, authenticatorData, signature) for audit
+  clientDataJSON String   @db.Text
+  authenticatorData String @db.Text
+  signature      String   @db.Text
+
+  // Verification outcome
+  verified       Boolean  @default(false)
+  failureReason  String?  @db.VarChar(255)
+
+  ipAddress      String?  @db.VarChar(45)
+  userAgent      String?  @db.VarChar(500)
+
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([relayerId, operation, createdAt])
+  @@index([credentialId])
+  @@index([challengeId])
+}
+
 model PriceHistory {
   id          Int       @id @default(autoincrement())
   currency    String
@@ -363,8 +466,50 @@ model Relayer {
   permissionChanges PermissionChange[]
   sessions          UserSession[]
   registry          RelayerRegistry?
+  watchlist         WatchlistItem[]
+  notificationPreference UserNotificationPreference?
+  pushSubscriptions PushSubscription[]
   
   @@index([dekRotationScheduledAt])
+}
+
+model WatchlistItem {
+  id             String   @id @default(uuid())
+  userId         Int
+  user            Relayer  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token          String
+  targetPrice    Decimal  @db.Decimal(38, 18)
+  direction      String   @default("ABOVE")
+  isActive       Boolean  @default(true)
+  lastTriggeredAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, token])
+  @@index([userId, isActive])
+}
+
+model UserNotificationPreference {
+  id        String   @id @default(uuid())
+  userId    Int      @unique
+  user      Relayer  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailEnabled Boolean @default(true)
+  pushEnabled  Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    Int
+  user      Relayer  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model RelayerRegistry {
@@ -497,6 +642,19 @@ model RemittanceTransaction {
   @@index([asset, createdAt])
   @@index([senderPublicKey])
   @@index([recipientPublicKey])
+  sep31Metadata Sep31TransactionMetadata?
+}
+
+model Sep31TransactionMetadata {
+  transactionId    String   @id
+  sourceAsset      String
+  destinationAsset String
+  sender           Json
+  receiver         Json
+  callbackUrl      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  transaction      RemittanceTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 }
 
 // Remittance Dispute Model – Issue #834
@@ -578,9 +736,17 @@ model GovernanceProposal {
   updatedAt       DateTime  @updatedAt
   votes           GovernanceVote[]
 
+  // Issue #1019 – immutable IPFS snapshot of the final vote result
+  resultExportCid         String?
+  resultExportContentHash String?
+  resultExportedAt        DateTime?
+  resultExportAttempts    Int      @default(0)
+  resultExportError       String?
+
   @@index([status, expiresAt])
   @@index([contractId])
   @@index([actionType])
+  @@index([status, resultExportCid])
 }
 
 enum RebalancingSwapStatus {
@@ -687,6 +853,26 @@ model GovernanceVote {
   @@index([accountId, votedAt])
 }
 
+// Voting Power Checkpoint Model – Issue #1044
+// Stores historical voting power checkpoints at specific ledger numbers for proposal voting eligibility.
+// Enables instant querying of historical voting power V(address, ledger, number) with < 20ms response times.
+model VotingPowerCheckpoint {
+  id             Int      @id @default(autoincrement())
+  accountId      String   // Stellar public key of the voter
+  ledgerSequence Int      // Ledger sequence number at which the checkpoint was created
+  votingWeight   Decimal  @db.Decimal(38, 18) // Voting power at this ledger
+  createdAt      DateTime @default(now()) // When the checkpoint was recorded
+
+  // Unique constraint ensures one checkpoint per account per ledger
+  @@unique([accountId, ledgerSequence])
+  // Primary query pattern: lookup voting power for an account at a specific ledger
+  @@index([accountId, ledgerSequence])
+  // Secondary pattern: scan all checkpoints at a specific ledger (for proposal eligibility)
+  @@index([ledgerSequence])
+  // Tertiary pattern: time-based queries for account's checkpoint history
+  @@index([accountId, createdAt])
+}
+
 model TimelockEvent {
   id         String   @id @default(uuid())
   eventType  String
@@ -742,7 +928,7 @@ model BridgeChain {
 model BridgeValidator {
   id              Int      @id @default(autoincrement())
   chainId         String
-  chain           BridgeChain @relation(fields: [chainId], references: [id])
+  chain           BridgeChain @relation(fields: [chainId], references: [chainId])
   validatorAddress String   @unique // Public key or address
   validatorName   String?
   isActive        Boolean  @default(true)
@@ -786,6 +972,9 @@ model BridgeEvent {
   processedAt     DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  validatorSignatures BridgeValidatorSignature[]
+  operations          BridgeOperation[]
 
   @@index([chainId, status])
   @@index([transactionHash])
@@ -841,741 +1030,42 @@ model BridgeOperation {
   @@index([stagedTxHash])
   @@index([stellarTxHash])
 }
-generator client {
-  provider = "prisma-client-js"
-}
-datasource db {
-  provider = "postgresql"
-}
 
-model PriceHistory {
-  id          Int       @id @default(autoincrement())
-  currency    String
-  rate        Decimal
-  bid         Decimal? // Buy price (optional)
-  ask         Decimal? // Sell price (optional)
-  source      String
-  timestamp   DateTime
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  currencyRef Currency? @relation(fields: [currency], references: [code])
-
-  @@index([currency, timestamp])
-  @@index([timestamp])
-  @@unique([currency, source, timestamp])
-}
-
-model Currency {
-  code        String    @id  // e.g., "GHS", "KES"
-  name        String      // Full name e.g., "Ghanaian Cedi"
-  symbol      String      // Currency symbol e.g., "₵", "KES"
-  decimals    Int       @default(2)           // Decimal places for display
-  isActive    Boolean   @default(true)        // Whether this currency is currently supported
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  priceHistory PriceHistory[]
-}
-
-// On-Chain Confirmed Price Model
-// Stores prices confirmed on Stellar via manageData or Soroban contract events
-model OnChainPrice {
-  id            Int       @id @default(autoincrement())
-  currency      String    // e.g., "NGN", "KES", "GHS"
-  rate          Decimal   // The confirmed price
-  txHash        String    // Stellar transaction hash
-  memoId        String?   // Memo ID from transaction (e.g., SF-NGN-1234567890-001)
-  ledgerSeq     Int                          // Ledger sequence number
-  confirmedAt   DateTime   // When transaction was confirmed on-chain
-
-  @@index([currency, confirmedAt])
-  @@index([txHash])
-  @@index([ledgerSeq])
-  @@unique([txHash, currency])
-
-  createdAt     DateTime  @default(now())
-}
-
-model ProviderReputation {
-  id              Int       @id @default(autoincrement())
-  providerName    String  // e.g., "CoinGecko", "ExchangeRateAPI"
-  endpoint        String?  // Specific endpoint URL or identifier
-  status          String   // "online", "offline", "degraded"
-  totalRequests   Int       @default(0)       // Total API calls made
-  successfulRequests Int    @default(0)       // Successful responses
-  failedRequests  Int       @default(0)       // Failed responses
-  incorrectResponses Int   @default(0)        // Responses with invalid/incorrect data
-  averageLatency  Float?    // Average response time in ms
-  lastSuccess     DateTime?                    // Last successful response timestamp
-  lastFailure     DateTime?                    // Last failed response timestamp
-  lastIncorrect   DateTime?                    // Last incorrect response timestamp
-  consecutiveFailures Int  @default(0)        // Current streak of consecutive failures
-  consecutiveIncorrect Int @default(0)        // Current streak of consecutive incorrect responses
-  
-  // Reliability metrics
-  reliabilityScore Float?   // Calculated score (0-100)
-  lastUpdated     DateTime  @updatedAt
-  
-  createdAt       DateTime  @default(now())
-  
-  // Indexes for quick lookups
-  @@index([providerName])
-  @@index([status])
-  @@index([reliabilityScore])
-  @@unique([providerName, endpoint])
-}
-
-// Multi-Sig Price Approval Model
-// Tracks price updates that require signatures from multiple oracle servers
-model MultiSigPrice {
-  id                Int       @id @default(autoincrement())
-  priceReviewId     Int       // Reference to the price_review_records with contract_status tracking
-  currency          String   // e.g., "NGN", "KES", "GHS"
-  rate              Decimal   // The price to be updated
-  source            String   // Price source (e.g., "CoinGecko")
-  
-  // Multi-sig status
-  status            String   // "PENDING", "APPROVED", "REJECTED", "EXPIRED"
-  requiredSignatures Int      @default(2)       // Number of signatures needed (typically 2)
-  collectedSignatures Int     @default(0)       // Number of signatures collected so far
-  
-  // Stellar transaction details (set when fully signed)
-  memoId            String?   // Memo ID from transaction
-  stellarTxHash     String?   // Submitted transaction hash
-  submittedAt       DateTime?                    // When transaction was submitted to Stellar
-  
-  // Timestamps
-  requestedAt       DateTime  @default(now())   // When the multi-sig request was created
-  expiresAt         DateTime                     // Expiration time for the signature request
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  
-  @@index([currency, status, requestedAt])
-  @@index([status, expiresAt])
-  @@index([priceReviewId])
-
-  multiSigSignatures MultiSigSignature[]
-}
-
-// Multi-Sig Signature Model
-// Records individual signatures from oracle servers
-model MultiSigSignature {
-  id                Int       @id @default(autoincrement())
-  multiSigPriceId   Int       // Reference to MultiSigPrice
-  multiSigPrice     MultiSigPrice @relation(fields: [multiSigPriceId], references: [id], onDelete: Cascade)
-  
-  // Server/Signer information
-  signerPublicKey   String    // Stellar public key of the signer
-  signerName        String    // Human-readable name (e.g., "oracle-server-1")
-  
-  // Signature details
-  signature         String    // The actual XDR signature (can be long)
-  signedAt          DateTime  @default(now())   // When the signature was created
-  
-  createdAt         DateTime  @default(now())
-  
-  @@unique([multiSigPriceId, signerPublicKey])  // Prevent duplicate signatures from same signer
-  @@index([multiSigPriceId])
-  @@index([signerPublicKey])
-}
-
-// Error log table for tracking provider/fetcher failures
-// Invariant Violation Circuit Breaker Event Model
-// Records automated circuit breaker activations triggered by invariant
-// violation detections from off-chain workers. Provides an audit trail and
-// cross-restart de-duplication for the automated pause() sequence.
-model CircuitBreakerEvent {
-  id              Int      @id @default(autoincrement())
-  breachType      String   // e.g., "KEEPER_XLM_BALANCE_BELOW_FLOOR"
-  severity        String   // e.g., "CRITICAL"
-  reason          String   // Human readable description of the violation
-  details         Json?    // Extra context (balance, threshold, contract id, etc.)
-  status          String   // "DETECTED" | "PAUSE_SUBMITTED" | "PAUSE_FAILED" | "NOTIFIED"
-  txHash          String?  // Stellar transaction hash of the submitted pause() tx
-  keeperPublicKey String?  // Emergency keeper key used to sign the pause() tx
-  detectedAt      DateTime @default(now())
-  createdAt       DateTime @default(now())
-
-  @@index([status, detectedAt])
-  @@index([breachType, detectedAt])
-  @@index([txHash])
-}
-
-model AuditLog {
-  id             String    @id // K-sortable KSUID (26-char Crockford Base32)
-  eventType      String    @db.VarChar(50) // e.g., "CONSENSUS_INITIATED", "USER_LOGIN_SUCCESS"
-  actionType     String?   @db.VarChar(50) // The type of action being audited (e.g., "HALT", "UPGRADE")
-  relatedId      Int? // ID of related record (e.g., PendingConsensus.id)
-
-  // Actor information
-  actorPublicKey String    @db.VarChar(56) // Public key of the actor
-  actorName      String    @db.VarChar(100) // Human-readable name
-  actorRole      String?   @db.VarChar(50) // Role of the actor
-
-  // Event details
-  eventDetails   String?   @db.Text // JSON details about the event
-  previousState  String?   @db.Text // Previous state before this event
-  newState       String?   @db.Text // New state after this event
-
-  // Request context
-  ipAddress      String?   @db.VarChar(45) // IP address of the request
-  userAgent      String?   @db.VarChar(500) // User agent of the request
-
-  // Timestamps – TIMESTAMPTZ ensures UTC storage and retrieval
-  occurredAt     DateTime  @db.Timestamptz(3) // When the event occurred (UTC)
-  createdAt      DateTime  @default(now()) @db.Timestamptz(3) // When record was created (UTC)
-
-  @@index([eventType])
-  @@index([actorPublicKey])
-  @@index([occurredAt])
-}
-
-model ComplianceMetadata {
-  id               Int       @id @default(autoincrement())
-  relayerId        Int? // Optional link to the relayer (if known)
-  relayerName      String? // Relayer name at time of violation
-  eventType        String // e.g., "LATENCY_VIOLATION", "PAYLOAD_REJECTED"
-  payloadTimestamp DateTime? // Timestamp from the relayer payload
-  receivedAt       DateTime // When the payload was received
-  latencyDiffMs    Int? // Calculated latency difference in milliseconds
-  thresholdMs      Int? // The threshold that was exceeded
-  details          String? // Additional JSON details about the event
-  resolved         Boolean   @default(false) // Whether the violation has been addressed
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  @@index([relayerId])
-  @@index([eventType])
-  @@index([createdAt])
-  @@index([relayerName, createdAt])
-}
-
-model PendingConsensus {
-  id                 Int       @id @default(autoincrement())
-  actionType         String    @db.VarChar(50) // "HALT", "UPGRADE", "EMERGENCY_STOP"
-  actionData         String?   @db.Text // JSON data for the action (e.g., upgrade version, halt reason)
-  status             String    @db.VarChar(20) // "PENDING", "APPROVED", "REJECTED", "EXECUTED", "EXPIRED"
-  requiredSignatures Int       @default(2) // Number of admin signatures required
-  collectedSignatures Int      @default(0) // Number of signatures collected so far
-
-  // Request information
-  requestedBy        String    @db.VarChar(100) // Admin who initiated the request
-  requestedAt        DateTime  @default(now()) // When the request was created
-  expiresAt          DateTime // When the request expires (if not approved)
-
-  // Execution information
-  executedAt         DateTime? // When the action was executed
-  executionResult    String?   @db.Text // Result of the execution (success/error message)
-
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-
-  @@index([actionType, status])
-  @@index([status, expiresAt])
-  @@index([requestedBy, requestedAt])
-
-  pendingSignatures  PendingSignature[]
-}
-
-model PendingSignature {
-  id                 Int       @id @default(autoincrement())
-  pendingConsensusId Int // Reference to PendingConsensus
-  pendingConsensus   PendingConsensus @relation(fields: [pendingConsensusId], references: [id], onDelete: Cascade)
-
-  // Admin information
-  adminPublicKey     String    @db.VarChar(56) // Stellar public key of the admin
-  adminName          String    @db.VarChar(100) // Human-readable admin name
-  adminRole          String    @db.VarChar(50) // Admin role (e.g., "SUPER_ADMIN", "OPERATOR")
-
-  // Signature details
-  signature          String    @db.Text // Cryptographic signature
-  ipAddress          String    @db.VarChar(45) // IP address of the signer
-  userAgent          String?   @db.VarChar(500) // User agent of the signer
-  signedAt           DateTime  @default(now()) // When the signature was provided
-
-  createdAt          DateTime  @default(now())
-
-  @@unique([pendingConsensusId, adminPublicKey]) // Prevent duplicate signatures from same admin
-  @@index([pendingConsensusId])
-  @@index([adminPublicKey])
-}
-
-model IssuerOnboardingRequest {
-  id               Int       @id @default(autoincrement())
-  name             String    @db.VarChar(200) // Healthcare provider name
-  licenseNumber    String    @db.VarChar(100) // Professional license number
-  country          String    @db.VarChar(100) // Country of operation
-  walletAddress    String    @db.VarChar(56) // Stellar wallet address
-
-  // Workflow status: PENDING → APPROVED | REJECTED
-  status           String    @default("PENDING") @db.VarChar(20)
-
-  // Admin decision
-  reviewedBy       String?   @db.VarChar(100) // Admin who reviewed the request
-  reviewedAt       DateTime? // When the decision was made
-  reviewNote       String?   @db.Text // Optional note from admin
-
-  // Contract allowlist tracking
-  addedToAllowlist Boolean   @default(false) // Whether the wallet was added on-chain
-  allowlistTxHash  String?   @db.VarChar(100) // Stellar tx hash for the allowlist update
-
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-
-  @@index([status])
-  @@index([walletAddress])
-  @@index([createdAt])
-}
-
-model OpenOrder {
-  id           String    @id @default(uuid())
-  orderId      String    @unique
-  totalAmount  Decimal   @db.Decimal(38, 18)
-  filledAmount Decimal   @default(0) @db.Decimal(38, 18)
-  status       String    @default("open")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  @@index([status])
-}
-
-model OrderFilledEvent {
-  id         String   @id @default(uuid())
-  orderId    String
-  fillAmount Decimal  @db.Decimal(38, 18)
-  txHash     String
-  ledgerSeq  Int
-  eventIndex Int
-  payload    Json
-  createdAt  DateTime @default(now())
-
-  @@unique([txHash, eventIndex])
-  @@index([orderId, ledgerSeq])
-}
-
-model ErrorLog {
-  id           String   @id  // K-sortable KSUID (26-char Crockford Base32)
-  providerName String   // e.g., "CoinGecko", "KESRateFetcher"
-  errorMessage String?
-  occurredAt   DateTime
-  createdAt    DateTime  @default(now())
-
-  @@index([providerName])
-  @@index([occurredAt])
-}
-
-model RawData {
-  id        Int      @id @default(autoincrement())
-  currency  String
-  provider  String
-  endpoint  String?
-  payload   String
-  fetchedAt DateTime
-  createdAt DateTime @default(now())
-
-  @@index([currency, fetchedAt])
-  @@index([provider, fetchedAt])
-  @@index([createdAt])
-}
-
-model Relayer {
-  id            Int      @id @default(autoincrement())
-  name          String
-  apiKey        String   @unique
-  isActive      Boolean  @default(true)
-  allowedAssets String
-  whitelistedIps  String[]
-  email           String?  @unique
-  passwordHash    String?
-  role            String?  @default("VIEWER")
-  lastLoginAt     DateTime?
-  
-  // Ed25519 Key Pair Storage (KMS Envelope Encryption)
-  publicKey              String?   @db.VarChar(64) // Hex-encoded Ed25519 public key (32 bytes)
-  encryptedPrivateKey    String?   @db.Text // AES-256-GCM encrypted private key (hex format: iv+ciphertext+tag)
-  encryptedDek           String?   @db.Text // KMS-encrypted Data Encryption Key (base64)
-  dekVersion             Int?      @default(1) // DEK version for rotation tracking
-  dekEncryptedAt         DateTime? @db.Timestamptz(3) // When current DEK was encrypted by KMS
-  dekRotationScheduledAt DateTime? @db.Timestamptz(3) // When next DEK rotation is scheduled (90 days from dekEncryptedAt)
-  keyGeneratedAt         DateTime? @db.Timestamptz(3) // When the key pair was first generated
-  
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  permissionChanges PermissionChange[]
-  sessions          UserSession[]
-  registry          RelayerRegistry?
-  
-  @@index([dekRotationScheduledAt])
-}
-
-model RelayerRegistry {
-  id               Int      @id @default(autoincrement())
-  relayerId        Int      @unique
-  relayer          Relayer  @relation(fields: [relayerId], references: [id], onDelete: Cascade)
-  contactName      String
-  email            String
-  organizationName String
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-}
-
-model ApiKey {
-  id         String    @id @default(uuid())
-  key        String    @unique
-  label      String?
-  scopes     String[]
-  ownerId    String?
-  isActive   Boolean   @default(true)
-  expiresAt  DateTime?
-  lastUsedAt DateTime?
-  tier       String    @default("Free") // API Key tier (Free, Developer, Institutional)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-}
-
-model UserSession {
-  id           Int       @id @default(autoincrement())
-  relayerId   Int
-  relayer     Relayer   @relation(fields: [relayerId], references: [id])
-  token       String    @unique
-  ipAddress   String
-  userAgent   String
-  createdAt   DateTime  @default(now())
-  expiresAt   DateTime
-  isActive    Boolean   @default(true)
-}
-
-model PermissionChange {
-  id          Int       @id @default(autoincrement())
-  relayerId  Int
-  relayer    Relayer   @relation(fields: [relayerId], references: [id])
-  changedBy  Int
-  targetId   Int?
-  field      String
-  oldValue   String?
-  newValue   String?
-  reason     String?
-  createdAt  DateTime  @default(now())
-}
-
-// OHLC Candle Model – Issue #208: Analytics | Time-Series Data Aggregation Service
-// Stores Open/High/Low/Close aggregates produced by the PriceAggregator worker.
-// Granularity is one of "MINUTE" | "HOUR" | "DAY".
-model OhlcCandle {
-  id          Int      @id @default(autoincrement())
-  currency    String   // e.g., "NGN", "KES", "GHS"
-  granularity String   // "MINUTE" | "HOUR" | "DAY"
-  openTime    DateTime // Start of the candle window (UTC, truncated to granularity)
-  closeTime   DateTime // End of the candle window (exclusive)
-
-  open        Decimal  // First price in the window
-  high        Decimal  // Highest price in the window
-  low         Decimal  // Lowest price in the window
-  close       Decimal  // Last price in the window
-  count       Int      @default(0) // Number of raw ticks aggregated
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Composite unique – one candle per (currency, granularity, openTime)
-  @@unique([currency, granularity, openTime])
-
-  // Primary query pattern: fetch candles for a currency/granularity over a time range
-  @@index([currency, granularity, openTime])
-  // Secondary: sweep all candles in a time range (e.g. backfill checks)
-  @@index([granularity, openTime])
-}
-
-// Hourly Statistics for smoothing out price spikes
-model HourlyStats {
-  id           Int      @id @default(autoincrement())
-  currency     String
-  averageRate  Decimal
-  hour         DateTime // The start of the hour this average represents
-  createdAt    DateTime  @default(now())
-
-  @@unique([currency, hour])
-  @@index([hour])
-}
-
-// Webhook Endpoint for Circuit Breaker Notifications
-// Stores registered third-party monitoring platform endpoints with HMAC secrets
 model WebhookEndpoint {
   id          String   @id @default(uuid())
-  name        String   // Human-readable name for the endpoint
-  url         String   // Webhook URL to send notifications to
-  hmacSecret  String   // HMAC secret for signing payloads
+  name        String
+  url         String
+  hmacSecret  String
   isActive    Boolean  @default(true)
-  events      String[] // Array of event types to subscribe to (e.g., ["Pause", "CircuitBreakerTriggered"])
-  headers     String?  // Optional custom headers as JSON string
-  timeoutMs   Int      @default(1000) // Request timeout in milliseconds (default 1 second)
-  maxRetries  Int      @default(3)    // Maximum retry attempts
+  events      String[]
+  headers     String?
+  timeoutMs   Int      @default(1000)
+  maxRetries  Int      @default(3)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([isActive])
   @@index([url])
-// Remittance Transaction Model – Issue #815
-// Records individual remittance transactions for the /api/v1/remittance/history endpoint.
-// Supports cursor-based pagination and compound filter queries by status, asset, and date.
-model RemittanceTransaction {
-  id              String   @id @default(uuid())
-  userId          String   // Relayer / end-user identifier
-  asset           String   @db.VarChar(20)  // e.g., "XLM", "USDC", "NGN"
-  senderCurrency  String   @db.VarChar(10)
-  receiverCurrency String  @db.VarChar(10)
-  amount          Decimal  @db.Decimal(24, 10)  // Amount in sender currency
-  outputAmount    Decimal  @db.Decimal(24, 10)  // Amount in receiver currency
-  fee             Decimal  @db.Decimal(24, 10)  @default(0)
-  rate            Decimal  @db.Decimal(24, 10)  // Exchange rate applied
-  status          String   @db.VarChar(32)  // PENDING | COMPLETED | FAILED | REVERSED | pending_screening | screening | flagged_compliance | compliance_cleared | payout_relayed | payout_halted
-  provider        String?  @db.VarChar(128) // Liquidity provider / rail used
-  stellarTxHash   String?  // Stellar transaction hash when submitted on-chain
-  reference       String?  @db.VarChar(128) // External reference / correlation ID
-  errorMessage    String?  // Populated when status = FAILED
-  senderPublicKey    String?  // Stellar public key screened against OFAC (#784)
-  recipientPublicKey String?
-  screeningProvider  String?
-  screeningHits      Json?
-  payoutHalted       Boolean   @default(false)
-  payoutRelayedAt    DateTime?
-  screenedAt         DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+}
 
-  // Compound index for primary query: filter by userId + status + date range (cursor pagination)
-  @@index([userId, status, createdAt])
-  // Compound index: filter by userId + asset + date range
-  @@index([userId, asset, createdAt])
-  // Compound index: filter by userId + date range only (broadest query)
-  @@index([userId, createdAt])
-  // Allow status-only scans (admin dashboards, reporting)
+// SEP-12 Customer Information Transfer (KYC) – Issue #990
+// Customer KYC payloads are AES-256-GCM encrypted at rest; only ciphertext is
+// persisted in `encryptedPayload` (see src/services/kycEncryption.ts).
+model KycCustomer {
+  id               String   @id @default(uuid())
+  account          String?  @db.VarChar(64)
+  memo             String?
+  memoType         String?  @db.VarChar(16) // id | text | hash
+  status           String   @db.VarChar(16) // ACCEPTED | PROCESSING | NEEDS_INFO | REJECTED
+  message          String?
+  encryptedPayload String   // AES-256-GCM ciphertext of the JSON KYC payload
+  fieldsRequested  Json?    // SEP-12 fields map while status = NEEDS_INFO
+  anchorReference  String?
+  provider         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([account, memoType, memo])
   @@index([status, createdAt])
-  // Asset-level reporting
-  @@index([asset, createdAt])
-  @@index([senderPublicKey])
-  @@index([recipientPublicKey])
-}
-
-// Remittance Dispute Model – Issue #834
-// Tracks dispute tickets opened when fiat payouts fail or time out.
-// State machine: open -> investigating -> refunded | closed.
-model RemittanceDispute {
-  id           String    @id @default(uuid())
-  remittanceId String    // RemittanceTransaction.id the dispute belongs to
-  userId       String    // Relayer / end-user identifier
-  status       String    @db.VarChar(20) @default("open") // open | investigating | refunded | closed
-  reason       String    @db.VarChar(255) // Payout failure / timeout reason captured at open
-  details      String?   // Structured JSON details captured when the dispute was opened
-  email        String?   // Contact address notified on state changes
-  webhookUrl   String?   // Endpoint notified on state changes (webhook updates)
-  refundAmount Decimal?  @db.Decimal(24, 10) // Amount refunded for manual refunds
-  refundedById String?   // Operator / admin identifier that triggered the refund
-  refundedAt   DateTime? // When the manual refund was issued
-  resolvedById String?   // Operator / admin identifier that closed the dispute
-  resolvedAt   DateTime? // When the dispute was closed
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-
-  @@index([userId, status, createdAt])
-  @@index([remittanceId])
-  @@index([status, createdAt])
-}
-model OhlcvCandle {
-  id        String   @id @default(uuid())
-  pair      String   @db.VarChar(10)
-  timeframe String   // e.g., "1m", "15m", "1h", "1d"
-  open      Decimal  @db.Decimal(20, 10)
-  high      Decimal  @db.Decimal(20, 10)
-  low       Decimal  @db.Decimal(20, 10)
-  close     Decimal  @db.Decimal(20, 10)
-  volume    Decimal  @db.Decimal(20, 10)
-  timestamp DateTime @db.Timestamp(3)
-  @@unique([pair, timeframe, timestamp])
-  @@index([pair, timeframe, timestamp])
-}
-
-model PoolLiquidity {
-  id        String   @id @default(uuid())
-  poolId    String   @db.VarChar(50)
-  timestamp DateTime @db.Timestamp(3)
-  liquidity Decimal  @db.Decimal(20, 10)
-  @@unique([poolId, timestamp])
-  @@index([poolId, timestamp])
-}
-
-model PoolVolumeAnalytics {
-  id        String   @id @default(uuid())
-  poolId    String   @db.VarChar(50)
-  timestamp DateTime @db.Timestamp(3)
-  volume24h Decimal  @db.Decimal(30, 10)
-  fees24h   Decimal  @db.Decimal(30, 10)
-  tvl       Decimal  @db.Decimal(30, 10)
-
-  @@unique([poolId, timestamp])
-  @@index([poolId, timestamp])
-}
-
-model GovernanceProposal {
-  id              Int       @id @default(autoincrement())
-  proposalId      String    @unique
-  contractId      String
-  title           String?
-  actionType      String?
-  actionData      String?
-  expiresAt       DateTime
-  status          String    @default("Queued")
-  transactionHash String?
-  executedAt      DateTime?
-  cancelledAt     DateTime?
-  queuedAt        DateTime?
-  timelockActionSource String?
-  notificationCount Int @default(0)
-  executionReadyNotifiedAt DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  votes           GovernanceVote[]
-
-  @@index([status, expiresAt])
-  @@index([contractId])
-  @@index([actionType])
-}
-
-enum RebalancingSwapStatus {
-  QUEUED
-  PROCESSING
-  COMPLETED
-  FAILED
-  CANCELLED
-}
-
-model RebalancingSwap {
-  id                String   @id
-  poolKey           String   @db.VarChar(100)
-  anchorAccount     String   @db.VarChar(56)
-  fromCurrency      String   @db.VarChar(12)
-  toCurrency        String   @db.VarChar(12)
-  fromAmount        Decimal  @db.Decimal(30, 7)
-  estimatedToAmount Decimal  @db.Decimal(30, 7)
-  normalizedVolume  Decimal  @db.Decimal(30, 7)
-  fromReserveRatio  Decimal  @db.Decimal(8, 7)
-  toReserveRatio    Decimal  @db.Decimal(8, 7)
-  status            RebalancingSwapStatus @default(QUEUED)
-  managerAccounts   String[]
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  @@index([poolKey, status])
-  @@index([status, createdAt])
-}
-
-model PaymentRoute {
-  id              String   @id @default(uuid())
-  senderCurrency  String
-  receiverCurrency String
-  sourceAsset     String
-  targetRail      String
-  provider        String
-  rate            Decimal  @db.Decimal(30, 12)
-  fee             Decimal  @db.Decimal(30, 12)
-  estimatedAmount Decimal  @db.Decimal(30, 12)
-  slippageBps     Int      @default(0)
-  liquidityPoolId String?
-  priority        Int      @default(0)
-  status          String   @default("ACTIVE")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  quotes          FxQuote[]
-
-  @@index([senderCurrency, receiverCurrency, status])
-}
-
-model FxQuote {
-  id              String   @id @default(uuid())
-  paymentRouteId  String
-  senderCurrency  String
-  receiverCurrency String
-  inputAmount     Decimal  @db.Decimal(30, 12)
-  outputAmount    Decimal  @db.Decimal(30, 12)
-  rate            Decimal  @db.Decimal(30, 12)
-  fee             Decimal  @db.Decimal(30, 12)
-  slippageBps     Int
-  liveFeedRate    Decimal  @db.Decimal(30, 12)
-  feedSource      String
-  feedTimestamp   DateTime
-  rateDeviationBps Int
-  status          String
-  expiresAt       DateTime
-  lockedAt        DateTime?
-  executedAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  paymentRoute    PaymentRoute @relation(fields: [paymentRouteId], references: [id])
-
-  @@index([paymentRouteId, status])
-  @@index([status, expiresAt])
-}
-
-model VaultApyMetric {
-  id         String   @id @default(uuid())
-  vaultId    String
-  ledgerSeq  Int
-  sharePrice Decimal  @db.Decimal(38, 18)
-  apy7d      Decimal? @db.Decimal(20, 10)
-  apy30d     Decimal? @db.Decimal(20, 10)
-  timestamp  DateTime
-  createdAt  DateTime @default(now())
-
-  @@index([vaultId, timestamp])
-}
-
-model GovernanceVote {
-  id         Int      @id @default(autoincrement())
-  accountId  String
-  proposalId String
-  choice     String
-  weight     Decimal  @db.Decimal(38, 18)
-  txHash     String?
-  votedAt    DateTime
-  proposal   GovernanceProposal @relation(fields: [proposalId], references: [proposalId])
-
-  @@unique([accountId, proposalId])
-  @@index([accountId, votedAt])
-}
-
-model TimelockEvent {
-  id         String   @id @default(uuid())
-  eventType  String
-  proposalId String
-  contractId String
-  ledgerSeq  Int
-  txHash     String
-  topics     String
-  value      String
-  createdAt  DateTime @default(now())
-
-  @@unique([txHash, eventType, proposalId])
-  @@index([ledgerSeq])
-}
-
-model HarvestExecution {
-  id              String    @id @default(uuid())
-  strategyId      String
-  asset           String
-  yieldAmount     Decimal   @db.Decimal(38, 18)
-  gasCost         Decimal   @db.Decimal(38, 18)
-  netProfit       Decimal   @db.Decimal(38, 18)
-  minimumProfit   Decimal   @db.Decimal(38, 18)
-  status          String
-  returnAmount    Decimal?  @db.Decimal(38, 18)
-  transactionHash String?
-  error           String?
-  evaluatedAt     DateTime
-  executedAt      DateTime?
-  createdAt       DateTime  @default(now())
-
-  @@index([strategyId, evaluatedAt])
-  @@index([status, evaluatedAt])
+  @@index([account])
 }

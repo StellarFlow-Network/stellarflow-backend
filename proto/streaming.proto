@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package stellarflow.streaming;
+
+// Timestamp message for consistent time representation
+message Timestamp {
+  int64 seconds = 1;  // Unix timestamp in seconds
+  int32 nanos = 2;    // Nanoseconds component
+}
+
+// Market trade event
+message MarketTrade {
+  string trade_id = 1;
+  string pool_id = 2;
+  string base_asset = 3;
+  string quote_asset = 4;
+  string price = 5;  // Decimal as string to avoid precision loss
+  string amount = 6; // Decimal as string
+  string side = 7;   // "buy" or "sell"
+  Timestamp timestamp = 8;
+  uint64 sequence = 9;
+}
+
+// Single order book level
+message OrderBookLevel {
+  string price = 1;  // Decimal as string
+  string amount = 2; // Decimal as string
+  uint32 order_count = 3;
+}
+
+// Order book depth snapshot or update
+message OrderBookDepth {
+  string pool_id = 1;
+  string base_asset = 2;
+  string quote_asset = 3;
+  repeated OrderBookLevel bids = 4;
+  repeated OrderBookLevel asks = 5;
+  Timestamp timestamp = 6;
+  uint64 sequence = 7;
+  bool is_snapshot = 8;  // true for full snapshot, false for incremental update
+}
+
+// Pricing update for a trading pair
+message PricingUpdate {
+  string pool_id = 1;
+  string base_asset = 2;
+  string quote_asset = 3;
+  string last_price = 4;      // Decimal as string
+  string bid_price = 5;        // Best bid
+  string ask_price = 6;        // Best ask
+  string high_24h = 7;         // 24h high
+  string low_24h = 8;          // 24h low
+  string volume_24h = 9;       // 24h volume in base asset
+  string quote_volume_24h = 10; // 24h volume in quote asset
+  string price_change_24h = 11; // Absolute price change
+  string price_change_pct_24h = 12; // Percentage change
+  Timestamp timestamp = 13;
+}
+
+// Liquidity pool statistics
+message PoolStats {
+  string pool_id = 1;
+  string total_liquidity_usd = 2;
+  string volume_24h_usd = 3;
+  string fee_rate = 4;  // e.g., "0.003" for 0.3%
+  uint32 trade_count_24h = 5;
+  Timestamp timestamp = 6;
+}
+
+// Heartbeat / keep-alive message
+message Heartbeat {
+  Timestamp timestamp = 1;
+  uint64 server_sequence = 2;
+}
+
+// Error message
+message StreamError {
+  string code = 1;
+  string message = 2;
+  Timestamp timestamp = 3;
+}
+
+// Subscription confirmation
+message SubscriptionConfirm {
+  string channel = 1;
+  bool subscribed = 2;
+  Timestamp timestamp = 3;
+}
+
+// Envelope message that wraps all streaming message types
+message StreamMessage {
+  // Message type discriminator
+  enum MessageType {
+    UNKNOWN = 0;
+    MARKET_TRADE = 1;
+    ORDER_BOOK_DEPTH = 2;
+    PRICING_UPDATE = 3;
+    POOL_STATS = 4;
+    HEARTBEAT = 5;
+    ERROR = 6;
+    SUBSCRIPTION_CONFIRM = 7;
+  }
+  
+  MessageType type = 1;
+  string channel = 2;  // Channel/topic identifier
+  
+  // One of the following will be populated based on type
+  oneof payload {
+    MarketTrade market_trade = 10;
+    OrderBookDepth order_book_depth = 11;
+    PricingUpdate pricing_update = 12;
+    PoolStats pool_stats = 13;
+    Heartbeat heartbeat = 14;
+    StreamError error = 15;
+    SubscriptionConfirm subscription_confirm = 16;
+  }
+}
+
+// Client -> Server subscription request
+message SubscriptionRequest {
+  enum Action {
+    SUBSCRIBE = 0;
+    UNSUBSCRIBE = 1;
+    PING = 2;  // Heartbeat response
+  }
+  
+  Action action = 1;
+  repeated string channels = 2;  // List of channels to subscribe/unsubscribe
+}

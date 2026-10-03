@@ -4,10 +4,39 @@ import { getRelayerKeyService, RelayerKeyError } from '../services/relayerKeySer
 import { getDekRotationService } from '../services/dekRotationService';
 import { triggerManualRotation } from '../jobs/dekRotationJob';
 import { logger } from '../utils/logger';
+import { getWebAuthnService, WebAuthnError } from '../services/webAuthnService';
+
+export interface WebAuthnAttestation {
+  id: string;
+  rawId: string;
+  response: {
+    clientDataJSON: string;
+    authenticatorData: string;
+    signature: string;
+    userHandle?: string;
+  };
+  getClientExtensionResults?: () => Promise<Map<string, unknown>;
+}
+
+export interface WebAuthnAssertionExpected {
+  challenge: string;
+  origin: string;
+  rpId?: string;
+  allowCredentials?: { id: string; type: 'public-key'; }[];
+}
+
+export interface WebAuthnRegistrationExpected {
+  challenge: string;
+  origin: string;
+  rpId?: string;
+  rpName?: string;
+  userVerificationRequirement?: 'required' | 'preferred' | 'discouraged';
+  authenticatorSelectionAttachment?: 'platform' | 'cross-platform';
+}
 
 /**
  * Admin API Controller for Relayer Key Management
- * 
+ *
  * Endpoints:
  * - POST   /admin/relayers/:id/keys         - Generate new key pair
  * - GET    /admin/relayers/:id/keys         - Get key information
@@ -16,7 +45,11 @@ import { logger } from '../utils/logger';
  * - POST   /admin/relayers/:id/keys/validate - Validate encrypted key
  * - GET    /admin/relayers/keys             - List all relayer keys
  * - GET    /admin/relayers/keys/rotation-stats - Get DEK rotation statistics
- * - POST   /admin/relayers/keys/rotate-deks - Trigger manual DEK rotation
+ * - POST   /admin/relayers/keys/rotate-deks - Trigger manual dek rotation
+ * - POST   /admin/relayers/webauthn/register/challenge - Generate WebAuthn registration challenge
+ * - POST   /admin/relayers/webauthn/register/verify   - Verify WebAuthn registration
+ * - POST   /admin/relayers/webauthn/authenticate/challenge - Generate WebAuthn authentication challenge
+ * - POST   /admin/relayers/webauthn/authenticate/verify   - Verify WebAuthn authentication
  */
 
 /**
@@ -86,7 +119,7 @@ export const getRelayerKeyInfo = async (req: Request, res: Response): Promise<vo
     const keyInfo = await keyService.getKeyInfo(relayerId);
 
     if (!keyInfo) {
-      sendApiError(res, 404, 'RELAYER_NOT_FOUND', `Relayer ${relayerId} not found`);
+      sendApiError(res, 404, 'RELAYUR_NOT_FOUND', `Relayer ${relayerId} not found`);
       return;
     }
 
@@ -122,6 +155,24 @@ export const rotateRelayerKeys = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    const attestation = req.body?.webAuthn?.attestation as WebAuthnAttestation | undefined;
+    if (!attestation) {
+      sendApiError(res, 400, 'WEBAUTHN_ATTESTATION_REQUIRED', 'WebAuthn attestation is required for key rotation');
+      return;
+    }
+
+    const webAuthnService = getWebAuthnService();
+    const verified = await webAuthnService.verifyAttestation(attestation, {
+      challenge: req.body?.webAuthn?.challenge,
+      origin: req.body?.webAuthn?.origin,
+      rpId: req.body?.webAuthn?.rpId,
+    });
+
+    if (!verified) {
+      sendApiError(res, 401, 'WEBAUTHN_VERIFICATION_FAILED', 'WebAuthn attestation verification failed');
+      return;
+    }
+
     logger.warn(`[RelayerKeyController] Rotating key pair for relayer ${relayerId}`);
 
     const keyService = getRelayerKeyService();
@@ -143,11 +194,13 @@ export const rotateRelayerKeys = async (req: Request, res: Response): Promise<vo
     logger.error('[RelayerKeyController] Failed to rotate keys:', error);
 
     if (error instanceof RelayerKeyError) {
-      if (error.code === 'RELAYER_NOT_FOUND') {
-        sendApiError(res, 404, 'RELAYER_NOT_FOUND', error.message);
+      if (error.code === 'RELAYUR_NOT_FOUND') {
+        sendApiError(res, 404, 'RELAYUR_NOT_FOUND', error.message);
       } else {
         sendApiError(res, 500, error.code, error.message);
       }
+    } else if (error instanceof WebAuthnError) {
+      sendApiError(res, 401, error.code, error.message);
     } else {
       sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to rotate key pair');
     }
@@ -178,6 +231,24 @@ export const deleteRelayerKeys = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    const attestation = req.body?.webAuthn?.attestation as WebAuthnAttestation | undefined;
+    if (!attestation) {
+      sendApiError(res, 400, 'WEBAUTHN_ATTESTATION_REQUIRED', 'WebAuthn attestation is required for key deletion');
+      return;
+    }
+
+    const webAuthnService = getWebAuthnService();
+    const verified = await webAuthnService.verifyAttestation(attestation, {
+      challenge: req.body?.webAuthn?.challenge,
+      origin: req.body?.webAuthn?.origin,
+      rpId: req.body?.webAuthn?.rpId,
+    });
+
+    if (!verified) {
+      sendApiError(res, 401, 'WEBAUTHN_VERIFICATION_FAILED', 'WebAuthn attestation verification failed');
+      return;
+    }
+
     logger.warn(`[RelayerKeyController] Deleting key pair for relayer ${relayerId}`);
 
     const keyService = getRelayerKeyService();
@@ -196,6 +267,8 @@ export const deleteRelayerKeys = async (req: Request, res: Response): Promise<vo
       } else {
         sendApiError(res, 500, error.code, error.message);
       }
+    } else if (error instanceof WebAuthnError) {
+      sendApiError(res, 401, error.code, error.message);
     } else {
       sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to delete key pair');
     }
@@ -211,7 +284,7 @@ export const validateRelayerKey = async (req: Request, res: Response): Promise<v
     const relayerId = parseInt(req.params.id);
 
     if (isNaN(relayerId)) {
-      sendApiError(res, 400, 'INVALID_RELAYER_ID', 'Relayer ID must be a number');
+      sendApiError(res, 400, 'INVALID_RELAYUR_ID', 'Relayer ID must be a number');
       return;
     }
 
@@ -278,7 +351,7 @@ export const listAllRelayerKeys = async (req: Request, res: Response): Promise<v
 
 /**
  * GET /admin/relayers/keys/rotation-stats
- * Get DEK rotation statistics for monitoring
+ * Get dek rotation statistics for monitoring
  */
 export const getRotationStats = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -312,11 +385,29 @@ export const getRotationStats = async (req: Request, res: Response): Promise<voi
 
 /**
  * POST /admin/relayers/keys/rotate-deks
- * Manually trigger DEK rotation for all overdue relayers
+ * Manually trigger dek rotation for all overdue relayers
  */
 export const triggerDekRotation = async (req: Request, res: Response): Promise<void> => {
   try {
     const { dryRun, maxRelayers } = req.query;
+
+    const attestation = req.body?.webAuthn?.attestation as WebAuthnAttestation | undefined;
+    if (!attestation) {
+      sendApiError(res, 400, 'WEBAUTHN_ATTESTATION_REQUIRED', 'WebAuthn attestation is required for manual DEK rotation');
+      return;
+    }
+
+    const webAuthnService = getWebAuthnService();
+    const verified = await webAuthnService.verifyAttestation(attestation, {
+      challenge: req.body?.webAuthn?.challenge,
+      origin: req.body?.webAuthn?.origin,
+      rpId: req.body?.webAuthn?.rpId,
+    });
+
+    if (!verified) {
+      sendApiError(res, 401, 'WEBAUTHN_VERIFICATION_FAILED', 'WebAuthn attestation verification failed');
+      return;
+    }
 
     logger.info(
       `[RelayerKeyController] Manual DEK rotation triggered (dryRun=${dryRun}, maxRelayers=${maxRelayers})`,
@@ -347,7 +438,11 @@ export const triggerDekRotation = async (req: Request, res: Response): Promise<v
     });
   } catch (error: any) {
     logger.error('[RelayerKeyController] Failed to trigger DEK rotation:', error);
-    sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to trigger DEK rotation');
+    if (error instanceof WebAuthnError) {
+      sendApiError(res, 401, error.code, error.message);
+    } else {
+      sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to trigger DEK rotation');
+    }
   }
 };
 
@@ -372,21 +467,153 @@ export const getRelayerPublicKey = async (req: Request, res: Response): Promise<
       return;
     }
 
-    if (!keyInfo.publicKey) {
-      sendApiError(res, 404, 'NO_PUBLIC_KEY', `Relayer ${keyInfo.relayerName} has no public key`);
-      return;
-    }
-
     res.json({
       success: true,
       data: {
         relayerId: keyInfo.relayerId,
-        relayerName: keyInfo.relayerName,
         publicKey: keyInfo.publicKey,
       },
     });
   } catch (error: any) {
     logger.error('[RelayerKeyController] Failed to get public key:', error);
     sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to retrieve public key');
+  }
+};
+
+/**
+ * POST /admin/relayers/webauthn/register/challenge
+ * Generate a WebAuthn registration challenge and store it in PostgreSQL
+ */
+export const generateWebAuthnRegistrationChallenge = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, username, displayName } = req.body;
+    if (!userId || typeof userId !== 'string') {
+      sendApiError(res, 400, 'INVALID_USER_ID', 'userId is required');
+      return;
+    }
+
+    const webAuthnService = getWebAuthnService();
+    const options = await webAuthnService.generateRegistrationOptions({
+      userId,
+      username: username || userId,
+      displayName: displayName || username || userId,
+    });
+
+    res.json({
+      success: true,
+      data: options,
+    });
+  } catch (error: any) {
+    logger.error('[RelayerKeyController] Failed to generate WebAuthn registration challenge:', error);
+    if (error instanceof WebAuthnError) {
+      sendApiError(res, 400, error.code, error.message);
+    } else {
+      sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to generate WebAuthn registration challenge');
+    }
+  }
+};
+
+/**
+ * POST /admin/relayers/webauthn/register/verify
+ * Verify a WebAuthn registration response and store the credential public key in PostgreSQL
+ */
+export const verifyWebAuthnRegistration = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, attestation, challenge, origin, rpId } = req.body;
+    if (!userId || typeof userId !== 'string') {
+      sendApiError(res, 400, 'INVALID_USER_ID', 'userId is required');
+      return;
+    }
+    if (!attestation) {
+      sendApiError(res, 400, 'WEBAUTHN_ATTESTATION_REQUIRED', 'WebAuthn attestation is required');
+      return;
+    }
+
+    const webAuthnService = getWebAuthnService();
+    const result = await webAuthnService.verifyRegistration(userId, attestation as WebAuthnAttestation, {
+      challenge,
+      origin,
+      rpId,
+    });
+
+    res.json({
+      success: true,
+      message: 'WebAuthn registration verified successfully',
+      data: result,
+    });
+  } catch (error: any) {
+    logger.error('[RelayerKeyController] Failed to verify WebAuthn registration:', error);
+    if (error instanceof WebAuthnError) {
+      sendApiError(res, 400, error.code, error.message);
+    } else {
+      sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to verify WebAuthn registration');
+    }
+  }
+};
+
+/**
+ * POST /admin/relayers/webauthn/authenticate/challenge
+ * Generate a WebAuthn authentication challenge and store it in PostgreSQL
+ */
+export const generateWebAuthnAuthenticationChallenge = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId } = req.body;
+    if (!userId || typeof userId !== 'string') {
+      sendApiError(res, 400, 'INVALID_USER_ID', 'userId is required');
+      return;
+    }
+
+    const webAuthnService = getWebAuthnService();
+    const options = await webAuthnService.generateAuthenticationOptions(userId);
+
+    res.json({
+      success: true,
+      data: options,
+    });
+  } catch (error: any) {
+    logger.error('[RelayerKeyController] Failed to generate WebAuthn authentication challenge:', error);
+    if (error instanceof WebAuthnError) {
+      sendApiError(res, 400, error.code, error.message);
+    } else {
+      sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to generate WebAuthn authentication challenge');
+    }
+  }
+};
+
+/**
+ * POST /admin/relayers/webauthn/authenticate/verify
+ * Verify a WebAuthn authentication response and return a short-lived token
+ */
+export const verifyWebAuthnAuthentication = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { userId, attestation, challenge, origin, rpId } = req.body;
+    if (!userId || typeof userId !== 'string') {
+      sendApiError(res, 400, 'INVALID_USER_ID', 'userId is required');
+      return;
+    }
+    if (!attestation) {
+      sendApiError(res, 400, 'WEBAUTHN_ATTESTATION_REQUIRED', 'WebAuthn attestation is required');
+      return;
+    }
+
+    const webAuthnService = getWebAuthnService();
+    const result = await webAuthnService.verifyAuthentication(userId, attestation as WebAuthnAttestation, {
+      challenge,
+      origin,
+      rpId,
+    });
+
+    res.json({
+      success: true,
+      message: 'WebAuthn authentication verified successfully',
+      data: result,
+    });
+  } catch (error: any) {
+    logger.error('[RelayerKeyController] Failed to verify WebAuthn authentication:', error);
+    if (error instanceof WebAuthnError) {
+      sendApiError(res, 401, error.code, error.message);
+    } else {
+      sendApiError(res, 500, 'INTERNAL_SERVER_ERROR', 'Failed to verify WebAuthn authentication');
+    }
   }
 };

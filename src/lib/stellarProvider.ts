@@ -2,6 +2,7 @@ import { Horizon, rpc as SorobanRpc } from "@stellar/stellar-sdk";
 import dotenv from "dotenv";
 import { logger } from "../utils/logger";
 import { getStellarNetwork } from "./stellarNetwork";
+import { RpcLoadBalancer } from "./rpcLoadBalancer";
 
 dotenv.config();
 
@@ -131,6 +132,7 @@ class StellarProvider {
   private readonly rpcUrls: readonly string[];
   private rpcCurrentIndex: number = 0;
   private rpcServer: SorobanRpc.Server;
+  private readonly rpcBalancer: RpcLoadBalancer;
 
   constructor() {
     this.network = getStellarNetwork();
@@ -144,6 +146,19 @@ class StellarProvider {
 
     // Initialize RPC
     this.rpcUrls = buildRpcUrls(this.network);
+    const weights = (process.env.RPC_WEIGHTS ?? "")
+      .split(",")
+      .map((weight) => Number.parseInt(weight.trim(), 10));
+    this.rpcBalancer = new RpcLoadBalancer(
+      this.rpcUrls.map((url, index) => ({
+        url,
+        weight: Number.isFinite(weights[index]) ? weights[index] : 1,
+      })),
+      {
+        cooldownMs: Number.parseInt(process.env.RPC_FAILURE_COOLDOWN_MS ?? "30000", 10),
+        latencyThresholdMs: Number.parseInt(process.env.RPC_LATENCY_THRESHOLD_MS ?? "2000", 10),
+      },
+    );
     this.rpcServer = this.wrapServer(
       new SorobanRpc.Server(this.rpcUrls[0]!, {
         allowHttp: this.network === "TESTNET",
@@ -176,6 +191,7 @@ class StellarProvider {
               return res
                 .then((r: any) => {
                   const latency = Date.now() - start;
+                  if (isRpc) self.rpcBalancer.recordSuccess(self.getCurrentRpcUrl(), latency);
                   if (isRpc) self.lastRpcLatencyMs = latency;
                   else self.lastHorizonLatencyMs = latency;
                   logger.networkInfo(
@@ -199,6 +215,7 @@ class StellarProvider {
             }
 
             const latency = Date.now() - start;
+            if (isRpc) self.rpcBalancer.recordSuccess(self.getCurrentRpcUrl(), latency);
             if (isRpc) self.lastRpcLatencyMs = latency;
             else self.lastHorizonLatencyMs = latency;
             logger.networkInfo(
@@ -262,6 +279,7 @@ class StellarProvider {
   // RPC methods
   // ==========================================
   getRpcServer(): SorobanRpc.Server {
+    this.selectRpcServer();
     return this.rpcServer;
   }
 
@@ -275,18 +293,18 @@ class StellarProvider {
     }
 
     const failedUrl = this.rpcUrls[this.rpcCurrentIndex]!;
-    const nextIndex = (this.rpcCurrentIndex + 1) % this.rpcUrls.length;
-
-    if (nextIndex === this.rpcCurrentIndex) {
+    this.rpcBalancer.recordFailure(failedUrl, latencyMs);
+    const next = this.rpcBalancer.next();
+    if (!next || next.url === failedUrl) {
       logger.networkError(
         `[StellarProvider] RPC Node ${failedUrl} failed and no fallback is available.`,
       );
       return false;
     }
 
-    this.rpcCurrentIndex = nextIndex;
+    this.rpcCurrentIndex = this.rpcUrls.indexOf(next.url);
     this.rpcServer = this.wrapServer(
-      new SorobanRpc.Server(this.rpcUrls[this.rpcCurrentIndex]!, {
+      new SorobanRpc.Server(next.url, {
         allowHttp: this.network === "TESTNET",
       }),
       true,
@@ -300,6 +318,23 @@ class StellarProvider {
     );
 
     return true;
+  }
+
+  /** Returns the current provider health snapshot for readiness and metrics. */
+  getRpcEndpointHealth() {
+    return this.rpcBalancer.snapshot();
+  }
+
+  private selectRpcServer(): void {
+    const next = this.rpcBalancer.next();
+    if (!next || next.url === this.getCurrentRpcUrl()) return;
+    this.rpcCurrentIndex = this.rpcUrls.indexOf(next.url);
+    this.rpcServer = this.wrapServer(
+      new SorobanRpc.Server(next.url, {
+        allowHttp: this.network === "TESTNET",
+      }),
+      true,
+    );
   }
 }
 

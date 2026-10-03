@@ -36,3 +36,58 @@ export const assetVolatility = new Gauge({
   help: "24-hour rolling volatility index for an asset",
   labelNames: ["asset"] as const,
 });
+
+/**
+ * Market stream (WebSocket) metrics.
+ * Used by the combined high-frequency market data endpoint
+ * (`wss://.../v1/market-stream?pairs=USDC-XLM,BTC-USDC`).
+ */
+
+export const marketStreamConnections = new Gauge({
+  name: "market_stream_connections",
+  help: "Number of currently active market-stream WebSocket connections",
+  labelNames: ["protocol"] as const,
+});
+
+export const marketStreamConnectionsTotal = new Counter({
+  name: "market_stream_connections_total",
+  help: "Total number of market-stream WebSocket connections accepted",
+  labelNames: ["protocol"] as const,
+});
+
+export const marketStreamDisconnectionsTotal = new Counter({
+  name: "market_stream_disconnections_total",
+  help: "Total number of market-stream WebSocket disconnections",
+  labelNames: ["protocol", "reason"] as const,
+});
+
+export const marketStreamMemoryBytes = new Gauge({
+  name: "market_stream_connection_memory_bytes",
+  help: "Estimated memory overhead in bytes per market-stream connection",
+  labelNames: ["protocol"] as const,
+});
+
+export const marketStreamTotalMemoryBytes = new Gauge({
+  name: "market_stream_total_memory_bytes",
+  help: "Estimated total memory overhead in bytes for all market-stream connections",
+  labelNames: ["protocol"] as const,
+});
+
+export const marketStreamMessagesTotal = new Counter({
+  name: "market_stream_messages_total",
+  help: "Total number of market-stream messages sent to clients",
+  labelNames: ["protocol", "kind"] as const,
+});
+
+export const marketStreamBytesTotal = new Counter({
+  name: "market_stream_bytes_total",
+  help: "Total number of bytes sent over market-stream connections",
+  labelNames: ["protocol"] as const,
+});
+
+export const marketStreamFanoutDuration = new Histogram({
+  name: "market_stream_fanout_duration_seconds",
+  help: "Duration of fanouting a market update to all subscribed clients in seconds",
+  labelNames: ["kind"] as const,
+  buckets: [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5],
+});

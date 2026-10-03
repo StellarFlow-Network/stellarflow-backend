@@ -1,4 +1,5 @@
 import { createServer } from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import dotenv from "dotenv";
 import { Horizon } from "@stellar/stellar-sdk";
 import stellarProvider from "./lib/stellarProvider";
@@ -20,6 +21,7 @@ import {
   GasBalanceMonitorService,
   getGasBalanceMonitorService,
 } from "./services/gasBalanceMonitorService";
+import { getRelayerGasReserveAllocator } from "./services/relayerGasReserveAllocator";
 import { sanitizeEnvironmentVariables } from "./config/environment";
 import { validateEnv } from "./utils/envValidator";
 import { refreshAllowedOrigins } from "./middleware/corsMiddleware";
@@ -39,11 +41,12 @@ import { contractSanityCheckService } from "./services/contractSanityCheckServic
 import { getCircuitBreakerService } from "./services/circuitBreakerService";
 import { governanceTimelockService } from "./services/governanceTimelockService";
 import { governanceWebhookBroadcaster } from "./services/governanceWebhookBroadcaster";
+import { governanceResultExportWorker } from "./services/governanceResultExportWorker";
 import { getRegionalHealthService } from "./services/regionalHealthService";
 import { storageRentBumpService } from "./services/storageRentBumpService";
 import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
-import { getOrderBookDepthSnapshotExporter } from "./services/orderBookDepthSnapshotExporter";
-import { getRegionalHealthService } from "./services/regionalHealthService";
+import { systemHealthWatchdog } from "./services/systemHealthWatchdog";
+import { startAmmReserveDivergenceDetector } from "./services/ammReserveDivergenceDetector";
 import { redisOperationsWorker } from "./services/redisOperationsWorker";
 import { initializeBridgeServices, stopBridgeServices } from "./services/bridgeIntegration";
 import { VolatilityService } from "./services/volatility.service";
@@ -52,6 +55,8 @@ import { storageMonitorService } from "./services/storageMonitorService";
 import { complianceScreeningWorker } from "./services/complianceScreeningWorker";
 import { startDekRotationJob } from "./jobs/dekRotationJob";
 import { ledgerEventStreamWorker } from "./services/ledgerEventStreamWorker";
+import { systemicRiskMonitor } from "./services/systemicRiskWiring";
+import { getEventBusService } from "./services/eventBus/eventBusService";
 
 // Load environment variables
 dotenv.config();
@@ -263,14 +268,16 @@ app.get("/", (req, res) => {
 // Start server
 const httpServer = createServer(app);
 initSocket(httpServer);
+const marketStreamWss = new WebSocketServer({ noServer: true });
 const liquidityRebalancingWorker = startLiquidityRebalancingWorker();
+const ammReserveDivergenceDetector = startAmmReserveDivergenceDetector();
 let sorobanEventListener: SorobanEventListener | null = null;
 
 systemHealthWatchdog.registerWorker({
   name: "redis-operations",
   getLastHeartbeatAt: () => redisOperationsWorker.getLastHeartbeatAt(),
   heartbeatTimeoutMs: redisOperationsWorker.getHeartbeatTimeoutMs(),
-  restart: () => {
+  restart: async () => {
     redisOperationsWorker.stop();
     await ledgerEventStreamWorker.stop();
     redisOperationsWorker.start();
@@ -289,10 +296,29 @@ if (liquidityRebalancingWorker) {
   });
 }
 
+if (ammReserveDivergenceDetector) {
+  systemHealthWatchdog.registerWorker({
+    name: "amm-reserve-divergence-detector",
+    getLastHeartbeatAt: () => ammReserveDivergenceDetector.getLastHeartbeatAt(),
+    heartbeatTimeoutMs: ammReserveDivergenceDetector.getHeartbeatTimeoutMs(),
+    restart: () => {
+      ammReserveDivergenceDetector.stop();
+      ammReserveDivergenceDetector.start();
+    },
+  });
+}
+
 // FIX 1: Typed as nullable — constructor is not called at module level,
 // so a missing secret env var won't crash the process before the server starts.
 let gasBalanceMonitorService: GasBalanceMonitorService | null = null;
+// Issue #1058: relayer gas reserve allocator (opt-in via RELAYER_GAS_RESERVE_ENABLED).
+let relayerGasReserveAllocator: { stop(): void } | null = null;
 const circuitBreakerService = getCircuitBreakerService();
+
+// Issue #1055 – Event bus queue depth metrics + backpressure alert bot + worker
+// autoscaler. Constructed here (rather than at module level) so importing this
+// file does not open broker connections before the process is ready.
+const eventBusService = getEventBusService();
 
 let isShuttingDown = false;
 let stopEnvFileWatcher: (() => void) | undefined;
@@ -339,12 +365,19 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     multiSigSubmissionService.stop();
     governanceTimelockService.stop();
     governanceWebhookBroadcaster.stop();
+    governanceResultExportWorker.stop();
     liquidityRebalancingWorker?.stop();
+    ammReserveDivergenceDetector?.stop();
     apyWorker.stop();
     storageMonitorService.stop(); // <--- ADDED
     systemHealthWatchdog.stop();
+systemicRiskMonitor.stop();
+    // Issue #1055 – stop the queue monitor before Redis/RabbitMQ go away so the
+    // final cycle is not a burst of failed probes.
+    await eventBusService.stop();
     // FIX 2: Optional chaining — safe to call even if service never started
     gasBalanceMonitorService?.stop();
+    relayerGasReserveAllocator?.stop();
     circuitBreakerService.stop();
     hourlyAverageService.stop();
     priceAggregatorService.stop();
@@ -352,14 +385,17 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     storageRentBumpService.stop();
     redisOperationsWorker.stop();
     complianceScreeningWorker.stop();
-    getOrderBookDepthSnapshotExporter().stopDailyHealthCheck();
+    sorobanStateRootInspectorWorker.stop();
+    await taxReportExportWorker.stop();
     getOrderBookSnapshotEngine().stop();
     VolatilityService.stop();
+    DynamicFeeAdjusterService.stop();
     ArbitrageScanner.stop();
     stopConfigWatcher();
     stopEnvFileWatcher?.();
     await stopBridgeServices();
 
+    marketStreamWss.close();
     await closeHttpServer();
     console.log("HTTP server closed.");
 
@@ -390,6 +426,46 @@ process.once("SIGTERM", () => {
   });
 });
 
+// High-Frequency Trading WebSocket Feed Aggregator
+// Combined price, volume, and order book streams for multiple pairs over a
+// single multiplexed endpoint: ws://.../v1/market-stream?pairs=USDC-XLM,BTC-USDC
+httpServer.on("upgrade", (request, socket, head) => {
+  let url: URL;
+  try {
+    url = new URL(request.url ?? "", "http://localhost");
+  } catch {
+    socket.destroy();
+    return;
+  }
+
+  if (url.pathname !== "/v1/market-stream") {
+    return;
+  }
+
+  const pairsParam = url.searchParams.get("pairs") ?? "";
+  const pairs = pairsParam
+    .split(",")
+    .map((p) => p.trim().toUpperCase())
+    .filter((p) => p.length > 0);
+
+  if (pairs.length === 0) {
+    socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+
+  marketStreamWss.handleUpgrade(request, socket, head, (ws) => {
+    marketStreamWss.emit("connection", ws, request, pairs);
+  });
+});
+
+marketStreamWss.on(
+  "connection",
+  (ws: WebSocket, _request: unknown, pairs: string[]) => {
+    marketStreamAggregator.registerClient(ws, pairs);
+  },
+);
+
 httpServer.listen(PORT, async () => {
   console.log(`🌊 StellarFlow Backend running on port ${PORT}`);
   console.log(
@@ -405,6 +481,9 @@ httpServer.listen(PORT, async () => {
   );
   console.log(`🔌 Socket.io ready for dashboard connections`);
 
+  marketStreamAggregator.start();
+  console.log(`⚡ Market stream aggregator started at /v1/market-stream`);
+
   redisOperationsWorker.start();
   console.log(`🧹 Redis operations worker started`);
 
@@ -415,6 +494,22 @@ httpServer.listen(PORT, async () => {
 
   complianceScreeningWorker.start();
   console.log(`🛡️ Compliance screening worker started`);
+
+  // Issue #1067 – Verify off-chain Merkle state against Soroban ledger roots
+  try {
+    sorobanStateRootInspectorWorker.start();
+    console.log(`🛡️ Soroban state root inspector worker started`);
+  } catch (err) {
+    console.error("Failed to start Soroban state root inspector worker:", err);
+  }
+
+  // Issue #1009 – Background tax report export worker
+  try {
+    taxReportExportWorker.start();
+    console.log(`🧾 Tax report export worker started`);
+  } catch (err) {
+    console.error("Failed to start tax report export worker:", err);
+  }
 
   // Start PostgreSQL storage footprint monitor (Issue #813)
   try {
@@ -560,6 +655,17 @@ httpServer.listen(PORT, async () => {
     );
   }
 
+  // Issue #1019 – export final governance vote results to IPFS
+  try {
+    governanceResultExportWorker.start();
+    console.log("Governance result export worker started");
+  } catch (err) {
+    console.warn(
+      "Governance result export worker not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   // Start background hourly average job
   try {
     hourlyAverageService.start().catch((err: Error) => {
@@ -608,6 +714,21 @@ httpServer.listen(PORT, async () => {
     );
   }
 
+  // Relayer Gas Reserve Allocator (Issue #1058): holds back 20% of relayer gas
+  // wallets for emergency operations and monitors each pool's balance
+  // independently. Opt-in via RELAYER_GAS_RESERVE_ENABLED=true.
+  if (process.env.RELAYER_GAS_RESERVE_ENABLED === "true") {
+    getRelayerGasReserveAllocator()
+      .then(async (allocator) => {
+        relayerGasReserveAllocator = allocator;
+        await allocator.start();
+        console.log(`🛡️ Relayer gas reserve allocator started`);
+      })
+      .catch((err: Error) => {
+        console.error("Failed to start relayer gas reserve allocator:", err);
+      });
+  }
+
   // Invariant Violation Automated Circuit Breaker (Issue #829):
   // monitors balance invariants off-chain and auto-submits a pause()
   // transaction signed by the emergency keeper key when a CRITICAL breach
@@ -652,11 +773,37 @@ httpServer.listen(PORT, async () => {
     console.error("Failed to start volatility service:", err);
   }
 
+  // Start Dynamic Fee Adjuster
+  try {
+    DynamicFeeAdjusterService.start();
+  } catch (err) {
+    console.error("Failed to start dynamic fee adjuster:", err);
+  }
+
   // Start Arbitrage Scanner
   try {
     ArbitrageScanner.start();
   } catch (err) {
     console.error("Failed to start arbitrage scanner:", err);
+  }
+// Issue #978 – Multi-collateral vault systemic risk score engine
+  try {
+    systemicRiskMonitor.start();
+    console.log("📉 Systemic risk monitor started");
+  } catch (err) {
+    console.error("Failed to start systemic risk monitor:", err);
+  }
+
+  // Issue #1055 – Event bus queue depth metrics, backpressure alert bot and
+  // worker autoscaler. Started last so the first cycle observes a fully
+  // warmed-up ingestion path.
+  try {
+    eventBusService.start();
+    console.log(
+      `📊 Event bus monitor started (${eventBusService.getConfig().pollIntervalMs}ms interval, alert threshold ${eventBusService.getConfig().alert.threshold})`,
+    );
+  } catch (err) {
+    console.error("Failed to start event bus monitor:", err);
   }
 });
 

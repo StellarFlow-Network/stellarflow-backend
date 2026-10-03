@@ -1,0 +1,39 @@
+name: API Vulnerability Scanner
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Daily at 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  scan-vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+          pip install -r requirements.txt
+
+      - name: Run pip-audit for Python dependency vulnerabilities
+        run: |
+          pip-audit --requirement requirements.txt --strict
+
+      - name: Create Pull Request for Security Patches
+        if: failure()
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(security): auto-patch vulnerable Python dependencies"
+          title: "🛡️ Automated Security Patch: Python Vulnerability Updates"
+          body: |
+            Automated dependency vulnerability scanner detected known CVEs in Python third-party packages.
+            Please review and merge this PR to update dependencies to secure versions.
+          branch: security/pip-audit-patch
+          delete-branch: true

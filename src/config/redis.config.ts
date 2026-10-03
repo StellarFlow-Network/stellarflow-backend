@@ -9,6 +9,7 @@ export const CACHE_CONFIG = {
     status: 60, // 1 minute
     feeEstimate: 30, // 30 seconds (fees change rapidly)
     governance: 300, // 5 minutes – voting data is near-realtime but not instant
+    yieldEmissions: 300, // 5 minutes – emission data changes with blocks
   },
   l1: {
     enabled: true,
@@ -55,5 +56,11 @@ export const CACHE_KEYS = {
   },
   governance: {
     voter: (accountId: string) => `governance:voter:${accountId}`,
+    turnout: (queryString: string) => `governance:turnout:${queryString}`,
+  },
+  yieldEmissions: {
+    complete: () => "yield:emissions:complete",
+    rate: () => "yield:emissions:rate",
+    schedule: () => "yield:emissions:schedule",
   },
 } as const;

@@ -1,0 +1,99 @@
+# docker-compose.test.yml — containerised Pytest runner (Issue #1085)
+#
+# Runs the complete Pytest suite against containerised PostgreSQL and Redis
+# that match the production versions (postgres:16-alpine, redis:7-alpine).
+#
+# Usage:
+#   make test            # full suite (unit + integration), one command
+#   make test-unit       # unit tests only, no services required
+#   make test-integration
+#   make test-shell      # interactive debugging shell
+#   make test-down       # tear down volumes
+#
+# The suite is invoked through `make test` so the exact same entrypoint is
+# used on a developer laptop and on a CI runner.
+
+name: stellarflow-test
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: stellarflow_test
+    # tmpfs keeps the data directory off the bind mount: faster, and it
+    # guarantees each run starts from an empty cluster.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d stellarflow_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks:
+      - stellarflow-test-net
+
+  redis:
+    image: redis:7-alpine
+    # Mirrors the production redis service configuration (docker-compose.yml).
+    command: redis-server --maxmemory 256mb --maxmemory-policy volatile-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 2s
+    networks:
+      - stellarflow-test-net
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      target: test
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Consumed by tests/integration/testcontainers_fixtures/fixtures.py.
+      # When both are set the fixtures attach to these services instead of
+      # starting nested testcontainers, so no Docker socket is required.
+      TEST_DATABASE_URL: postgresql://postgres:postgres@db:5432/stellarflow_test
+      TEST_REDIS_URL: redis://redis:6379
+      # app.db.session reads this at import time; asyncpg is the async driver.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/stellarflow_test
+      REDIS_URL: redis://redis:6379
+      # HORIZON_URL is intentionally unset: the integration suite starts an
+      # in-process Horizon mock and points the fixtures at it, so the suite
+      # never reaches the live Stellar network.
+      #
+      # Keep the suite offline: no live Stellar network, no real broker.
+      SIGNER_BACKEND: local
+      STELLAR_NETWORK: testnet
+      CELERY_BROKER_URL: memory://
+      CELERY_RESULT_BACKEND: cache+memory://
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: /app:/app/src
+    volumes:
+      # Surface the E2E release-readiness report on the host. This is a
+      # directory mount, so the host side is created on demand.
+      - ./reports:/app/reports
+      # coverage.xml is bind-mounted from the host via run.sh (see Makefile),
+      # because a single-file bind mount cannot be created ahead of time and
+      # the runner runs as a non-root user that cannot create it at /app.
+    command:
+      - python
+      - -m
+      - pytest
+      - -p
+      - no:cacheprovider
+    networks:
+      - stellarflow-test-net
+
+networks:
+  stellarflow-test-net:
+    driver: bridge

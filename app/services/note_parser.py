@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.events import LedgerEvent
 from app.models.shielded import ShieldedCommitment, SpentNullifier
+from app.security.proof_encryption import ProofEncryptor
 
 # Prometheus metrics setup (with fallback mock if prometheus_client not available)
 try:
@@ -63,6 +64,25 @@ HEX64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 class NoteParser:
     """Service to parse and index NoteDeposited and NullifierSpent ledger events."""
+
+    _PRIVATE_PAYLOAD_KEYS = frozenset(
+        {"proof", "proof_hex", "private_inputs", "witness", "contract_params", "nullifier_tree"}
+    )
+
+    def __init__(self, encryptor: ProofEncryptor | None = None) -> None:
+        self._encryptor = encryptor
+
+    def _encrypt_private_payload(
+        self, payload: dict[str, Any], *, associated_data: str
+    ) -> dict[str, Any] | None:
+        private = {key: payload[key] for key in self._PRIVATE_PAYLOAD_KEYS if key in payload}
+        if not private:
+            return None
+        if self._encryptor is None:
+            raise RuntimeError(
+                "Private ZK payload received but PROOF_STORAGE_PROVIDER is not configured"
+            )
+        return self._encryptor.encrypt(private, associated_data=associated_data).as_dict()
 
     @staticmethod
     def _validate_hex64(value: Optional[str]) -> bool:
@@ -181,6 +201,9 @@ class NoteParser:
                     ledger_sequence=event.ledger_sequence,
                     tx_hash=event.tx_hash,
                     event_hash=event.event_hash,
+                    encrypted_proof_inputs=self._encrypt_private_payload(
+                        payload, associated_data=f"proof:{event.event_hash}"
+                    ),
                 )
                 session.add(commitment_record)
                 current_leaf_index += 1
@@ -218,6 +241,9 @@ class NoteParser:
                     ledger_sequence=event.ledger_sequence,
                     tx_hash=event.tx_hash,
                     event_hash=event.event_hash,
+                    encrypted_proof_inputs=self._encrypt_private_payload(
+                        payload, associated_data=f"nullifier:{event.event_hash}"
+                    ),
                 )
                 session.add(spent_record)
                 nullifiers_indexed += 1

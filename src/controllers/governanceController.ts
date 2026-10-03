@@ -21,6 +21,7 @@ import {
 } from "../services/voterHistoryService.js";
 import { CACHE_CONFIG, CACHE_KEYS } from "../config/redis.config.js";
 import { cacheMiddleware } from "../cache/CacheMiddleware.js";
+import { GovernanceExecutionScheduler } from "../services/governanceExecutionScheduler";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -164,6 +165,83 @@ export function governanceVoterCache() {
  *       '500':
  *         description: Internal server error
  */
+export function parseMaintenanceWindows(rawValue: unknown): Array<{ start: Date; end: Date; reason?: string }> {
+  if (!rawValue) return [];
+
+  const parsed = Array.isArray(rawValue)
+    ? rawValue
+    : typeof rawValue === "string"
+      ? JSON.parse(rawValue)
+      : [];
+
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((window) => {
+      if (!window || typeof window !== "object") return null;
+      const start = new Date((window as { start?: string }).start ?? 0);
+      const end = new Date((window as { end?: string }).end ?? 0);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return null;
+      }
+      return {
+        start,
+        end,
+        reason: typeof (window as { reason?: string }).reason === "string"
+          ? (window as { reason?: string }).reason
+          : undefined,
+      };
+    })
+    .filter(Boolean) as Array<{ start: Date; end: Date; reason?: string }>;
+}
+
+export async function getProposalExecutionAvailability(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const scheduler = new GovernanceExecutionScheduler();
+    const scheduledFor = req.query.scheduledFor
+      ? new Date(String(req.query.scheduledFor))
+      : new Date();
+
+    if (Number.isNaN(scheduledFor.getTime())) {
+      sendApiError(res, 400, "BAD_REQUEST", "Invalid `scheduledFor` date.");
+      return;
+    }
+
+    const durationMinutes = Math.max(
+      1,
+      Number(req.query.durationMinutes ?? 30),
+    );
+    const maintenanceWindows = parseMaintenanceWindows(req.query.maintenanceWindows ?? []);
+    const executionWindow = scheduler.findNextAvailableSlot(
+      scheduledFor,
+      maintenanceWindows,
+      durationMinutes,
+    );
+
+    res.json({
+      success: true,
+      data: {
+        proposalId: req.query.proposalId ?? null,
+        scheduledFor: scheduledFor.toISOString(),
+        durationMinutes,
+        maintenanceWindows,
+        executionWindow: {
+          start: executionWindow.start.toISOString(),
+          end: executionWindow.end.toISOString(),
+          blockedByMaintenance: executionWindow.blockedByMaintenance,
+          reason: executionWindow.reason,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("[GovernanceController] getProposalExecutionAvailability failed:", error);
+    sendApiError(res, 500, "INTERNAL_SERVER_ERROR", "Failed to calculate execution availability");
+  }
+}
+
 export async function getVoterProfile(
   req: Request,
   res: Response,

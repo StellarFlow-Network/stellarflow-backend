@@ -33,6 +33,7 @@ export default [
         Response: "readonly",
         Headers: "readonly",
         Request: "readonly",
+        AbortSignal: "readonly",
       },
     },
     plugins: {

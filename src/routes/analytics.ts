@@ -9,7 +9,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import { getOhlcCandles } from "../controllers/analyticsController.js";
+import { getOhlcCandles, getLeaderboard } from "../controllers/analyticsController.js";
 import { priceAggregatorService } from "../services/priceAggregatorService.js";
 import { getLiquidityPoolAnalytics } from "../controllers/liquidityPoolAnalyticsController.js";
 import { VolatilityService } from "../services/volatility.service";
@@ -57,6 +57,7 @@ const router = Router();
  *         description: Server error
  */
 router.get("/ohlc", getOhlcCandles);
+router.get("/leaderboard", getLeaderboard);
 
 router.get("/liquidity-pools", getLiquidityPoolAnalytics);
 

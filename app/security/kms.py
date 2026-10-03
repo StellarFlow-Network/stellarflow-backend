@@ -30,7 +30,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Dict, List, Optional
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,19 @@ __all__ = [
     # Horizon broadcast helper
     "verify_signed_envelope",
     "verify_envelope_async",
+    # WebAuthn / Passkey authentication
+    "WebAuthnCredential",
+    "WebAuthnChallenge",
+    "WebAuthnAuthenticator",
+    "WebAuthnError",
+    "WebAuthnVerificationError",
+    "WebAuthnRegistrationError",
+    "WebAuthnAuthenticationError",
+    "WebAuthnChallengeStore",
+    "InMemoryChallengeStore",
+    "PostgresChallengeStore",
+    "WebAuthnManager",
+    "require_webauthn_attestation",
 ]
 
 # ---------------------------------------------------------------------------
