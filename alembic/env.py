@@ -54,6 +54,7 @@ from sqlalchemy import create_engine, engine_from_config, pool, text
 try:
     from app.models.events import _PartitionBase
     import app.models.revenue  # register revenue models into _PartitionBase.metadata
+    import app.models.portfolio  # register portfolio models into _PartitionBase.metadata
     target_metadata = _PartitionBase.metadata
 except ImportError:
     target_metadata = None

@@ -70,6 +70,7 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@pgbouncer:6432/stellarflow?schema=public&sslmode=disable
       - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
       - CELERY_RESULT_BACKEND=rpc://
+      - SOROBAN_RPC_URL=${SOROBAN_RPC_URL:-}
       - S3_BUCKET=${S3_BUCKET:-}
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}

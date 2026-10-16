@@ -7,11 +7,12 @@ Tables:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 from sqlalchemy import (
     DateTime,
+    Date,
     Index,
     Integer,
     Numeric,
@@ -23,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.session import Base
+from app.db.base import Base
 
 
 class WalletGroup(Base):
@@ -200,3 +201,37 @@ class WalletGroupMember(Base):
             f"<WalletGroupMember id={self.id} group_id={self.wallet_group_id} "
             f"public_key={self.public_key[:12]}...>"
         )
+
+
+class PortfolioBalanceSnapshot(Base):
+    """Daily wallet token balance valued at that day's historical TWAP."""
+
+    __tablename__ = "portfolio_balance_snapshot"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    wallet_group_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    public_key: Mapped[str] = mapped_column(String(56), nullable=False)
+    asset_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    asset_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    asset_issuer: Mapped[Optional[str]] = mapped_column(String(56), nullable=True)
+    balance: Mapped[Any] = mapped_column(Numeric(38, 18), nullable=False)
+    twap_usd: Mapped[Any] = mapped_column(Numeric(38, 18), nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "wallet_group_id",
+            "public_key",
+            "asset_key",
+            "snapshot_date",
+            name="uq_portfolio_balance_snapshot_daily_asset",
+        ),
+        Index(
+            "ix_portfolio_balance_snapshot_group_date",
+            "wallet_group_id",
+            "snapshot_date",
+        ),
+    )
