@@ -118,6 +118,14 @@ celery_app.conf.update(
             "task": "app.tasks.generate_treasury_yield_report",
             "schedule": crontab(minute="0", hour="0", day_of_month="1"),
         },
+        "purge-postgres-temp-exports": {
+            "task": "app.tasks.purge_postgres_temp_exports",
+            "schedule": crontab(minute="20", hour="2"),
+        },
+        "reconcile-indexed-ledger-events": {
+            "task": "app.tasks.reconcile_indexed_ledger_events",
+            "schedule": crontab(minute="0"),
+        },
         "sweep-treasury-staked-yield": {
             "task": "app.tasks.sweep_treasury_staked_yield",
             "schedule": crontab(minute="*/15"),

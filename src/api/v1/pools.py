@@ -4,9 +4,12 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import get_async_session
 from src.api.schemas import ErrorResponse, PoolStatsResponse
 from src.cache.redis_cache import cache_response
 
@@ -391,6 +394,75 @@ async def simulate_diversification_swap_alias(
         xlm_price_usd=xlm_price_usd,
         max_impact_percent=max_impact_percent,
     )
+
+
+@router.get(
+    "/{address}/optimal-range",
+    summary="Calculate a 95% optimal tick range",
+    description="Estimates daily price drift and volatility from historical pool candles.",
+)
+@cache_response(ttl=60, prefix="pool:optimal-range")
+async def get_optimal_tick_range(
+    address: str,
+    request: Request,
+    window_days: int = Query(30, ge=2, le=365),
+    tick_spacing: int = Query(1, ge=1, le=10000),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, object]:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    result = await session.execute(
+        text(
+            'SELECT "openTime" AS observed_at, close::double precision AS close '
+            'FROM "OhlcCandle" '
+            'WHERE currency = :address AND granularity = \'DAY\' '
+            'AND "openTime" >= :cutoff AND close > 0 '
+            'ORDER BY "openTime" ASC'
+        ),
+        {"address": address, "cutoff": cutoff},
+    )
+    closes = [float(row.close) for row in result.all()]
+    if len(closes) < 2:
+        raise HTTPException(
+            status_code=422,
+            detail="At least two daily OHLCV closes are required",
+        )
+
+    returns = [
+        math.log(current / previous)
+        for previous, current in zip(closes, closes[1:])
+        if previous > 0 and current > 0
+    ]
+    if not returns:
+        raise HTTPException(status_code=422, detail="No valid daily price returns")
+
+    drift = sum(returns) / len(returns)
+    variance = (
+        sum((value - drift) ** 2 for value in returns) / (len(returns) - 1)
+        if len(returns) > 1
+        else 0.0
+    )
+    volatility = math.sqrt(variance)
+    z_score_95 = 1.959963984540054
+    current_price = closes[-1]
+    lower_price = current_price * math.exp(drift - z_score_95 * volatility)
+    upper_price = current_price * math.exp(drift + z_score_95 * volatility)
+    tick_base = math.log(1.0001)
+    lower_tick = math.floor(math.log(lower_price) / tick_base / tick_spacing) * tick_spacing
+    upper_tick = math.ceil(math.log(upper_price) / tick_base / tick_spacing) * tick_spacing
+
+    return {
+        "success": True,
+        "pool_address": address,
+        "window_days": window_days,
+        "confidence_level": 0.95,
+        "current_price": current_price,
+        "drift_per_day": drift,
+        "volatility_per_day": volatility,
+        "price_interval": {"lower": lower_price, "upper": upper_price},
+        "tick_range": {"lower": lower_tick, "upper": upper_tick},
+        "tick_spacing": tick_spacing,
+        "sample_count": len(closes),
+    }
 
 
 __all__ = ["router"]

@@ -9,15 +9,16 @@ Routes:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_async_session
+from app.models.portfolio import PortfolioBalanceSnapshot
 from app.models import (
     ErrorResponse,
     GroupedPortfolioSummaryData,
@@ -29,6 +30,7 @@ from app.models import (
     WalletSummary,
     YieldRewardItem,
 )
+from src.cache.redis_cache import cache_response
 
 router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
 
@@ -163,6 +165,61 @@ async def get_grouped_portfolio_summary(
             calculated_at=datetime.now(timezone.utc),
         )
     )
+
+
+@router.get(
+    "/net-worth-history",
+    summary="Get 30-day multi-wallet net-worth history",
+    description="Returns daily USD valuations across all wallets in a wallet group.",
+)
+@cache_response(ttl=300, prefix="portfolio:net-worth-history")
+async def get_net_worth_history(
+    request: Request,
+    wallet_group_id: str = Query(..., min_length=1),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, object]:
+    """Aggregate daily token snapshots using their captured historical TWAP."""
+    group_result = await session.execute(
+        select(WalletGroup).where(WalletGroup.id == wallet_group_id)
+    )
+    if group_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Wallet group not found")
+
+    end_date = datetime.now(timezone.utc).date()
+    start_date = end_date - timedelta(days=29)
+    snapshots = await session.execute(
+        select(
+            PortfolioBalanceSnapshot.snapshot_date,
+            func.sum(
+                PortfolioBalanceSnapshot.balance * PortfolioBalanceSnapshot.twap_usd
+            ).label("net_worth_usd"),
+        )
+        .where(
+            PortfolioBalanceSnapshot.wallet_group_id == wallet_group_id,
+            PortfolioBalanceSnapshot.snapshot_date >= start_date,
+            PortfolioBalanceSnapshot.snapshot_date <= end_date,
+        )
+        .group_by(PortfolioBalanceSnapshot.snapshot_date)
+        .order_by(PortfolioBalanceSnapshot.snapshot_date)
+    )
+    values = {row.snapshot_date: float(row.net_worth_usd) for row in snapshots.all()}
+    points = [
+        {
+            "date": (start_date + timedelta(days=offset)).isoformat(),
+            "net_worth_usd": values.get(start_date + timedelta(days=offset)),
+        }
+        for offset in range(30)
+    ]
+    return {
+        "success": True,
+        "data": {
+            "wallet_group_id": wallet_group_id,
+            "currency": "USD",
+            "window_days": 30,
+            "points": points,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
 
 
 __all__ = ["router"]

@@ -919,6 +919,67 @@ def purge_s3_temp_exports(
 @celery_app.task(
     bind=True,
     base=DatabaseTask,
+    name="app.tasks.purge_postgres_temp_exports",
+    autoretry_for=(OSError, asyncpg.PostgresError),
+    retry_backoff=True,
+    max_retries=3,
+)
+def purge_postgres_temp_exports(
+    self: DatabaseTask,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Remove expired temporary report tables and refresh PostgreSQL statistics."""
+    from app.services.postgres_export_cleaner import purge_expired_temp_export_tables
+
+    ttl_hours = int(os.getenv("POSTGRES_TEMP_EXPORT_TTL_HOURS", "24"))
+    return asyncio.run(
+        purge_expired_temp_export_tables(
+            DatabaseTask._database_url,
+            dry_run=dry_run,
+            ttl_hours=ttl_hours,
+        )
+    )
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.reconcile_indexed_ledger_events",
+    autoretry_for=(OSError, asyncpg.PostgresError, RuntimeError),
+    retry_backoff=True,
+    max_retries=3,
+)
+def reconcile_indexed_ledger_events(self: DatabaseTask) -> Dict[str, Any]:
+    """Audit 100 random ledgers from the prior hour against Soroban RPC."""
+    from app.services.indexer_reconciliation import audit_recent_ledgers
+
+    return asyncio.run(audit_recent_ledgers(DatabaseTask._database_url))
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.reindex_ledger_events",
+    autoretry_for=(OSError, asyncpg.PostgresError, RuntimeError),
+    retry_backoff=True,
+    max_retries=3,
+)
+def reindex_ledger_events_task(self: DatabaseTask, ledger_sequence: int) -> int:
+    """Re-fetch and idempotently persist raw Soroban events for one ledger."""
+    from app.services.indexer_reconciliation import reindex_ledger_events
+
+    rpc_url = os.getenv("SOROBAN_RPC_URL") or os.getenv("STELLAR_SOROBAN_RPC_URL")
+    if not rpc_url:
+        raise RuntimeError("SOROBAN_RPC_URL must be configured")
+    database_url = DatabaseTask._database_url or os.getenv("DATABASE_URL") or os.getenv("DB_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL or DB_URL must be configured")
+    return asyncio.run(reindex_ledger_events(database_url, rpc_url, ledger_sequence))
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
     name="app.tasks.auto_rebalance_capital",
     autoretry_for=(OSError, asyncpg.PostgresError),
     retry_backoff=True,

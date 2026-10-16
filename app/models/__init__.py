@@ -790,4 +790,8 @@ from app.models.treasury import TreasuryYieldAllocation, TreasuryYieldReport  # 
 # Multi-Address Wallet Aggregation ORM models
 # ---------------------------------------------------------------------------
 
-from app.models.portfolio import WalletGroup, WalletGroupMember  # noqa: E402
+from app.models.portfolio import (  # noqa: E402
+    PortfolioBalanceSnapshot,
+    WalletGroup,
+    WalletGroupMember,
+)
