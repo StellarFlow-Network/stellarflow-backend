@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import json
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
@@ -9,8 +11,12 @@ from pydantic import BaseModel, Field
 
 from src.api.schemas import ErrorResponse, PoolStatsResponse
 from src.cache.redis_cache import cache_response
+from src.services.pool_market_metrics import (
+    build_price_impact_heatmap,
+    get_pool_apy_breakdown,
+)
 
-router = APRRouter(prefix="/pools", tags=["Pools"])
+router = APIRouter(prefix="/pools", tags=["Pools"])
 
 # Mock database of pool stats for analytics engine
 _MOCK_POOLS: dict[str, dict] = {
@@ -24,6 +30,7 @@ _MOCK_POOLS: dict[str, dict] = {
         "price_change_24h_percent": 2.15,
         "total_trades_24h": 1420,
         "status": "active",
+        "quote_asset_price_usd": 1.0,
     },
     "xlm-ngn": {
         "pool_id": "xlm-ngn",
@@ -35,6 +42,7 @@ _MOCK_POOLS: dict[str, dict] = {
         "price_change_24h_percent": -0.85,
         "total_trades_24h": 980,
         "status": "active",
+        "quote_asset_price_usd": 0.1245 / 185.50,
     },
     "usdc-kes": {
         "pool_id": "usdc-kes",
@@ -46,6 +54,7 @@ _MOCK_POOLS: dict[str, dict] = {
         "price_change_24h_percent": 0.45,
         "total_trades_24h": 650,
         "status": "active",
+        "quote_asset_price_usd": 1.0 / 129.20,
     },
 }
 
@@ -79,6 +88,40 @@ class TwapScheduleResponse(BaseModel):
     updated_at: datetime = Field(..., description="Timestamp of the estimate")
 
 
+class PriceImpactTier(BaseModel):
+    trade_size_usd: float
+    estimated_output: float
+    price_impact_percent: float
+    liquidity_exhausted: bool
+
+
+class PriceImpactHeatmapResponse(BaseModel):
+    pool_id: str
+    asset_pair: str
+    quote_asset: str
+    base_asset: str
+    spot_price: float
+    range_lower_price: float
+    range_upper_price: float
+    fee_tier_bps: int
+    liquidity_model: str
+    tiers: List[PriceImpactTier]
+    updated_at: datetime
+
+
+class PoolApyBreakdownResponse(BaseModel):
+    pool_id: str
+    trading_fee_apy_percent: float
+    reward_emission_apy_percent: float
+    total_apy_percent: float
+    fees_7d_usd: float
+    average_liquidity_usd: float
+    reward_emissions: List[dict[str, Any]]
+    window_start: datetime
+    window_end: datetime
+    updated_at: datetime
+
+
 def _get_pool_data(pool_id: str) -> dict:
     clean_id = pool_id.lower().strip()
     if clean_id in _MOCK_POOLS:
@@ -101,6 +144,22 @@ def _get_pool_data(pool_id: str) -> dict:
         status_code=404,
         detail=f"Liquidity pool '{pool_id}' not found",
     )
+
+
+def _get_market_pool_data(pool_id: str) -> dict:
+    """Resolve a pool with explicit market state for estimates and analytics."""
+    clean_id = pool_id.strip()
+    configured = os.getenv("POOL_MARKET_DATA_JSON", "{}")
+    try:
+        market_data = json.loads(configured)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail="POOL_MARKET_DATA_JSON is invalid") from exc
+    pool = _MOCK_POOLS.get(clean_id.lower()) or market_data.get(clean_id) or market_data.get(
+        clean_id.lower()
+    )
+    if not pool:
+        raise HTTPException(status_code=404, detail=f"Pool '{pool_id}' has no market data")
+    return pool
 
 
 def _constant_product_output(
@@ -270,6 +329,46 @@ async def get_pool_stats(
 
 
 @router.get(
+    "/{pool_id}/price-impact-heatmap",
+    response_model=PriceImpactHeatmapResponse,
+    summary="Estimate price impact by trade size",
+)
+@cache_response(ttl=5)
+async def get_price_impact_heatmap(
+    request: Request,
+    pool_id: str = Path(..., description="Pool identifier"),
+) -> PriceImpactHeatmapResponse:
+    """Return concentrated-liquidity swap estimates for standard USD tiers."""
+    pool_data = _get_market_pool_data(pool_id)
+    try:
+        result = build_price_impact_heatmap(pool_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return PriceImpactHeatmapResponse(
+        **result,
+        updated_at=datetime.now(timezone.utc),
+    )
+
+
+@router.get(
+    "/{pool_id}/apy-breakdown",
+    response_model=PoolApyBreakdownResponse,
+    summary="Get seven-day pool APY breakdown",
+)
+@cache_response(ttl=15)
+async def get_pool_apy_breakdown_endpoint(
+    request: Request,
+    pool_id: str = Path(..., description="Pool identifier"),
+) -> PoolApyBreakdownResponse:
+    """Separate seven-day trading-fee yield from active reward emissions."""
+    try:
+        result = await get_pool_apy_breakdown(pool_id.lower().strip())
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return PoolApyBreakdownResponse(**result)
+
+
+@router.get(
     "/{pool_id}/dividend-swap-simulation",
     response_model=TwapScheduleResponse,
     summary="Simulate Treasury Diversification TWAP Swap",
@@ -360,8 +459,8 @@ async def simulate_diversification_swap(
     return schedule_response
 
 
-@__router.get(
-    "/{}/dividending-swap-simulation",
+@router.get(
+    "/{pool_id}/dividending-swap-simulation",
     response_model=TwapScheduleResponse,
     summary="Simulate Treasury Diversification TWAP Swap (alias)",
     include_in_schema=False,
