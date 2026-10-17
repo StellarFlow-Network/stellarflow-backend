@@ -7,6 +7,8 @@ import {
   encodeOrderDepth,
   isCompressedOrderDepth,
 } from "./orderBookDepthCompression";
+import { packOrderBookDepth } from "./binaryDepthSerializer";
+import { publishMarketEvent } from "../lib/socket";
 
 export type OrderSide = "bids" | "asks";
 
@@ -118,6 +120,36 @@ class OrderDepthAggregatorService {
     if (!redis?.isReady) return;
 
     await redis.set(this.cacheKey(market), encodeOrderDepth(depth));
+
+    // Pack top-50 bid/ask depth levels into compact binary buffer (< 512 bytes)
+    // and broadcast to Redis Pub/Sub WebSocket stream
+    try {
+      const binaryPackedBuffer = packOrderBookDepth({
+        market: depth.market,
+        bids: depth.bids.slice(0, 50).map((b) => ({
+          price: Number(b.price),
+          amount: Number(b.volume),
+        })),
+        asks: depth.asks.slice(0, 50).map((a) => ({
+          price: Number(a.price),
+          amount: Number(a.volume),
+        })),
+        isSnapshot: true,
+      });
+
+      // Broadcast via Redis Pub/Sub channel `depth:<market>`
+      await redis.publish(`depth:${market}`, binaryPackedBuffer);
+
+      // Also publish to in-process WebSocket subscribers
+      publishMarketEvent({
+        type: "orderbook",
+        pair: market,
+        data: binaryPackedBuffer,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      logger.warn(`[OrderDepthAggregatorService] Failed to broadcast binary depth update for ${market}:`, err);
+    }
   }
 
   /**
