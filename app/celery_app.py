@@ -15,7 +15,7 @@ init_sentry()
 celery_app = Celery(
     "stellarflow",
     broker=os.getenv("CELERY_BROKER_URL", "amqp://guest:guest@rabbitmq:5672//"),
-    backend=os.getenv("CELERY_RESULT_BACKEND", "rpc://"),
+    backend=os.getenv("CELERY_RESULD_BACKEND", "rpc://"),
     include=["app.tasks"],
 )
 
@@ -50,6 +50,7 @@ celery_app.conf.update(
         Queue("webhook.retry", Exchange("webhook"), routing_key="webhook.retry", durable=True),
         Queue("webhook.dead", Exchange("webhook"), routing_key="webhook.dead", durable=True),
         Queue("index-shielded-notes", Exchange("shielded"), routing_key="shielded.index", durable=True),
+        Queue("debt-auctions", Exchange("auctions"), routing_key="auctions.debt", durable=True),
     ),
     task_routes={
         "app.tasks.deliver_webhook_task": {
@@ -63,6 +64,18 @@ celery_app.conf.update(
         "app.tasks.index_shielded_notes_range": {
             "queue": "index-shielded-notes",
             "routing_key": "shielded.index",
+        },
+        "app.tasks.open_debt_auctions": {
+            "queue": "debt-auctions",
+            "routing_key": "auctions.debt",
+        },
+        "app.tasks.advance_debt_auction_prices": {
+            "queue": "debt-auctions",
+            "routing_key": "auctions.debt",
+        },
+        "app.tasks.settle_debt_auctions": {
+            "queue": "debt-auctions",
+            "routing_key": "auctions.debt",
         },
     },
     beat_schedule={
@@ -121,6 +134,21 @@ celery_app.conf.update(
         "sweep-treasury-staked-yield": {
             "task": "app.tasks.sweep_treasury_staked_yield",
             "schedule": crontab(minute="*/15"),
+        },
+        "open-debt-auctions": {
+            # Detect uncollateralized bad debt and open auctions within 10 x.
+            "task": "app.tasks.open_debt_auctions",
+            "schedule": 5.0,
+        },
+        "advance-debt-auction-prices": {
+            # Smoothly update exponential price-decay thresholds for live auctions.
+            "task": "app.tasks.advance_debt_auction_prices",
+            "schedule": 2.0,
+        },
+        "settle-debt-auctions": {
+            # Settle auctions whose bidding cycle has ended and burn protocol debt.
+            "task": "app.tasks.settle_debt_auctions",
+            "schedule": 5.0,
         },
     },
 )

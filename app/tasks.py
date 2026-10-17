@@ -2,6 +2,8 @@
 
 import asyncio
 import hashlib
+import math
+import hashlib
 import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -10,6 +12,7 @@ from typing import Any, Dict, Optional
 import asyncpg
 from celery import Task
 
+from app.celery_app import celery_app
 from app.celery_app import celery_app
 from app.services.anchor_status_poller import AnchorStatusPoller
 from app.services.webhook_retry import (
@@ -1003,3 +1006,278 @@ def record_sla_metrics_task(self) -> Dict[str, Any]:
             "status": "error",
             "error": str(exc),
         }
+
+
+# ---------------------------------------------------------------------------
+# Issue #XXX — Automated vault liquidation debt auction scheduler
+# ---------------------------------------------------------------------------
+
+
+def _debt_auction_id(vault_id: str, liquidation_id: str) -> str:
+    """Deterministic dedup key for a bad-debt auction record."""
+    raw = f"{vault_id}:{liquidation_id}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _decayed_price(
+    start_price: float,
+    decay_rate: float,
+    elapsed_seconds: float,
+) -> float:
+    """Exponential price decay: P(t) = P_start * e^(-k * t)."""
+    if start_price <= 0:
+        return 0.0
+    if decay_rate <= 0:
+        return float(start_price)
+    if elapsed_seconds <= 0:
+        return float(start_price)
+    return float(start_price) * math.exp(-float(decay_rate) * float(elapsed_seconds))
+
+
+async def _open_bad_debt_auctions(lookback_seconds: int = 60) -> int:
+    """Create debt auction records for vaults with uncollateralized bad debt.
+
+    Scans recent failed liquidations and inserts a ``debt_auctions`` row for
+    each one that does not yet have an auction record.
+    """
+    database_url = DatabaseTask._database_url
+    if not database_url:
+        raise RuntimeError("DATABASE_URL or DB_URL must be configured")
+
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+        seconds=lookback_seconds
+    )
+    pool = await asyncpg.create_pool(database_url)
+    try:
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT id, "vaultId", "badDebt", "debtAsset", "createdAt"
+                FROM "VaultLiquidation"
+                WHERE status = 'FAILED_UNDERCOLLATERALIZED'
+                  AND "createdAt" >= $1
+                ORDER BY "createdAt" ASC
+                """,
+                cutoff,
+            )
+
+            opened = 0
+            for row in rows:
+                vault_id = str(row["vaultId"])
+                liquidation_id = str(row["id"])
+                auction_id = _debt_auction_id(vault_id, liquidation_id)
+                bad_debt = _safe_numeric(row["badDebt"]) or 0.0
+                if bad_debt <= 0:
+                    continue
+
+                start_price = bad_debt
+                decay_rate = float(os.getenv("DEBT_AUCTION_DECAY_RATE", "0.0001"))
+                duration_seconds = int(
+                    os.getenv("DEBT_AUCTION_DURATION_SECONDS", "86400")
+                )
+                opened_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                ends_at = opened_at + timedelta(seconds=duration_seconds)
+
+                try:
+                    await connection.execute(
+                        """
+                        INSERT INTO debt_auctions (
+                            id, "vaultId", "liquidationId", "debtAsset",
+                            "badDebt", "startPrice", "decayRate",
+                            "openedAt", "endsAt", status
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'OPEN')
+                        ON CONFLICT (id) DO NOTHING
+                        """,
+                        auction_id,
+                        vault_id,
+                        liquidation_id,
+                        row["debtAsset"],
+                        bad_debt,
+                        start_price,
+                        decay_rate,
+                        opened_at,
+                        ends_at,
+                    )
+                    opened += 1
+                except Exception:
+                    continue
+
+            return opened
+    finally:
+        await pool.close()
+
+
+async def _update_debt_auction_prices() -> int:
+    """Refresh the current bidding threshold for all open debt auctions."""
+    database_url = DatabaseTask._database_url
+    if not database_url:
+        raise RuntimeError("DATABASE_URL or DB_URL must be configured")
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    pool = await asyncpg.create_pool(database_url)
+    try:
+        async with pool.acquire() as connection:
+            rows = await connection.fetch(
+                """
+                SELECT id, "startPrice", "decayRate", "openedAt"
+                FROM debt_auctions
+                WHERE status = 'OPEN'
+                """
+            )
+
+            updated = 0
+            for row in rows:
+                opened_at: datetime = row["openedAt"]
+                elapsed = max(0.0, (now - opened_at).total_seconds())
+                current_price = _decayed_price(
+                    float(row["startPrice"]),
+                    float(row["decayRate"]),
+                    elapsed,
+                )
+                try:
+                    await connection.execute(
+                        """
+                        UPDATE debt_auctions
+                        SET "currentPrice" = $2, "updatedAt" = CURRENT_TIMESTAMP
+                        WHERE id = $1
+                        """,
+                        row["id"],
+                        current_price,
+                    )
+                    updated += 1
+                except Exception:
+                    continue
+
+            return updated
+    finally:
+        await pool.close()
+
+
+async def _settle_debt_auction(auction_id: str, bidder: str, bid_amount: float) -> Dict[str, Any]:
+    """Settle a winning bid and burn the corresponding protocol debt tokens."""
+    database_url = DatabaseTask._database_url
+    if not database_url:
+        raise RuntimeError("DATABASE_URL or DB_URL must be configured")
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    pool = await asyncpg.create_pool(database_url)
+    try:
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    SELECT id, "startPrice", "decayRate", "openedAt", "badDebt", status
+                    FROM debt_auctions
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    auction_id,
+                )
+                if row is None:
+                    raise LookupError(f"debt auction {auction_id!r} not found")
+                if row["status"] != "OPEN":
+                    raise ValueError(
+                        f"debt auction {auction_id!r} is not open (status={row['status']})"
+                    )
+
+                opened_at: datetime = row["openedAt"]
+                elapsed = max(0.0, (now - opened_at).total_seconds())
+                threshold = _decayed_price(
+                    float(row["startPrice"]),
+                    float(row["decayRate"]),
+                    elapsed,
+                )
+                if float(bid_amount) < threshold:
+                    raise ValueError(
+                        f"bid {bid_amount} below current threshold {threshold}"
+                    )
+
+                await connection.execute(
+                    """
+                    UPDATE debt_auctions
+                    SET status = 'SETTLED', "winner" = $2, "winningBid" = $3,
+                        "settledAt" = $4, "updatedAt" = CURRENT_TIMESTAMP
+                    WHERE id = $1
+                    """,
+                    auction_id,
+                    bidder,
+                    float(bid_amount),
+                    now,
+                )
+
+                burned = min(float(bid_amount), float(row["badDebt"]))
+                await connection.execute(
+                    """
+                    INSERT INTO protocol_debt_burns (
+                        id, "auctionId", "burnedAmount", "burnedAt"
+                    ) VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    _debt_auction_id(auction_id, bidder),
+                    auction_id,
+                    burned,
+                    now,
+                )
+
+                return {
+                    "auction_id": auction_id,
+                    "winner": bidder,
+                    "winning_bid": float(bid_amount),
+                    "threshold": threshold,
+                    "burned": burned,
+                }
+    finally:
+        await pool.close()
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.open_bad_debt_auctions",
+    autoretry_for=(OSError, asyncpg.PostgresError),
+    retry_backoff=True,
+    max_retries=3,
+)
+def open_bad_debt_auctions(self: DatabaseTask, lookback_seconds: int = 60) -> int:
+    """Open debt auctions for vaults with uncollateralized bad debt."""
+    DatabaseTask._database_url = os.getenv("DATABASE_URL", os.getenv("DB_URL"))
+    if lookback_seconds < 1:
+        raise ValueError("lookback_seconds must be positive")
+    return int(asyncio.run(_open_bad_debt_auctions(lookback_seconds)))
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.update_debt_auction_prices",
+    autoretry_for=(OSError, asyncpg.PostgresError),
+    retry_backoff=True,
+    max_retries=3,
+)
+def update_debt_auction_prices(self: DatabaseTask) -> int:
+    """Refresh exponential price decay thresholds for open debt auctions."""
+    DatabaseTask._database_url = os.getenv("DATABASE_URL", os.getenv("DB_URL"))
+    return int(asyncio.run(_update_debt_auction_prices()))
+
+
+@celery_app.task(
+    bind=True,
+    base=DatabaseTask,
+    name="app.tasks.settle_debt_auction",
+    autoretry_for=(OSError, asyncpg.PostgresError),
+    retry_backoff=True,
+    max_retries=3,
+)
+def settle_debt_auction(
+    self: DatabaseTask,
+    auction_id: str,
+    bidder: str,
+    bid_amount: float,
+) -> Dict[str, Any]:
+    """Settle a winning bid and burn the corresponding protocol debt tokens."""
+    DatabaseTask._database_url = os.getenv("DATABASE_URL", os.getenv("DB_URL"))
+    if not auction_id or not bidder:
+        raise ValueError("auction_id and bidder must be non-empty")
+    if bid_amount <= 0:
+        raise ValueError("bid_amount must be positive")
+    return dict(asyncio.run(_settle_debt_auction(auction_id, bidder, bid_amount)))

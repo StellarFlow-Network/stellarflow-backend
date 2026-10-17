@@ -1098,3 +1098,73 @@ model AnchorSpreadMetric {
   @@index([isAnomaly, timestamp(sort: Desc)])
 }
 
+// Debt Auction Scheduler – Issue: Automated Vault Liquidation Debt Auction Scheduler
+// Manages multi-stage collateral auctions for vaults whose collateral value fails
+// to cover total debt after liquidation. Tracks bad-debt auctions, bidding cycles,
+// and time-based price decay curves (P(t) = P_start * e^(-k*t)).
+model DebtAuction {
+  id                String   @id @default(uuid())
+  vaultId           String   @db.VarChar(128)
+  liquidationId     String?  @db.VarChar(128)
+
+  // Debt details
+  debtToken         String   @db.VarChar(64)   // Protocol debt token to be burned on settlement
+  debtAmount        Decimal  @db.Decimal(38, 18) // Outstanding bad debt (in debt token units)
+  collateralAsset   String?  @db.VarChar(64)   // Residual collateral offered, if any
+  collateralAmount  Decimal? @db.Decimal(38, 18)
+
+  // Auction lifecycle
+  status            String   @default("PENDING") @db.VarChar(20) // PENDING | OPEN | SETTLED | CANCELLED | EXPIRED
+
+  // Price decay curve parameters: P(t) = startPrice * e^(-decayRate * elapsedSeconds)
+  startPrice        Decimal  @db.Decimal(38, 18)
+  currentPrice      Decimal  @db.Decimal(38, 18)
+  decayRate         Decimal  @db.Decimal(20, 18) // k in the decay formula (per second)
+  reservePrice      Decimal  @db.Decimal(38, 18) // Floor price below which auction cannot settle
+
+  // Timing
+  openedAt          DateTime? @db.Timestamptz(3)
+  expiresAt         DateTime  @db.Timestamptz(3)
+  lastPriceUpdateAt DateTime? @db.Timestamptz(3)
+  settledAt         DateTime? @db.Timestamptz(3)
+
+  // Settlement
+  winningBidId      String?  @db.VarChar(128)
+  settledAmount     Decimal? @db.Decimal(38, 18)
+  burnedDebtAmount  Decimal? @db.Decimal(38, 18)
+  settlementTxHash  String?  @db.VarChar(128)
+
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  bids              DebtAuctionBid[]
+
+  @@index([status, expiresAt])
+  @@index([vaultId, status])
+  @@index([debtToken, status])
+  @@index([openedAt])
+}
+
+// Individual bids placed against a DebtAuction. Bids are validated against the
+// current decayed price at placement time and the highest valid bid wins on settle.
+model DebtAuctionBid {
+  id              String   @id @default(uuid())
+  auctionId       String
+  auction         DebtAuction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  bidder          String   @db.VarChar(128) // Bidder public key / address
+  bidAmount       Decimal  @db.Decimal(38, 18) // Amount offered for the debt position
+  priceAtBid      Decimal  @db.Decimal(38, 18) // Decayed price threshold at bid time
+  status          String   @default("ACTIVE") @db.VarChar(20) // ACTIVE | WON | LOST | REFUNDED | CANCELLED
+  txHash          String?  @db.VarChar(128)
+
+  placedAt        DateTime @default(now()) @db.Timestamptz(3)
+  settledAt       DateTime? @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([auctionId, status])
+  @@index([auctionId, bidAmount(sort: Desc)])
+  @@index([bidder, placedAt])
+}
+
