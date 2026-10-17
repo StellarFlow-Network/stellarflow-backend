@@ -621,6 +621,8 @@ class FlashLoanObservation:
     amount: float
     #: Pool liquidity at the time of the observation.
     pool_liquidity: float
+    #: Address of the pool the loan was taken from.
+    pool_address: str = ""
 
 
 class FlashLoanCircuitBreaker:
@@ -745,6 +747,164 @@ class FlashLoanCircuitBreaker:
 
 
 # ---------------------------------------------------------------------------
+# Mempool flash loan watcher (#1006)
+# ---------------------------------------------------------------------------
+
+#: Default Telegram channel the security team watches for emergency alerts.
+DEFAULT_SECURITY_TELEGRAM_CHANNEL: str = ""
+
+#: Default pause entrypoint invoked on the target contract when the breaker trips.
+DEFAULT_PAUSE_ENTRYPOINT: str = "pause"
+
+
+@dataclass
+class FlashLoanAlert:
+    """Payload dispatched to the security team when the breaker trips."""
+
+    reason: str
+    ledger: int
+    tx_hashes: List[str]
+    pool_addresses: List[str]
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def to_payload(self) -> Dict[str, any]:
+        """Render the alert as a JSON-serialisable dict for Telegram."""
+        return {
+            "reason": self.reason,
+            "ledger": self.ledger,
+            "tx_hashes": list(self.tx_hashes),
+            "pool_addresses": list(self.pool_addresses),
+            "timestamp": self.timestamp.isoformat(),
+        }
+
+
+class FlashLoanMempoolWatcher:
+    """Watches pending mempool transactions for malicious flash loan patterns.
+
+    The watcher is the transport layer around :class:`FlashLoanCircuitBreaker`:
+    it parses raw mempool entries into :class:`FlashLoanObservation` records,
+    feeds them to the breaker, and — when the breaker trips — fires the
+    emergency pause call and dispatches the security alert in the *same* ledger
+    window the anomaly was detected in.
+
+    The pause call and alert dispatch are injected as callables so the watcher
+    stays testable and the caller keeps control of credentials and transport.
+    """
+
+    def __init__(
+        self,
+        *,
+        pause_callback: Optional[Callable[[str, str], None]] = None,
+        alert_callback: Optional[Callable[[FlashLoanAlert], None]] = None,
+        breaker: Optional[FlashLoanCircuitBreaker] = None,
+        pause_entrypoint: str = DEFAULT_PAUSE_ENTRYPOINT,
+    ) -> None:
+        self._pause_callback = pause_callback
+        self._alert_callback = alert_callback
+        self._pause_entrypoint = pause_entrypoint
+        self._breaker = breaker or FlashLoanCircuitBreaker()
+        self._lock = threading.Lock()
+        self._last_alert: Optional[FlashLoanAlert] = None
+
+    @property
+    def breaker(self) -> FlashLoanCircuitBreaker:
+        return self._breaker
+
+    @property
+    def last_alert(self) -> Optional[FlashLoanAlert]:
+        with self._lock:
+            return self._last_alert
+
+    def observe_mempool(self, entries: List[Dict]) -> Optional[FlashLoanAlert]:
+        """Process a batch of pending mempool entries.
+
+        Each entry is expected to describe a flash loan borrow with at least
+        ``tx_hash``, ``ledger``, ``amount``, ``pool_liquidity`` and
+        ``pool_address``. Malformed entries are skipped rather than raising, so
+        one bad payload cannot stall the watcher.
+
+        Returns the dispatched alert when the breaker trips on this batch,
+        otherwise ``None``.
+        """
+        alert: Optional[FlashLoanAlert] = None
+
+        for entry in entries:
+            observation = self._parse_entry(entry)
+            if observation is None:
+                continue
+
+            reason = self._breaker.record(observation)
+            if reason is None:
+                continue
+
+            alert = self._build_alert(reason, observation)
+            self._dispatch(alert)
+
+        return alert
+
+    def _parse_entry(self, entry: Dict) -> Optional[FlashLoanObservation]:
+        try:
+            tx_hash = str(entry["tx_hash"])
+            ledger = int(entry["ledger"])
+            amount = float(entry["amount"])
+            pool_liquidity = float(entry.get("pool_liquidity", 0.0))
+            pool_address = str(entry.get("pool_address", ""))
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.warning("[FlashLoanWatcher] Skipping malformed entry: %s", exc)
+            return None
+
+        return FlashLoanObservation(
+            tx_hash=tx_hash,
+            ledger=ledger,
+            amount=amount,
+            pool_liquidity=pool_liquidity,
+            pool_address=pool_address,
+        )
+
+    def _build_alert(
+        self, reason: str, observation: FlashLoanObservation
+    ) -> FlashLoanAlert:
+        """Collect every tx hash and pool address seen in the tripping ledger."""
+        with self._breaker._lock:  # noqa: SLF001 - same module, shared state
+            bucket = list(self._breaker._by_ledger.get(observation.ledger, []))
+
+        tx_hashes = [obs.tx_hash for obs in bucket]
+        pool_addresses = [
+            str(obs.pool_address)
+            for obs in bucket
+            if isinstance(obs, FlashLoanObservation) and obs.pool_address
+        ]
+        # FlashLoanObservation does not carry the pool address; fall back to the
+        # tripping observation's hash so the payload always names a target.
+        if not pool_addresses:
+            pool_addresses = [observation.tx_hash]
+
+        return FlashLoanAlert(
+            reason=reason,
+            ledger=observation.ledger,
+            tx_hashes=tx_hashes or [observation.tx_hash],
+            pool_addresses=pool_addresses,
+        )
+
+    def _dispatch(self, alert: FlashLoanAlert) -> None:
+        """Fire the pause call and security alert for a tripped ledger."""
+        with self._lock:
+            self._last_alert = alert
+
+        if self._pause_callback is not None:
+            try:
+                self._pause_callback(self._pause_entrypoint, alert.reason)
+            except Exception as exc:  # noqa: BLE001 - external transport
+                logger.error("[FlashLoanWatcher] Pause callback failed: %s", exc)
+
+        if self._alert_callback is not None:
+            try:
+                self._alert_callback(alert)
+            except Exception as exc:  # noqa: BLE001 - external transport
+                logger.error("[FlashLoanWatcher] Alert callback failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Soroban ledger footprint pre-flight inspector (#1017)
 # ---------------------------------------------------------------------------
 
@@ -863,8 +1023,12 @@ __all__ = [
     "DEFAULT_SUCCESS_RATE_THRESHOLD",
     "FlashLoanCircuitBreaker",
     "FlashLoanObservation",
+    "FlashLoanAlert",
+    "FlashLoanMempoolWatcher",
     "FLASH_LOAN_BREAKER_THRESHOLD",
     "FLASH_LOAN_POOL_SHARE_THRESHOLD",
+    "DEFAULT_SECURITY_TELEGRAM_CHANNEL",
+    "DEFAULT_PAUSE_ENTRYPOINT",
     "inspect_footprint",
     "assert_footprint_complete",
     "footprint_declares",

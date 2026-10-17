@@ -3,8 +3,11 @@ import json
 import logging
 import hashlib
 import base64
+import os
+from collections import defaultdict, deque
 from typing import Optional, Set
 import websockets
+import httpx
 from app.tasks.ingestion_tasks import dispatch_backfill_job
 from app.db.session import async_session_factory
 from app.models.events import LedgerEvent
@@ -39,11 +42,30 @@ class SorobanListener:
         hashlib.sha256(b"GovernanceVoted").hexdigest(),
     }
 
+    FLASH_LOAN_TOPIC_HASHES: Set[str] = {
+        _compute_xdr_symbol_hash("FlashLoan"),
+        _compute_xdr_symbol_hash("flash_loan"),
+        _compute_xdr_symbol_hash("flashloan"),
+        hashlib.sha256(b"FlashLoan").hexdigest(),
+        hashlib.sha256(b"flash_loan").hexdigest(),
+        hashlib.sha256(b"flashloan").hexdigest(),
+    }
+
+    SUSPICIOUS_FLASH_LOAN_THRESHOLD: int = 3
+
     def __init__(self, ws_url: str, rpc_url: str):
         self.ws_url = ws_url
         self.rpc_url = rpc_url
         self.last_ingested_sequence: Optional[int] = None
         self.is_running: bool = False
+        # Per-ledger tracking of suspicious flash loan activity for circuit breaker
+        self._flash_loan_ledger: Optional[int] = None
+        self._flash_loan_events: deque = deque()
+        self._paused_ledgers: Set[int] = set()
+        self._pause_contract_id: Optional[str] = os.getenv("EMERGENCY_PAUSE_CONTRACT_ID")
+        self._pause_admin_secret: Optional[str] = os.getenv("EMERGENCY_PAUSE_ADMIN_SECRET")
+        self._telegram_bot_token: Optional[str] = os.getenv("SECURITY_TELEGRAM_BOT_TOKEN")
+        self._telegram_chat_id: Optional[str] = os.getenv("SECURITY_TELEGRAM_CHAT_ID")
 
     @staticmethod
     def generate_event_hash(ledger_seq: int, tx_hash: str, event_index: int) -> str:
@@ -89,6 +111,9 @@ class SorobanListener:
             if not isinstance(topics, list):
                 topics = [topics]
 
+            # Detect flash loan pattern BEFORE topic allow-list filter so we never miss anomalies
+            await self._detect_flash_loan_anomaly(event_data)
+
             # Pre-filter using binary topic hash matching
             if topics:
                 topic_matched = False
@@ -120,7 +145,7 @@ class SorobanListener:
                     missing_start = self.last_ingested_sequence + 1
                     missing_end = current_sequence - 1
                     logger.warning(
-                        f"🚨 Sequence gap detected! Missing ledgers [{missing_start} - {missing_end}]. Triggering Celery backfill..."
+                        f"🚀 Sequence gap detected! Missing ledgers [{missing_start} - {missing_end}]. Triggering Celery backfill..."
                     )
                     # Dispatch async backfill task via Celery
                     dispatch_backfill_job.delay(missing_start, missing_end, self.rpc_url)
@@ -132,23 +157,148 @@ class SorobanListener:
         except Exception as e:
             logger.error(f"Error processing WebSocket message: {e}")
 
-    async def _save_event(self, event_data: dict, sequence: int):
-        """Saves event record using unique event_hash constraint to prevent duplicate insertion."""
-        tx_hash = event_data.get("txHash", "0x0")
-        event_idx = event_data.get("index", 0)
-        event_hash = self.generate_event_hash(sequence, tx_hash, event_idx)
+    @staticmethod
+    def _topic_matches(topic: str, allowed: Set[str]) -> bool:
+        """Checks whether a raw topic string matches any hash in the allowed set."""
+        if not isinstance(topic, str):
+            return False
+        try:
+            if topic.startswith("A") or len(topic) > 32:
+                raw_bytes = base64.b64decode(topic)
+            else:
+                raw_bytes = topic.encode("utf-8")
+            return hashlib.sha256(raw_bytes).hexdigest() in allowed
+        except Exception:
+            return False
 
+    async def _detect_flash_loan_anomaly(self, event_data: dict):
+        """Tracks flash loan events per ledger and triggers circuit breaker on threshold breach."""
+        try:
+            sequence = int(event_data["ledger"])
+        except (KeyError, TypeError, ValueError):
+            return
+
+        topics = event_data.get("topic") or event_data.get("topics") or []
+        if not isinstance(topics, list):
+            topics = [topics]
+
+        is_flash_loan = any(
+            self._topic_matches(t, self.FLASH_LOAN_TOPIC_HASHES) for t in topics
+        )
+        if not is_flash_loan:
+            return
+
+        # Reset window when ledger advances
+        if self._flash_loan_ledger != sequence:
+            self._flash_loan_ledger = sequence
+            self._flash_loan_events = deque()
+
+        tx_hash = event_data.get("txHash", "0x0")
+        pool_target = self._extract_pool_target(event_data)
+        self._flash_loan_events.append(
+            {"tx_hash": tx_hash, "pool": pool_target, "ledger": sequence}
+        )
+
+        if (
+            len(self._flash_loan_events) > self.SUSPICIOUS_FLASH_LOAN_THRESHOLD
+            and sequence not in self._paused_ledgers
+        ):
+            self._paused_ledgers.add(sequence)
+            logger.critical(
+                f"🚠 Flash loan anomaly detected on ledger {sequence}: "
+                f"{len(self._flash_loan_events)} suspicious loans. Triggering emergency pause."
+            )
+            # Fire pause + alert concurrently so pause submits within same ledger window
+            await asyncio.gather(
+                self._trigger_emergency_pause(sequence),
+                self._dispatch_security_alert(sequence, list(self._flash_loan_events)),
+                return_exceptions=True,
+            )
+
+    @staticmethod
+    def _extract_pool_target(event_data: dict) -> str:
+        """Best-effort extraction of the pool/contract target from an event payload."""
+        for key in ("contractId", "contract_id", "pool", "poolAddress", "address"):
+            value = event_data.get(key)
+            if isinstance(value, str) and value:
+                return value
+        value = event_data.get("value")
+        if isinstance(value, dict):
+            for key in ("contractId", "contract_id", "pool", "poolAddress", "address"):
+                v = value.get(key)
+                if isinstance(v, str) and v:
+                    return v
+        return "unknown"
+
+    async def _trigger_emergency_pause(self, sequence: int):
+        """Invokes the emergency pause entrypoint on the target contract via Soroban RPC."""
+        if not self._pause_contract_id or not self._pause_admin_secret:
+            logger.error(
+                "Emergency pause skipped: EMERGENCY_PAUSE_CONTRACT_ID / "
+                "EMERGENCY_PAUSE_ADMIN_SECRET not configured."
+            )
+            return
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "invokeContract",
+            "params": {
+                "contractId": self._pause_contract_id,
+                "function": "emergency_pause",
+                "args": [{"ledger": sequence}],
+                "auth": self._pause_admin_secret,
+            },
+        }
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.post(self.rpc_url, json=payload)
+                resp.raise_for_status()
+                logger.critical(
+                    f"🛄 Emergency pause submitted for ledger {sequence}: {resp.text}"
+                )
+        except Exception as e:
+            logger.error(f"Emergency pause invocation failed for ledger {sequence}: {e}")
+
+    async def _dispatch_security_alert(self, sequence: int, events: list):
+        """Sends a structured alert to the security team Telegram channel."""
+        if not self._telegram_bot_token or not self._telegram_chat_id:
+            logger.error(
+                "Security alert skipped: SECURITY_TELEGRAM_BOT_TOKEN / "
+                "SECURITY_TELEGRAM_CHAT_ID not configured."
+            )
+            return
+        tx_hashes = [e["tx_hash"] for e in events]
+        pool_targets = sorted({e["pool"] for e in events})
+        message = (
+            f"🚠 FLASH LOAN ANOMALY — ledger {sequence}\n"
+            f"Suspicious loans: {len(events)}\n"
+            f"Tx hashes: {', '.join(tx_hashes)}\n"
+            f"Pool targets: {', '.join(pool_targets)}\n"
+            f"Action: emergency pause invoked."
+        )
+        url = f"https://api.telegram.org/bot{self._telegram_bot_token}/sendMessage"
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.post(
+                    url,
+                    json={"chat_id": self._telegram_chat_id, "text": message},
+                )
+                resp.raise_for_status()
+                logger.info(f"Security alert dispatched for ledger {sequence}.")
+        except Exception as e:
+            logger.error(f"Security alert dispatch failed for ledger {sequence}: {e}")
+
+    async def _save_event(self, event_data: dict, sequence: int):
+        """Persists a ledger event with a deterministic duplicate prevention hash."""
+        tx_hash = event_data.get("txHash", "0x0")
+        event_index = int(event_data.get("eventIndex", 0))
+        event_hash = self.generate_event_hash(sequence, tx_hash, event_index)
         async with async_session_factory() as session:
-            # PostgreSQL ON CONFLICT DO NOTHING using event_hash
-            event_record = LedgerEvent(
+            event = LedgerEvent(
                 event_hash=event_hash,
                 ledger_sequence=sequence,
                 tx_hash=tx_hash,
-                event_type=event_data.get("topic", "unknown"),
                 payload=event_data,
             )
-            session.add(event_record)
-            try:
-                await session.commit()
-            except Exception:
-                await session.rollback()  # Ignore duplicate constraint collisions cleanly
+            session.merge(event)
+            await session.commit()

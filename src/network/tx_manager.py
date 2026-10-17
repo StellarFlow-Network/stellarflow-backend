@@ -14,13 +14,13 @@ assumed to have landed.
 """
 
 from __future__ import annotations
+import asyncio
 
 import copy
 import logging
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, MutableMapping, Optional, Protocol
-from .nonce_tracker import nonce_tracker
 
 from network.nonce_tracker import NonceTracker, nonce_tracker
 
@@ -30,12 +30,14 @@ Payload = MutableMapping[str, Any]
 Signer = Callable[[Payload], Payload]
 Dispatcher = Callable[[Payload], Any]
 
+SuspiciousTxCallback = Callable[[str, Dict[str, Any]], None]
+
 # NOTE: TxManager treats any dispatcher call that returns without raising as
 # a success (confirm()), and any raised exception as a failure (fail()).
 # It deliberately does not inspect dispatch_result's contents -- e.g. an
 # HTTP status code -- since dispatcher's return shape is caller-defined and
 # TxManager has no generic way to interpret it (see horizon_pool.py, whose
-# broadcast_transaction() returns a urllib3 response with a `.status`, vs.
+# broadcast_transaction() returns a urllib3 response with a `.status`, vs
 # this module's own test suite, whose dispatchers return plain values).
 # TODO: a horizon_pool-specific caller should inspect the returned response's
 #       status itself and call tx_manager._tracker.fail()/confirm() (or a
@@ -122,6 +124,26 @@ class BroadcastResult:
     dispatch_result: Any
 
 
+@dataclass
+class FlashLoanAnomaly:
+    """Detected flash-loan anomaly within a single ledger window."""
+
+    ledger: int
+    tx_hashes: list[str]
+    pool_addresses: list[str]
+    count: int
+
+    def to_alert_payload(self) -> Dict[str, Any]:
+        return {
+            "ledger": self.ledger,
+            "count": self.count,
+            "tx_hashes": list(self.tx_hashes),
+            "pool_addresses": list(self.pool_addresses),
+        }
+
+
+
+
 class TxManager:
     """Serialize signing and dispatch by account using NonceTracker sequencing.
 
@@ -147,10 +169,13 @@ class TxManager:
         # TxManager instances never silently share sequence state for the
         # same account_id. Pass tracker=nonce_tracker explicitly to opt in
         # to the shared, process-wide singleton (e.g. if multiple TxManager
-        # instances genuinely need to coordinate over the same accounts).
+# instances genuinely need to coordinate over the same accounts).
         self._tracker = tracker if tracker is not None else NonceTracker.create_standalone()
         self._account_locks: Dict[str, threading.Lock] = {}
         self._account_locks_map_lock = threading.Lock()
+        self._flash_loan_lock = threading.Lock()
+        self._flash_loan_window: Dict[int, list[Dict[str, Any]]] = {}
+        self._flash_loan_threshold = 3
 
     def _get_account_lock(self, account_id: str) -> threading.Lock:
         lock = self._account_locks.get(account_id)
@@ -196,8 +221,8 @@ class TxManager:
         lock = self._get_account_lock(account_id)
         with lock:
             # Holding this lock across assign -> sign -> dispatch is what
-            # prevents a later sequence from leapfrogging an earlier one on
-            # the wire if signing happens to take longer for one worker.
+            # prevents a later sequence from leapfrogging an earlier one on the
+            # wire if signing happens to take longer for one worker.
             # NonceTracker's own lock is not sufficient for this -- it only
             # protects the increment itself, not this whole section.
             sequence = self._tracker.get_next_nonce(account_id, seed=seed_sequence)
@@ -244,55 +269,51 @@ class TxManager:
             dispatch_result=dispatch_result,
         )
 
-    def sync_sequence(self, account_id: str, sequence: int) -> None:
-        """Set an account's tracked sequence to a known-good value."""
+    def record_flash_loan_candidate(
+        self,
+        ledger: int,
+        tx_hash: str,
+        pool_address: str,
+        *,
+        on_anomaly: Optional[SuspiciousTxCallback] = None,
+    ) -> Optional[FlashLoanAnomaly]:
+        """Record a suspicious flash loan and detect per-ledger anomalies.
 
-        self._tracker.sync_nonce(account_id, sequence)
-        logger.info("[TxManager] Synced sequence for %s to %d", account_id, sequence)
-
-    def invalidate(self, account_id: Optional[str] = None) -> None:
-        """Clear one account sequence or all tracked account sequences."""
-
-        self._tracker.invalidate(account_id)
-        if account_id is not None:
-            logger.info("[TxManager] Invalidated sequence for %s", account_id)
-        else:
-            logger.info("[TxManager] Invalidated all tracked sequences")
-
-    def get_stale_sequences(
-        self, account_id: str, timeout_seconds: float = 30.0
-    ) -> list[int]:
-        """Return sequences for *account_id* issued but never confirmed/failed.
-
-        Surfaces NonceTracker.get_stale() so callers don't need to reach into
-        the tracker directly. A non-empty result suggests a dispatched
-        transaction's outcome was never recorded -- e.g. a process crash
-        between dispatch and the confirm/fail call above -- and may need
-        investigation or a sync_sequence() call once the ledger truth is known.
+        When more than ``_flash_loan_threshold`` suspicious flash loans are
+        observed within a single ledger window, an anomaly is returned and
+        ``on_anomaly`` (if provided) is invoked synchronously so the caller
+        can submit an emergency pause within the same ledger window.
         """
 
-        return self._tracker.get_stale(account_id, timeout_seconds=timeout_seconds)
+        with self._flash_loan_lock:
+            bucket = self._flash_loan_window.setdefault(ledger, [])
+            bucket.append({"tx_hash": tx_hash, "pool_address": pool_address})
+            if len(bucket) <= self._flash_loan_threshold:
+                return None
+            anomaly = FlashLoanAnomaly(
+                ledger=ledger,
+                tx_hashes=[entry["tx_hash"] for entry in bucket],
+                pool_addresses=[entry["pool_address"] for entry in bucket],
+                count=len(bucket),
+            )
+            # Reset the window so subsequent flash loans in the same ledger
+            # start a fresh count instead of re-triggering on every additional tx.
+            self._flash_loan_window[ledger] = []
+
+        if on_anomaly is not None:
+            on_anomaly(tx_hash, anomaly.to_alert_payload())
+
+        return anomaly
 
     def _with_sequence(self, payload: Payload, sequence: int) -> Payload:
-        sequenced_payload = copy.deepcopy(dict(payload))
+        sequenced_payload = copy.deepcopy(payload)
         sequenced_payload[self.sequence_field] = sequence
         return sequenced_payload
 
-    def _assert_signed_sequence(self, payload: Payload, sequence: int) -> None:
-        if payload.get(self.sequence_field) != sequence:
+    def _assert_signed_sequence(self, signed_payload: Payload, sequence: int) -> None:
+        actual = signed_payload.get(self.sequence_field)
+        if actual != sequence:
             raise ValueError(
-                "Signer returned a payload with a mismatched sequence value."
+                f"Signer altered sequence field '{self.sequence_field}': "
+                f"expected {sequence}, got {actual}"
             )
-
-
-# The shared, module-level instance explicitly opts into the process-wide
-# NonceTracker singleton (rather than TxManager's private-by-default
-# tracker) so that all callers importing this tx_manager see consistent
-# sequence state per account, matching the original singleton design.
-tx_manager = TxManager(tracker=nonce_tracker)
-
-__all__ = [
-    "BroadcastResult",
-    "TxManager",
-    "tx_manager",
-]
