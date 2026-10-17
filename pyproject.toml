@@ -4,8 +4,17 @@ testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (require Docker containers)",
     "e2e_layer(name): marks a layer E2E test",
+    "benchmark: marks benchmark tests",
 ]
 addopts = "-v --tb=short"
+
+[tool.pytest-benchmark]
+mini_rounds = 1
+max_time = "0.50"
+min_time = "0.001"
+disable_gc = true
+save = true
+sort = "mean"
 
 [tool.coverage.run]
 source = ["app"]
