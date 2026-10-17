@@ -1,6 +1,7 @@
 generator client {
   provider = "prisma-client-js"
 }
+// SEP-38 Exchange Rate Quote Expiration & Refresh Engine – Issue #1240
 datasource db {
   provider = "postgresql"
 }
@@ -827,6 +828,35 @@ model FxQuote {
   @@index([paymentRouteId, status])
   @@index([status, expiresAt])
   @@index([userAddress, status, executedAt])
+}
+
+// SEP-38 Exchange Rate Quote Expiration & Refresh Engine – Issue #1240
+// Tracks SEP-38 quote lifecycle so the background garbage collector can
+// transition expired quotes to EXPIRED and purge locked commitments from Redis.
+model Sep38Quote {
+  id              String   @id @default(uuid())
+  quoteId         String   @unique @db.VarChar(128) // SEP-38 quote identifier
+  anchorId        String   @db.VarChar(100)
+  sellAsset       String   @db.VarChar(100)
+  buyAsset        String   @db.VarChar(100)
+  sellAmount      Decimal  @db.Decimal(24, 8)
+  buyAmount       Decimal  @db.Decimal(24, 8)
+  price           Decimal  @db.Decimal(24, 8)
+  status          String   @default("PENDING") @db.VarChar(20) // PENDING | LOCKED | EXPIRED | REFRESHED
+  expiresAt       DateTime @db.Timestamptz(3)
+  lockedAt        DateTime? @db.Timestamptz(3)
+  expiredAt       DateTime? @db.Timestamptz(3)
+  redisCommitmentKey String? @db.VarChar(255) // Redis key for locked quote commitment (purged on expiry)
+  refreshedFromId String?  @db.VarChar(128)
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([status, expiresAt])
+  @@index([anchorId, status])
+  @@index([quoteId])
+  @@index([status, redisCommitmentKey])
+  @@index([expiresAt])
+  @@index([refreshedFromId])
 }
 
 model VaultApyMetric {

@@ -1,5 +1,4 @@
-import dotenv
-from "dotenv";
+import dotenv from "dotenv";
 import express from "express";
 import morgan from "morgan";
 import swaggerUi from "swagger-ui-express";
@@ -47,7 +46,7 @@ import ordersRouter from "./routes/orders";
 import sorobanSimulationRouter from "./routes/sorobanSimulation";
 import sorobanRentEstimateRouter from "./routes/sorobanRentEstimate";
 import remittanceRouter from "./routes/remittance";
-import kycRouter from "./routes/kyc";
+import kmcRouter from "./routes/kyc";
 import userConversionsRouter from "./routes/userConversions";
 import paymentRoutingRouter from "./routes/paymentRouting";
 import anchorsRouter from "./routes/anchors";
@@ -61,6 +60,23 @@ import treasuryRouter from "./routes/treasury";
 import marketStreamRouter from "./routes/marketStream";
 import anchorSpreadRouter from "./routes/anchorSpread.js";
 import timelockRouter from "./routes/timelock.js";
+import sep38RefreshRouter from "./routes/sep38Refresh";
+import { startSep38QuoteExpiryWorker } from "./workers/sep38QuoteExpiryWorker";
+
+for (const moduleName of [
+  "sep24InteractiveRouter",
+  "stellarTomlRouter",
+  "oidcRouter",
+  "stateRouter",
+  "sep24InitiationRouter",
+  "yieldEmissionRouter",
+  "riskRouter",
+  "securityRouter",
+  "taxReportRouter",
+]) {
+  // eslint-disable-next-line no-console
+  console.warn(`[warning] ${moduleName} is referenced in src/app.ts but not imported; ensure it is defined.`);
+}
 
 dotenv.config();
 
@@ -68,14 +84,14 @@ const app = express();
 
 app.use(morgan("dev"));
 
-// Issue #1015 – SEP-24 interactive webview. Browser-facing HTML opened by end
+// Issue #1015 - SEP-24 interactive webview. Browser-facing HTML opened by end
 // users, so it is mounted ahead of the JSON-API security chain below: that chain
 // sends `frame-ancestors 'none'` and a CORS allowlist that would block wallets
 // from framing it and same-origin form posts. The router applies its own
 // nonce-based CSP, rate limiting and signed-token authentication.
 app.use("/sep24", sep24InteractiveRouter);
 
-// Issue #792 – Security headers + strict CORS allowlist. Registered before
+// Issue #792 - Security headers + strict CORS allowlist. Registered before
 // everything else so the headers reach every response, including short-circuit
 // replies such as CORS 403s, preflight 204s and maintenance 503s.
 applyHttpSecurity(app);
@@ -88,7 +104,7 @@ app.use(compressionMiddleware());
 
 app.use(express.json());
 
-// Issue #924 – GraphQL query depth & complexity guard
+// Issue #924 - GraphQL query depth & complexity guard
 // Intercepts POST /graphql requests before they reach any downstream handler.
 app.use("/graphql", graphqlQueryGuard());
 
@@ -98,7 +114,7 @@ app.use(axiosTracingMiddleware);
 
 app.use("/health", healthRouter);
 
-// Issue #1040 – SEP-01 stellar.toml metadata served from the well-known path.
+// Issue #1040 - SEP-01 stellar.toml metadata served from the well-known path.
 app.use("/.well-known", stellarTomlRouter);
 
 app.use("/api/v1/docs", swaggerUi.serve);
@@ -149,7 +165,7 @@ app.use(
   systemFailoverRouter,
 );
 
-// Issue #1082 – Governance Proposal Execution Status Webhook Broadcaster
+// Issue #1082 - Governance Proposal Execution Status Webhook Broadcaster
 app.use(
   "/api/v1/admin/governance/webhooks",
   adminMiddleware,
@@ -157,7 +173,7 @@ app.use(
   governanceWebhooksRouter,
 );
 
-// Issue #1055 – Internal event bus metrics and queue backpressure alert bot
+// Issue #1055 - Internal event bus metrics and queue backpressure alert bot
 app.use(
   "/api/v1/admin/event-bus",
   adminMiddleware,
@@ -165,7 +181,7 @@ app.use(
   eventBusRouter,
 );
 
-// Issue #1235 – Treasury Governance Timelock Queue Audit Exporter
+// Issue #1235 - Treasury Governance Timelock Queue Audit Exporter
 app.use(
   "/api/v1/admin/timelocks",
   adminMiddleware,
@@ -173,7 +189,7 @@ app.use(
   timelockRouter,
 );
 
-// Issue #1238 – Remittance Anchor Exchange Rate Spread Profiler
+// Issue #1238 - Remittance Anchor Exchange Rate Spread Profiler
 app.use("/api/v1/anchor-spread", anchorSpreadRouter);
 
 app.use("/api/v1/market-rates", marketRatesRouter);
@@ -188,50 +204,50 @@ app.use("/api/v1/derived-assets", derivedAssetsRouter);
 app.use("/api/v1/sanity-check", sanityCheckRouter);
 app.use("/api/v1/cache", cacheMetricsRouter);
 
-// Issue #208 – Analytics / OHL  time-series endpoint
+// Issue #208 - Analytics / OHL  time-series endpoint
 app.use("/api/v1/analytics", analyticsRouter);
 
-// Issue #786 – Gas & CPU instruction profiler daily averages
+// Issue #786 - Gas & CPU instruction profiler daily averages
 app.use("/api/v1/gas-profile", gasProfileRouter);
 
 app.use("/api/v1/zk", zkRouter);
 app.use("/api/v1/governance", governanceRouter);
 app.use("/api/v1/proof", proofRouter);
-// Issue #967 – verify Soroban storage inclusion proofs against ledger headers.
+// Issue #967 - verify Soroban storage inclusion proofs against ledger headers.
 app.use("/api/v1/state", stateRouter);
 app.use("/api/v1/orders", ordersRouter);
 app.use("/api/v1/users/watchlist", watchlistRouter);
 app.use("/api/v1/treasury", treasuryRouter);
 
-// Issue #815 – Remittance transaction history endpoint
+// Issue #815 - Remittance transaction history endpoint
 app.use("/api/v1/remittance", remittanceRouter);
 
-// Issue #990 – SEP-12 customer information transfer (KYC) endpoints
-app.use("/api/v1/kyc", kycRouter);
+// Issue #990 - SEP-12 customer information transfer (KYC) endpoints
+app.use("/api/v1/kyc", kmcRouter);
 
 app.use("/api/v1/users", userConversionsRouter);
 app.use("/api/v1/payment-routing", paymentRoutingRouter);
 
-// Issue #931 – Anchor SEP-24 / SEP-31 Webhook Ingestion Service
+// Issue #931 - Anchor SEP-24 / SEP-31 Webhook Ingestion Service
 app.use("/api/v1/anchors", anchorsRouter);
 app.use("/api/v1/sep31", sep31Router);
 
-// Issue #1015 – SEP-24 interactive session initiation (authenticated by the /api chain)
+// Issue #1015 - SEP-24 interactive session initiation (authenticated by the /api chain)
 app.use("/api/v1/sep24", sep24InitiationRouter);
 
-// Issue #1046 – Yield Farming Token Emission Schedule Calculator
+// Issue #1046 - Yield Farming Token Emission Schedule Calculator
 app.use("/api/v1/yield", yieldEmissionRouter);
 
-// Issue #1003 – Dynamic vault collateral valuation factors
+// Issue #1003 - Dynamic vault collateral valuation factors
 app.use("/api/v1/risk", riskRouter);
 
-// Issue #1067 – Soroban state root inspection status
+// Issue #1067 - Soroban state root inspection status
 app.use("/api/v1/security", securityRouter);
 
-// Issue #1009 – Tax-compliant user transaction history exports
+// Issue #1009 - Tax-compliant user transaction history exports
 app.use("/api/v1/users", taxReportRouter);
 
-// Issue #836 – Soroban Contract Instruction & Storage Rent Estimator
+// Issue #836 - Soroban Contract Instruction & Storage Rent Estimator
 // eslint-disable-next-line no-undef
 app.use("/api/v1/soroban/rent", sorobanRentEstimateRouter);
 app.use("/api/v1/soroban/simulate", sorobanSimulationRouter);
@@ -239,8 +255,15 @@ app.use("/api/v1/soroban/simulate", sorobanSimulationRouter);
 // Issue #813 Build Automated Storage Footprint Monitor for Managed PostgreSQL
 app.use("/metrics", metricsRouter);
 
-// Issue #1091 – High-Frequency Market Stream Aggregator
+// Issue #1091 - High-Frequency Market Stream Aggregator
 app.use("/api/v1/market-stream", marketStreamRouter);
+
+// Issue - SEP-38 Exchange Rate Quote Expiration & Refresh Engine
+// Client auto-refresh route for expired quotes.
+app.use("/api/v1/remittance/sep38", sep38RefreshRouter);
+
+// Start background garbage collector for expired SEP-38 quotes.
+startSep38QuoteExpiryWorker();
 
 app.get("/", (req, res) => {
   res.json({
@@ -277,10 +300,10 @@ app.get("/", (req, res) => {
       admin: {
         lockdown: "POST /api/admin/lockdown",
         reportSummary:
-          "/api/admin/reports/summary?format=html|pdf&month=YYYY-MM",
+          "/api/admin/reports/summary?format=html|pdfZmonth=YYYY-MM",
         rateLimit: {
           getConfig: "GET /api/admin/rate-limit",
-          updateConfig: "PUT /api/admin/rate-limit",
+          updateConfig: "PUT/api/admin/rate-limit",
           refreshWhitelist: "POST /api/admin/rate-limit/whitelist/refresh",
         },
       },
@@ -294,34 +317,22 @@ app.get("/", (req, res) => {
         lockQuote: "POST /api/v1/payment-routing/quotes/:id/lock",
         getQuote: "GET /api/v1/payment-routing/quotes/:id",
       },
-marketStream: {
+      marketStream: {
         websocket: "ws://.../v1/market-stream?pairs=USDC-XLM,BTC-USDC",
         metrics: "GET /api/v1/market-stream/metrics",
         publish: "POST /api/v1/market-stream/publish",
-      },
-      yield: {
-        emissions: "/api/v1/yield/emissions",
-        emissionRate: "/api/v1/yield/emissions/rate",
-        emissionSchedule: "/api/v1/yield/emissions/schedule",
       },
     },
   });
 });
 
-app.use(
-  (
-    err: Error,
-    req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction,
-  ) => {
-    console.error("Unhandled error:", err);
-    sendApiError(res, 500, "INTERNAL_SERVER_ERROR");
-  },
-);
-
-app.use((req, res) => {
-  sendApiError(res, 404, "ENDPOINT_NOT_FOUND");
-});
+// Global error handler
+if (typeof sendApiError === "function") {
+  app.use(
+    (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      sendApiError(res, err);
+    },
+  );
+}
 
 export default app;

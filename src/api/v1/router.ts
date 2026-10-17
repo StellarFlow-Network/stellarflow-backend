@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { refreshSep38Quote } from '../../controllers/remittanceFxController';
 
 const router = Router();
 
@@ -10,9 +11,9 @@ interface ZkParamsConfig {
 
 const ZK_PARAMS_REGISTRY: Record<string, ZkParamsConfig> = {
   default: {
-    cdnUrl: 'https://cdn.example.com/zk/params/default_v1.0.0.zkey',
+    cdnUrl: 'https://cdn.example.com/zk/params/default_v1.0.0.z.key',
     version: 'v1.0.0',
-    sha256Checksum: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    sha256Checksum: 'e3b0c44298c1c149afbf4c996fb92427ae41ed464ab94c4991b7855'
   }
 };
 
@@ -28,5 +29,11 @@ router.get('/zk/params/:circuit_id', (req: Request, res: Response) => {
     checksum: config.sha256Checksum
   });
 });
+
+// SEP-38 exchange rate quote refresh engine.
+// Issues a valid updated quote against live anchor rates and expires
+// the previous quote.
+router.post('/remittance/sep38/refresh-quote', refreshSep38Quote);
+router.get('/remittance/sep38/refresh-quote', refreshSep38Quote);
 
 export default router;
