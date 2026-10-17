@@ -74,6 +74,13 @@ try:
 except ImportError:
     _HAS_STREAMING_ROUTER = False
 
+try:
+    from app.routers import rpc_health as rpc_health_router
+    from app.workers.soroban_rpc_health import get_health_matrix
+    _HAS_RPC_HEALTH_ROUTER = True
+except ImportError:
+    _HAS_RPC_HEALTH_ROUTER = False
+
 log = structlog.get_logger(__name__)
 
 
@@ -165,11 +172,27 @@ async def lifespan(app: FastAPI):
             log.info("WebSocket streaming managers initialized", redis_url=redis_url)
         except Exception as exc:
             log.error("Failed to initialize streaming managers", error=str(exc))
-    
+
+    # Issue #1294 — start Soroban RPC health matrix background polling
+    if _HAS_RPC_HEALTH_ROUTER:
+        try:
+            await get_health_matrix().start()
+            log.info("soroban_rpc_health_matrix.started")
+        except Exception as exc:
+            log.error("Failed to start Soroban RPC health matrix", error=str(exc))
+
     yield
-    
+
     # Shutdown
     log.info("stellarflow.shutdown")
+
+    # Issue #1294 — stop Soroban RPC health matrix
+    if _HAS_RPC_HEALTH_ROUTER:
+        try:
+            await get_health_matrix().stop()
+            log.info("soroban_rpc_health_matrix.stopped")
+        except Exception as exc:
+            log.error("Failed to stop Soroban RPC health matrix", error=str(exc))
     
     # Shutdown streaming managers
     if _HAS_STREAMING_ROUTER:
@@ -270,3 +293,6 @@ if _HAS_REBALANCING_ROUTER:
 
 if _HAS_STREAMING_ROUTER:
     app.include_router(streaming_router.router, prefix="/api")
+
+if _HAS_RPC_HEALTH_ROUTER:
+    app.include_router(rpc_health_router.router, prefix="/api/v1")

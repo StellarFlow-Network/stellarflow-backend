@@ -1003,3 +1003,54 @@ def record_sla_metrics_task(self) -> Dict[str, Any]:
             "status": "error",
             "error": str(exc),
         }
+
+
+# ---------------------------------------------------------------------------
+# Issue #1294 — Soroban RPC Node Latency & Health Matrix Exporter
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.poll_soroban_rpc_health",
+    autoretry_for=(OSError,),
+    retry_backoff=True,
+    max_retries=3,
+)
+def poll_soroban_rpc_health(self) -> Dict[str, Any]:
+    """Ping all configured Soroban RPC nodes and export health metrics to Prometheus.
+
+    Runs every 5 seconds via Celery beat. For each node it:
+    - Measures response latency via ``getHealth`` JSON-RPC call.
+    - Reads the current ledger sequence via ``getLatestLedger``.
+    - Records error counts and consecutive failure streaks.
+    - Updates all ``soroban_rpc_*`` Prometheus gauges/counters/histograms so
+      the load balancer can route traffic away from lagging or degraded nodes.
+
+    Returns a summary dict with per-node results.
+    """
+    from app.workers.soroban_rpc_health import get_health_matrix
+
+    matrix = get_health_matrix()
+    snapshots = asyncio.run(matrix.poll_once())
+
+    results = [
+        {
+            "node_url": s.node_url,
+            "is_healthy": s.is_healthy,
+            "latency_ms": round(s.latency_ms, 2),
+            "ledger_sequence": s.ledger_sequence,
+            "ledger_lag": s.ledger_lag,
+            "error_count": s.error_count,
+            "rpc_status": s.rpc_status,
+        }
+        for s in snapshots
+    ]
+
+    healthy_count = sum(1 for s in snapshots if s.is_healthy)
+    return {
+        "total_nodes": len(snapshots),
+        "healthy_nodes": healthy_count,
+        "degraded_nodes": len(snapshots) - healthy_count,
+        "results": results,
+    }

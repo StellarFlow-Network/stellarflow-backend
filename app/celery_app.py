@@ -122,5 +122,11 @@ celery_app.conf.update(
             "task": "app.tasks.sweep_treasury_staked_yield",
             "schedule": crontab(minute="*/15"),
         },
+        # Issue #1294 — Soroban RPC Node Latency & Health Matrix Exporter
+        # Polls every 5 seconds so Prometheus always has fresh latency/ledger data.
+        "poll-soroban-rpc-health": {
+            "task": "app.tasks.poll_soroban_rpc_health",
+            "schedule": 5.0,
+        },
     },
 )
