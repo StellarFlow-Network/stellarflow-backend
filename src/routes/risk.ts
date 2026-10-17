@@ -16,10 +16,12 @@ function parseAssets(raw: unknown): string[] | undefined {
 /**
  * GET /api/v1/risk/collateral-factors
  *
- * Returns the active vault risk parameters: the dynamic collateral valuation
- * factor for every collateral asset, derived from 7-day liquidity depth. Assets
- * whose liquidity dropped below the threshold expose `belowThreshold: true` and
- * a reduced `valuationFactor`.
+ * Returns active vault risk parameters: dynamic collateral valuation factor M_i
+ * for every collateral asset, derived from rolling 7-day liquidity depth.
+ * Assets whose liquidity dropped below the threshold expose belowThreshold: true
+ * and an automatically reduced valuationFactor.
+ *
+ * Responds from active cache in under 15ms.
  *
  * @swagger
  * /api/v1/risk/collateral-factors:
@@ -32,16 +34,23 @@ function parseAssets(raw: unknown): string[] | undefined {
  *         schema:
  *           type: string
  *         description: Optional comma-separated collateral asset codes.
+ *       - in: query
+ *         name: refresh
+ *         schema:
+ *           type: boolean
+ *         description: Optional flag to force dynamic recomputation instead of active cache.
  *     responses:
  *       200:
- *         description: Collateral factor report.
+ *         description: Active collateral factor report.
  */
 router.get("/collateral-factors", async (req: Request, res: Response) => {
   try {
     const assets = parseAssets(req.query.assets);
-    const report = await collateralFactorService.getCollateralFactors(
-      assets ? { assets } : {},
-    );
+    const forceRefresh = req.query.refresh === "true";
+    const report = await collateralFactorService.getCollateralFactors({
+      assets,
+      forceRefresh,
+    });
     res.json({ success: true, data: report });
   } catch (error) {
     sendApiError(

@@ -243,14 +243,14 @@ export async function getLeaderboard(req: Request, res: Response): Promise<void>
 
     const offset = (page - 1) * limit;
 
-    const rows = await prisma.\$queryRaw\
+    const rows = await prisma.$queryRaw`
       SELECT "userId", SUM(volume) as total_volume
       FROM user_volume_leaderboard
       WHERE bucket >= NOW() - INTERVAL '30 days'
       GROUP BY "userId"
       ORDER BY total_volume DESC
-      LIMIT \ OFFSET \
-    \;
+      LIMIT ${limit} OFFSET ${offset}
+    `;
 
     res.json({
       success: true,

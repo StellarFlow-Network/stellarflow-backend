@@ -36,7 +36,7 @@ router.get('/relayers/keys', listAllRelayerKeys);
 router.get('/relayers/keys/rotation-stats', getRotationStats);
 
 // Trigger manual dek rotation
-router.post('/relayers/keys/rotate-deks', requireWebAuthn: requireWebAuthnAttestation, triggerDekRotation);
+router.post('/relayers/keys/rotate-deks', requireWebAuthnAttestation, triggerDekRotation);
 
 // Get public key for a specific relayer
 router.get('/relayers/:id/public-key', getRelayerPublicKey);

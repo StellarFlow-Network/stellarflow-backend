@@ -59,6 +59,7 @@ import { systemicRiskMonitor } from "./services/systemicRiskWiring";
 import { getEventBusService } from "./services/eventBus/eventBusService";
 import { anchorSpreadProfiler } from "./services/remittance/anchorSpreadProfiler";
 import { treasuryGovernanceTimelockAuditExporter } from "./services/governanceTimelockAuditExporter";
+import { startCollateralFactorJob } from "./jobs/collateralFactorJob";
 
 // Load environment variables
 dotenv.config();
@@ -824,6 +825,14 @@ httpServer.listen(PORT, async () => {
     console.log("🏛️ Treasury Governance Timelock Audit Exporter scheduled (daily at 00:00 UTC)");
   } catch (err) {
     console.error("Failed to start Treasury Governance Timelock Audit Exporter:", err);
+  }
+
+  // Issue #1003 – Dynamic vault collateral valuation factor calculation job (daily 24h schedule)
+  try {
+    startCollateralFactorJob();
+    console.log("🛡️ Dynamic Collateral Factor Calculation Job scheduled (daily every 24h)");
+  } catch (err) {
+    console.error("Failed to start Collateral Factor Job:", err);
   }
 });
 

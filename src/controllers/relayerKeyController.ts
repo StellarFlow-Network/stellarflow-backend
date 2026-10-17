@@ -15,7 +15,7 @@ export interface WebAuthnAttestation {
     signature: string;
     userHandle?: string;
   };
-  getClientExtensionResults?: () => Promise<Map<string, unknown>;
+  getClientExtensionResults?: () => Promise<Map<string, unknown>>;
 }
 
 export interface WebAuthnAssertionExpected {
