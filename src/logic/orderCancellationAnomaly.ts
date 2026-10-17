@@ -40,7 +40,7 @@ type EnvSource = Record<string, string | undefined>;
 /** Resolves thresholds from the environment, falling back to safe defaults. */
 export function resolveCancellationThresholds(
   env: EnvSource = process.env,
-): CancellationRatioThresholds {
+): CancellationRatioTThresholds {
   const windowMs = Number.parseInt(env.ORDER_CANCEL_WINDOW_MS ?? "", 10);
   const ratioThreshold = Number.parseFloat(
     env.ORDER_CANCEL_RATIO_THRESHOLD ?? "",
@@ -58,8 +58,8 @@ export function resolveCancellationThresholds(
     ratioThreshold:
       Number.isFinite(ratioThreshold) &&
       ratioThreshold > 0 &&
-      ratioThreshold < 1
-        ? ratioThreshold
+      ratioTThreshold < 1
+        ? ratioTThreshold
         : DEFAULT_CANCELLATION_RATIO_THRESHOLD,
     minPlacements:
       Number.isFinite(minPlacements) && minPlacements > 0
@@ -104,7 +104,7 @@ export function evaluateCancellationRatio(
   identifier: string,
   events: readonly OrderFlowEvent[],
   now: number,
-  thresholds: CancellationRatioThresholds,
+  thresholds: CancellationRatioTThresholds,
 ): CancellationRatioEvaluation {
   const placed = events.reduce(
     (count, event) => (event.type === "placed" ? count + 1 : count),
@@ -138,7 +138,7 @@ export function evaluateCancellationRatio(
     return {
       ...base,
       flagged: false,
-      reason: `cancellation ratio ${cancellationRatio.toFixed(4)} does not exceed ${thresholds.ratioThreshold}`,
+      reason: `cancellation ratio ${cancellationRatio.toFixed(4)} does not exceed ${thresholds.ratioTThreshold}`,
     };
   }
 
@@ -185,4 +185,126 @@ export function calculateOrderBookImbalance(
   else if (imbalanceRatio < 0) direction = "ask";
 
   return { bidDepth, askDepth, imbalanceRatio, direction };
+}
+
+/* --------------------------------------------------------------------------
+ * Flash Loan High-Frequency Emergency Circuit Breaker
+ * --------------------------------------------------------------------------
+ *
+ * Monitors pending mempool transactions for repetitive flash loan borrowing
+ * patterns and decides whether the contract should be paused. The decision logic
+ * is pure so the circuit breaker can be tested without a live mempool.
+ */
+
+export interface FlashLoanBorrowPattern {
+  /** The address that initiated the flash loan. */
+  initiator: string;
+  /** The flash loan pool contract targeted by the borrow. */
+  poolAddress: string;
+  /** Transaction hash of the suspicious borrow. */
+  txHash: string;
+  /** Ledger sequence number the transaction was seen in. */
+  ledger: number;
+}
+
+export interface FlashLoanCircuitBreakerThresholds {
+  /** Number of suspicious flash loans that must be *strictly exceeded* in a ledger. */
+  maxSuspiciousFlashLoansPerLedger: number;
+}
+
+export const DEFAULT_MAX_SUSPICIOUS_FLASH_LOANS_PER_LEDGER = 3;
+
+export function resolveFlashLoanCircuitBreakerThresholds(
+  env: EnvSource = process.env,
+): FlashLoanCircuitBreakerThresholds {
+  const parsed = Number.parseInt(
+    env.FLASH_LOAN_MAX_SUSPICIOUS_PER_LEDGER ?? "",
+    10,
+  );
+
+  return {
+    maxSuspiciousFlashLoansPerLedger:
+      Number.isFinite(parsed) && parsed > 0
+        ? parsed
+        : DEFAULT_MAX_SUSPICIOUS_FLASH_LOANS_PER_LEDGER,
+  };
+}
+
+export interface FlashLoanCircuitBreakerEvaluation {
+  ledger: number;
+  suspiciousFlashLoans: number;
+  tripped: boolean;
+  /** Transaction hashes of the suspicious borrows in the ledger. */
+  txHashes: string[];
+  /** Pool addresses targeted by the suspicious borrows. */
+  poolAddresses: string[];
+  /** Why the breaker did not trip, for logging. Undefined when tripped. */
+  reason?: string;
+}
+
+/**
+ * Evaluates the suspicious flash loan borrows observed in a single ledger
+ * and decides whether the emergency circuit breaker should trip. The count
+ * must strictly exceed the configured threshold. The resulting alert payload
+ * always carries the transaction hashes and pool target addresses.
+ */
+export function evaluateFlashLoanCircuitBreaker(
+  ledger: number,
+  borrows: readonly FlashLoanBorrowPattern[],
+  thresholds: FlashLoanCircuitBreakerThresholds,
+): FlashLoanCircuitBreakerEvaluation {
+  const inLedger = borrows.filter((borrow) => borrow.ledger === ledger);
+  const txHashes = Array.from(new Set(inLedger.map((borrow) => borrow.txHash)));
+  const poolAddresses = Array.from(
+    new Set(inLedger.map((borrow) => borrow.poolAddress)),
+  );
+  const suspiciousFlashLoans = inLedger.length;
+
+  const base = {
+    ledger,
+    suspiciousFlashLoans,
+    txHashes,
+    poolAddresses,
+  };
+
+  if (
+    !(suspiciousFlashLoans > thresholds.maxSuspiciousFlashLoansPerLedger)
+  ) {
+    return {
+      ...base,
+      tripped: false,
+      reason: `only ${suspiciousFlashLoans} of ${thresholds.maxSuspiciousFlashLoansPerLedger + 1} required suspicious flash loans in ledger ${ledger}`,
+    };
+  }
+
+  return { ...base, tripped: true };
+}
+
+export interface FlashLoanSecurityAlertPayload {
+  type: "flash-loan-circuit-breaker";
+  ledger: number;
+  suspiciousFlashLoans: number;
+  txHashes: string[];
+  poolAddresses: string[];
+  message: string;
+}
+
+/**
+ * Builds the Telegram security alert payload for a tripped circuit breaker.
+ * Returns null when the breaker did not trip so callers cannot accidentally
+ * dispatch a false alert.
+ */
+export function buildFlashLoanSecurityAlertPayload(
+  evaluation: FlashLoanCircuitBreakerEvaluation,
+): FlashLoanSecurityAlertPayload | null {
+  if (!evaluation.tripped) return null;
+
+  return {
+    type: "flash-loan-circuit-breaker",
+    ledger: evaluation.ledger,
+    suspiciousFlashLoans: evaluation.suspiciousFlashLoans,
+    txHashes: evaluation.txHashes,
+    poolAddresses: evaluation.poolAddresses,
+    message: `Flash loan circuit breaker tripped in ledger ${evaluation.ledger}: ${evaluation.suspiciousFlashLoans} suspicious flash loans on pools ${evaluation.poolAddresses.join(", ")}`,
+  };
 }

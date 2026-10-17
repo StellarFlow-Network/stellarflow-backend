@@ -1,4 +1,4 @@
-/**
+/*
  * Prometheus metrics used across services.
  * Re-exported from the central middleware/metrics module so every
  * service can import from "../metrics" without circular dependencies.
@@ -38,9 +38,52 @@ export const assetVolatility = new Gauge({
 });
 
 /**
+ * Flasb loan circuit breaker metrics.
+ * Used by the emergency bot that monitors the mempool for malicious
+ * flasb loan patterns and triggers automatic contract pauses.
+ */
+
+export const flashLoanSuspiciousTotal = new Counter({
+  name: "flash_loan_suspicious_total",
+  help: "Total number of suspicious flash loan transactions detected in the mempool",
+  labelNames: ["pool"] as const,
+});
+
+export const flashLoanAnomaliesTotal = new Counter({
+  name: "flash_loan_anomalies_total",
+  help: "Total number of flash loan anomalies that exceeded the per-ledger threshold",
+  labelNames: ["pool"] as const,
+});
+
+export const circuitBreakerPausesTotal = new Counter({
+  name: "circuit_breaker_pauses_total",
+  help: "Total number of emergency contract pause calls submitted",
+  labelNames: ["pool", "status"] as const,
+});
+
+export const circuitBreakerPauseDuration = new Histogram({
+  name: "circuit_breaker_pause_duration_seconds",
+  help: "Duration of emergency contract pause submissions in seconds",
+  labelNames: ["pool"] as const,
+  buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5],
+});
+
+export const circuitBreakerAlertsTotal = new Counter({
+  name: "circuit_breaker_alerts_total",
+  help: "Total number of emergency security alerts dispatched to Telegram",
+  labelNames: ["status"] as const,
+});
+
+export const flashLoanLedgerSuspicion = new Gauge({
+  name: "flash_loan_ledger_suspicion",
+  help: "Number of suspicious flash loans observed in the current ledger window",
+  labelNames: ["pool"] as const,
+});
+
+/**
  * Market stream (WebSocket) metrics.
  * Used by the combined high-frequency market data endpoint
- * (`wss://.../v1/market-stream?pairs=USDC-XLM,BTC-USDC`).
+ * (`wss://.../v1/market-stream?pairs=USD-XLM,BTC-US@).
  */
 
 export const marketStreamConnections = new Gauge({
