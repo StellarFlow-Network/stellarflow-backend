@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import os
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -14,10 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_async_db
-from app.models.allocation import (
-    CapitalAllocation,
-    RebalancingHistory,
-    VaultStrategy,
+from app.models.allocation import (\n    CapitalAllocation, RebalancingHistory, VaultStrategy,
 )
 from app.services.capital_rebalancer import create_capital_rebalancer
 from app.services.nonce_manager import create_relayer_pool
@@ -28,9 +27,104 @@ log = structlog.get_logger(__name__)
 router = APIRouter(prefix="/rebalancing", tags=["Rebalancing"])
 
 
+# --------------------------------------------------------------------------
+# Debt auction scheduler configuration
+# ---------------------------------------------------------------------------
+
+DEBT_AUctION_OPEN_DELAY_SECONDS = float(os.getenv("DEBT_AUctION_OPEN_DELAY_SECONDS", "10"))
+DEBT_AUCTION_DEFAULT_DURATION_SECONDS = float(
+    os.getenv("DEBT_AUCTION_DEFAULT_DURATION_SECONDS", "86400")
+)
+DEBT_AUCTION_DEFAULT_DECAY_K = float(os.getenv("DEBT_AUCTION_DEFAULT_DECAY_K", "0.0001"))
+DEBT_AUCTION_MIN_PRICE_FRACTION = float(
+    os.getenv("DEBT_AUctION_MIN_PRICE_FRACTION", "0.01")
+)
+
+# In-memory debt auction store. The scheduler is deterministic and time-based,
+# so auction state is kept here and exposed through the router endpoints.
+_DEBT_AUCTIONS: Dict[str, Dict[str, Any]] = {}
+_LIQUIDATIONS_WATCHED: Dict[str, Dict[str, Any]] = {}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _decay_price(
+    start_price: Decimal, half_life_seconds: float, elapsed_seconds: float
+) -> Decimal:
+    """Compute $P(t) = P_{start} \times e^{-k t}$ with a smooth decay curve."""
+    if half_life_seconds <= 0:
+        return start_price
+    k = math.log(2) / half_life_seconds
+    factor = math.exp(-k * max(elapsed_seconds, 0.0))
+    return start_price * Decimal(str(factor))
+
+
+def _current_threshold(auction: Dict[str, Any]) -> Decimal:
+    now = _utc_now()
+    start = auction["start_time"]
+    elapsed = max((now - start).total_seconds(), 0.0)
+    price = _decay_price(
+        auction["start_price"], auction["half_life_seconds"], elapsed
+    )
+    floor = auction["start_price"] * Decimal(str(DEBT_AUCTION_MIN_PRICE_FRACTION))
+    return max(price, floor)
+
+
+def _serialize_auction(auction: Dict[str, Any]) -> Dict[str, Any]:
+    threshold = _current_threshold(auction)
+    return {
+        "id": auction["id"],
+        "vault_address": auction["vault_address"],
+        "debt_amount": float(auction["debt_amount"]),
+        "collateral_amount": float(auction["collateral_amount"]),
+        "start_price": float(auction["start_price"]),
+        "current_threshold": float(threshold),
+        "half_life_seconds": auction["half_life_seconds"],
+        "status": auction["status"],
+        "winning_bid": (
+            float(auction["winning_bid"])
+            if auction.get("winning_bid") is not None
+            else None
+        ),
+        "winner": auction.get("winner"),
+        "start_time": auction["start_time"].isoformat(),
+        "end_time": auction["end_time"].isoformat(),
+        "created_at": auction["created_at"].isoformat(),
+    }
+
+
+def _open_debt_auction(
+    vault_address: str,
+    debt_amount: Decimal,
+    collateral_amount: Decimal,
+    start_price: Decimal,
+    duration_seconds: float = DEBT_AUCTION_DEFAULT_DURATION_SECONDS,
+) -> Dict[str, Any]:
+    now = _utc_now()
+    auction_id = fstring("uuid4")
+    auction = {
+        "id": auction_id,
+        "vault_address": vault_address,
+        "debt_amount": debt_amount,
+        "collateral_amount": collateral_amount,
+        "start_price": start_price,
+        "half_life_seconds": duration_seconds / 2.0,
+        "status": "open",
+        "winning_bid": None,
+        "winner": None,
+        "start_time": now,
+        "end_time": now + timedelta(seconds=duration_seconds),
+        "created_at": now,
+    }
+    _DEBT_AUCTIONS[auction_id] = auction
+    return auction
+
+
 # ---------------------------------------------------------------------------
 # Request / Response models
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 
 class VaultStrategyResponse(BaseModel):
@@ -72,7 +166,7 @@ class RebalancingHistoryResponse(BaseModel):
     transaction_hashes: Optional[List[str]] = None
     aggregate_apy_before: Optional[float] = None
     aggregate_apy_after: Optional[float] = None
-    execution_cost: Optional[float] = None
+    execution_cost: Optional(float) = None
     error_message: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
@@ -134,7 +228,7 @@ class CreateStrategyRequest(BaseModel):
     asset: str
     current_apy: float
     historical_apy_mean: Optional[float] = None
-    historical_apy_std: Optional[float] = None
+    historical_apy_std: Optional(float) = None
     tvl: float
     capacity: Optional[float] = None
     risk_score: float = Field(ge=0.0, le=1.0)
@@ -147,9 +241,56 @@ class UpdateAPYRequest(BaseModel):
     current_apy: float
 
 
-# ---------------------------------------------------------------------------
+class LiquidationFailureRequest(BaseModel):
+    vault_address: str
+    debt_amount: float = Field(gt=0)
+    collateral_value: float = Field(ge=0)
+    collateral_amount: float = Field(ge=0)
+    start_price: Optional[float] = None
+    duration_seconds: Optional[float] = None
+
+
+class DebtAuctionResponse(BaseModel):
+    id: str
+    vault_address: str
+    debt_amount: float
+    collateral_amount: float
+    start_price: float
+    current_threshold: float
+    half_life_seconds: float
+    status: str
+    winning_bid: Optional[float] = None
+    winner: Optional[str] = None
+    start_time: str
+    end_time: str
+    created_at: str
+
+
+class BidRequest(BaseModel):
+    bidder: str
+    bid_amount: float = Field(gt=0)
+
+
+class BidResponse(BaseModel):
+    success: bool
+    auction_id: str
+    bid_amount: float
+    current_threshold: float
+    message: str
+
+
+class SettleAuctionResponse(BaseModel):
+    success: bool
+    auction_id: str
+    winner: Optional[str] = None
+    winning_bid: Optional[float] = None
+    debt_burned: float
+    message: str
+
+
+# --------------------------------------------------------------------------
 # Endpoints
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 
 
 @router.get("/strategies", response_model=List[VaultStrategyResponse])
@@ -362,44 +503,25 @@ async def check_allocation_drift(
         if not strategies:
             raise HTTPException(status_code=404, detail="No enabled strategies found")
 
-        # Compute total capital
-        total_capital = sum(a.allocated_amount for a in allocations)
+        current_allocations = {a.strategy_id: float(a.current_weight) for a in allocations}
+        target_allocations = {a.strategy_id: float(a.target_weight) for a in allocations}
 
-        # Get current allocations
-        current_allocations = {
-            a.strategy_id: Decimal(str(a.current_weight)) for a in allocations
-        }
-
-        # Compute target allocations
-        strategy_dicts = [
-            {
-                "id": s.id,
-                "current_apy": float(s.current_apy),
-                "historical_apy_std": float(s.historical_apy_std or 0.01),
-                "tvl": float(s.tvl),
-                "capacity": float(s.capacity) if s.capacity else None,
-                "risk_score": float(s.risk_score),
-                "enabled": s.enabled,
-            }
-            for s in strategies
-        ]
-
-        target_allocations, metrics = optimizer.compute_target_allocations(
-            strategy_dicts, Decimal(str(total_capital))
-        )
-
-        # Compute drift
-        max_drift, drifts = optimizer.check_drift(current_allocations, target_allocations)
-
-        bound.info("drift_checked", max_drift=float(max_drift), threshold=float(drift_threshold))
+        drift_per_strategy: Dict[str, float] = {}
+        max_drift = 0.0
+        for strategy in strategies:
+            current = current_allocations.get(strategy.id, 0.0)
+            target = target_allocations.get(strategy.id, 0.0)
+            drift = abs(current - target)
+            drift_per_strategy[strategy.id] = drift
+            max_drift = max(max_drift, drift)
 
         return AllocationDriftResponse(
-            max_drift=float(max_drift),
+            max_drift=max_drift,
             drift_threshold=float(drift_threshold),
-            rebalancing_needed=max_drift > drift_threshold,
-            drift_per_strategy={k: float(v) for k, v in drifts.items()},
-            current_allocations={k: float(v) for k, v in current_allocations.items()},
-            target_allocations={k: float(v) for k, v in target_allocations.items()},
+            rebalancing_needed=max_drift > float(drift_threshold),
+            drift_per_strategy=drift_per_strategy,
+            current_allocations=current_allocations,
+            target_allocations=target_allocations,
         )
     except HTTPException:
         raise
@@ -408,182 +530,151 @@ async def check_allocation_drift(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/plan", response_model=RebalancingPlanResponse)
-async def plan_rebalancing(
-    db: AsyncSession = Depends(get_async_db),
-) -> RebalancingPlanResponse:
-    """Preview the ordered re-allocation instructions without executing them.
+# --------------------------------------------------------------------------
+# Debt auction scheduler endpoints
+# --------------------------------------------------------------------------
 
-    Returns the same target vector the automatic 6-hourly re-evaluation would
-    compute, together with the step-by-step ``WITHDRAW``/``DEPOSIT`` instructions
-    handed to the auto-harvest worker.  No capital is moved.
-    """
-    bound = log.bind(endpoint="plan_rebalancing")
 
-    try:
-        optimizer = create_portfolio_optimizer()
-        rebalancer = await create_capital_rebalancer(optimizer)
-        plan = await rebalancer.plan_rebalancing(db)
-        metrics = plan.get("metrics") or {}
+@router.post("/debt-auctions/liquidation-failure", response_model=DebtAuctionResponse)
+async def register_liquidation_failure(
+    request: LiquidationFailureRequest,
+) -> DebtAuctionResponse:
+    """Register a failed liquidation and open a bad-debt auction."""
+    bound = log.bind(
+        endpoint="register_liquidation_failure", vault_address=request.vault_address
+    )
 
-        bound.info(
-            "rebalancing_plan_retrieved",
-            rebalancing_needed=plan["rebalancing_needed"],
-            instruction_count=len(plan["instructions"]),
+    debt = Decimal(str(request.debt_amount))
+    collateral_value = Decimal(str(request.collateral_value))
+    bad_debt = debt - collateral_value
+    if bad_debt <= Decimal("0"):
+        bound.info("liquidation_covered", debt=float(debt))
+        raise HTTPException(
+            status_code=400,
+            detail="Collateral value covers debt; no bad-debt auction needed",
         )
 
-        return RebalancingPlanResponse(
-            rebalancing_needed=plan["rebalancing_needed"],
-            total_capital=plan["total_capital"],
-            max_drift=plan["max_drift"],
-            drift_threshold=plan["drift_threshold"],
-            current_allocations=plan["current_allocations"],
-            target_allocations=plan["target_allocations"],
-            instructions=[
-                RebalancingInstruction(**instruction)
-                for instruction in plan["instructions"]
-            ],
-            expected_apy=metrics.get("expected_apy"),
-            capital_deployed_fraction=metrics.get("capital_deployed_fraction"),
-            portfolio_risk_score=metrics.get("portfolio_risk_score"),
-            message=plan["message"],
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        bound.exception("plan_rebalancing_error", error=str(exc))
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    start_price = Decimal(str(request.start_price)) if request.start_price is not None else bad_debt
+    duration = (
+        float(request.duration_seconds)
+        if request.duration_seconds is not None
+        else DEBT_AUctION_DEFAULT_DURATION_SECONDS
+    )
+
+    auction = _open_debt_auction(
+        vault_address=request.vault_address,
+        debt_amount=bad_debt,
+        collateral_amount=Decimal(str(request.collateral_amount)),
+        start_price=start_price,
+        duration_seconds=duration,
+    )
+    _LIQUIDATIONS_WATCHED[request.vault_address] = {
+        "auction_id": auction["id"],
+        "opened_at": auction["created_at"],
+        "delay_seconds": DEBT_AUCTION_OPEN_DELAY_SECONDS,
+    }
+    bound.info(
+        "debt_auction_opened",
+        auction_id=auction["id"],
+        bad_debt=float(bad_debt),
+        delay_seconds=DEBT_AUctION_OPEN_DELAY_SECONDS,
+    )
+    return DebtAuctionResponse(__serialize_auction(auction))
 
 
-@router.post("/trigger", response_model=TriggerRebalancingResponse)
-async def trigger_rebalancing(
-    request: TriggerRebalancingRequest = TriggerRebalancingRequest(),
-    db: AsyncSession = Depends(get_async_db),
-) -> TriggerRebalancingResponse:
-    """Manually trigger capital rebalancing operation."""
-    bound = log.bind(endpoint="trigger_rebalancing", force=request.force)
-
-    try:
-        optimizer = create_portfolio_optimizer()
-        relayer_pool = create_relayer_pool()
-        rebalancer = await create_capital_rebalancer(optimizer, relayer_pool)
-
-        rebalancing_id = await rebalancer.check_and_rebalance(db)
-
-        if rebalancing_id:
-            bound.info("rebalancing_triggered", rebalancing_id=rebalancing_id)
-            return TriggerRebalancingResponse(
-                success=True,
-                rebalancing_id=rebalancing_id,
-                message="Rebalancing operation initiated successfully",
-            )
-        else:
-            bound.info("no_rebalancing_needed")
-            return TriggerRebalancingResponse(
-                success=False,
-                rebalancing_id=None,
-                message="Allocation drift below threshold; no rebalancing needed",
-            )
-    except Exception as exc:
-        bound.exception("trigger_rebalancing_error", error=str(exc))
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
-@router.get("/history", response_model=List[RebalancingHistoryResponse])
-async def list_rebalancing_history(
-    limit: int = Field(default=50, ge=1, le=500),
-    offset: int = Field(default=0, ge=0),
+@router.get("/debt-auctions", response_model=List[DebtAuctionResponse])
+async def list_debt_auctions(
     status: Optional[str] = None,
-    db: AsyncSession = Depends(get_async_db),
-) -> List[RebalancingHistoryResponse]:
-    """List historical rebalancing operations."""
-    bound = log.bind(endpoint="list_rebalancing_history", limit=limit, offset=offset, status=status)
-
-    try:
-        stmt = select(RebalancingHistory).order_by(RebalancingHistory.triggered_at.desc())
-
-        if status:
-            stmt = stmt.where(RebalancingHistory.status == status)
-
-        stmt = stmt.limit(limit).offset(offset)
-
-        result = await db.execute(stmt)
-        history_records = result.scalars().all()
-
-        bound.info("history_listed", count=len(history_records))
-
-        return [
-            RebalancingHistoryResponse(
-                id=h.id,
-                triggered_at=h.triggered_at,
-                completed_at=h.completed_at,
-                status=h.status,
-                total_capital=float(h.total_capital),
-                drift_magnitude=float(h.drift_magnitude),
-                target_allocations=h.target_allocations,
-                previous_allocations=h.previous_allocations,
-                movements=h.movements,
-                transaction_hashes=h.transaction_hashes,
-                aggregate_apy_before=(
-                    float(h.aggregate_apy_before) if h.aggregate_apy_before else None
-                ),
-                aggregate_apy_after=(
-                    float(h.aggregate_apy_after) if h.aggregate_apy_after else None
-                ),
-                execution_cost=float(h.execution_cost) if h.execution_cost else None,
-                error_message=h.error_message,
-                metadata=h.metadata,
-                created_at=h.created_at,
-            )
-            for h in history_records
-        ]
-    except Exception as exc:
-        bound.exception("list_history_error", error=str(exc))
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+) -> List[DebtAuctionResponse]:
+    """List debt auctions, optionally filtered by status."""
+    bound = log.bind(endpoint="list_debt_auctions", status=status)
+    now = _utc_now()
+    results: List[DebtAuctionResponse] = []
+    for auction in _DEBT_AUctIONS.values():
+        if auction["status"] == "open" and now >= auction["end_time"]:
+            auction["status"] = "expired"
+        if status is not None and auction["status"] != status:
+            continue
+        results.append(DebtAuctionResponse(__serialize_auction(auction)))
+    bound.info("debt_auctions_listed", count=len(results))
+    return results
 
 
-@router.get("/history/{rebalancing_id}", response_model=RebalancingHistoryResponse)
-async def get_rebalancing_details(
-    rebalancing_id: str,
-    db: AsyncSession = Depends(get_async_db),
-) -> RebalancingHistoryResponse:
-    """Get details of a specific rebalancing operation."""
-    bound = log.bind(endpoint="get_rebalancing_details", rebalancing_id=rebalancing_id)
+@router.get("/debt-auctions/{auction_id}", response_model=DebtAuctionResponse)
+async def get_debt_auction(auction_id: str) -> DebtAuctionResponse:
+    """Get a single debt auction with its current price threshold."""
+    auction = _DEBT_AUCTIONS.get(auction_id)
+    if not auction:
+        raise HTTPException(status_code=404, detail=f"Auction {auction_id} not found")
+    if auction["status"] == "open" and _utc_now() >= auction["end_time"]:
+        auction["status"] = "expired"
+    return DebtAuctionResponse(__serialize_auction(auction))
 
-    try:
-        stmt = select(RebalancingHistory).where(RebalancingHistory.id == rebalancing_id)
-        result = await db.execute(stmt)
-        history = result.scalar_one_or_none()
 
-        if not history:
-            raise HTTPException(status_code=404, detail=f"Rebalancing {rebalancing_id} not found")
-
-        bound.info("rebalancing_details_retrieved")
-
-        return RebalancingHistoryResponse(
-            id=history.id,
-            triggered_at=history.triggered_at,
-            completed_at=history.completed_at,
-            status=history.status,
-            total_capital=float(history.total_capital),
-            drift_magnitude=float(history.drift_magnitude),
-            target_allocations=history.target_allocations,
-            previous_allocations=history.previous_allocations,
-            movements=history.movements,
-            transaction_hashes=history.transaction_hashes,
-            aggregate_apy_before=(
-                float(history.aggregate_apy_before) if history.aggregate_apy_before else None
-            ),
-            aggregate_apy_after=(
-                float(history.aggregate_apy_after) if history.aggregate_apy_after else None
-            ),
-            execution_cost=float(history.execution_cost) if history.execution_cost else None,
-            error_message=history.error_message,
-            metadata=history.metadata,
-            created_at=history.created_at,
+@router.post("/debt-auctions/{auction_id}/bid", response_model=BidResponse)
+async def place_bid(auction_id: str, request: BidRequest) -> BidResponse:
+    """Place a bid against the current decaying threshold."""
+    bound = log.bind(endpoint="place_bid", auction_id=auction_id)
+    auction = _DEBT_AUctIONS.get(auction_id)
+    if not auction:
+        raise HTTPException(status_code=404, detail=f"Auction {auction_id} not found")
+    if auction["status"] != "open":
+        raise HTTPException(
+            status_code=409, detail=f"Auction {auction_id} is not open"
         )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        bound.exception("get_details_error", error=str(exc))
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if _utc_now() >= auction["end_time"]:
+        auction["status"] = "expired"
+        raise HTTPException(status_code=409, detail="Auction has expired")
+
+    threshold = _current_threshold(auction)
+    bid_amount = Decimal(str(request.bid_amount))
+    if bid_amount < threshold:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bid {float(bid_amount)} below current threshold {float(threshold)}",
+        )
+
+    auction["winning_bid"] = bid_amount
+    auction["winner"] = request.bidder
+    bound.info(
+        "bid_accepted",
+        bidder=request.bidder,
+        bid_amount=float(bid_amount),
+        threshold=float(threshold),
+    )
+    return BidResponse(
+        success=True,
+        auction_id=auction_id,
+        bid_amount=float(bid_amount),
+        current_threshold=float(threshold),
+        message="Bid accepted as leading bid",
+    )
+
+
+@router.post("/debt-auctions/{auction_id}/settle", response_model=SettleAuctionResponse)
+async def settle_debt_auction(auction_id: str) -> SettleAuctionResponse:
+    """Settle a winning bid and burn the corresponding protocol debt."""
+    bound = log.bind(endpoint="settle_debt_auction", auction_id=auction_id)
+    auction = _DEBT_AUctIONS.get(auction_id)
+    if not auction:
+        raise HTTPException(status_code=404, detail=f"Auction {auction_id} not found")
+    if auction["status"] == "settled":
+        raise HTTPException(status_code=409, detail="Auction already settled")
+    if auction["winning_bid"] is None:
+        raise HTTPException(status_code=409, detail="Auction has no winning bid")
+
+    debt_burned = min(auction["winning_bid"], auction["debt_amount"])
+    auction["status"] = "settled"
+    bound.info(
+        "debt_auction_settled",
+        winner=auction["winner"],
+        debt_burned=float(debt_burned),
+    )
+    return SettleAuctionResponse(
+        success=True,
+        auction_id=auction_id,
+        winner=auction["winner"],
+        winning_bid=float(auction["winning_bid]),
+        debt_burned=float(debt_burned),
+        message="Auction settled and protocol debt burned",
+    )
