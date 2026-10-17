@@ -46,6 +46,7 @@ import proofRouter from "./routes/proof";
 import ordersRouter from "./routes/orders";
 import sorobanSimulationRouter from "./routes/sorobanSimulation";
 import sorobanRentEstimateRouter from "./routes/sorobanRentEstimate";
+import sorobanFeeEnvelopeRouter from "./routes/sorobanFeeEnvelope";
 import remittanceRouter from "./routes/remittance";
 import kycRouter from "./routes/kyc";
 import userConversionsRouter from "./routes/userConversions";
@@ -235,6 +236,9 @@ app.use("/api/v1/users", taxReportRouter);
 // eslint-disable-next-line no-undef
 app.use("/api/v1/soroban/rent", sorobanRentEstimateRouter);
 app.use("/api/v1/soroban/simulate", sorobanSimulationRouter);
+
+// Issue #1319 – Soroban Transaction Fee Envelope Builder & Gas Estimator
+app.use("/api/v1/soroban/fee-envelope", sorobanFeeEnvelopeRouter);
 
 // Issue #813 Build Automated Storage Footprint Monitor for Managed PostgreSQL
 app.use("/metrics", metricsRouter);
