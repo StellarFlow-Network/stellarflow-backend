@@ -122,5 +122,10 @@ celery_app.conf.update(
             "task": "app.tasks.sweep_treasury_staked_yield",
             "schedule": crontab(minute="*/15"),
         },
+        "monitor-redis-memory": {
+            "task": "app.tasks.monitor_redis_memory",
+            "schedule": crontab(minute="*/1"),
+            "kwargs": {"threshold_percent": 85.0},
+        },
     },
 )
