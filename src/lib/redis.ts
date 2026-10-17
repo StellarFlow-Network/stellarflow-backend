@@ -10,7 +10,8 @@ const isCiEnvironment =
 const isTestEnvironment =
   process.env.NODE_ENV === "test" ||
   Boolean(process.env.JEST_WORKER_ID) ||
-  isCiEnvironment;
+  isCiEnvironment ||
+  process.argv.some((arg) => arg.includes("test"));
 
 let redisClient: RedisClientType | null = null;
 

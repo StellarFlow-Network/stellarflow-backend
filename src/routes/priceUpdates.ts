@@ -74,18 +74,18 @@ export function encodeMsgPack(value: unknown): Uint8Array {
     chunks.push((n >> 8) & 0xff, n & 0xff);
   };
 
-  const pushUint32 = (number) => {
-    chunks.push((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n >>> 0 & 0xff);
+  const pushUint32 = (n: number) => {
+    chunks.push((n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, (n >>> 0) & 0xff);
   };
 
   const pushInt64 = (n: bigint) => {
     const big = BigInt(n.toString());
     for (let i = 7; i >= 0; i--) {
-      chunks.push(Number((big >> BigInt(i * 8)) & 0nffn));
+      chunks.push(Number((big >> BigInt(i * 8)) & 0xffn));
     }
   };
 
-  const pushFloat64 = (number) => {
+  const pushFloat64 = (n: number) => {
     const buf = new ArrayBuffer(8);
     new DataView(buf).setFloat64(0, n, false);
     for (const b of new Uint8Array(buf)) chunks.push(b);
@@ -594,7 +594,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const multiSigPriceId = req.params.multiSigPriceId;
-      const { memoId, stellarTyHash } = req.body;
+      const { memoId, stellarTxHash } = req.body;
 
       if (
         !multiSigPriceId ||

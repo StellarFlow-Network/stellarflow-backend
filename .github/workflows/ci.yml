@@ -40,6 +40,8 @@ jobs:
           npx tsx --test test/feeProjection.test.ts
           npx tsx test/circuitBreakerService.test.ts
           npx tsx test/auctionPrice.test.ts
+          # Issue #1003 – dynamic vault collateral valuation factor calculation
+          npx tsx --test test/collateralFactor.test.ts
 
       - uses: actions/setup-python@v5
         with:
