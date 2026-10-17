@@ -100,3 +100,59 @@ jobs:
           path: |
             coverage.xml
             coverage-integration.xml
+
+  benchmarks:
+    name: Pytest Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install benchmark dependencies
+        run: pip install -r requirements.txt pytest pytest-benchmark
+
+      - name: Run benchmarks on PR head
+        run: |
+          python -m pytest tests/benchmarks/ \
+            --benchmark-only \
+            --benchmark-json=benchmark-head.json \
+            --benchmark-min-rounds=5 \
+            -p no:cacheprovider -q
+
+      - name: Fetch main branch baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin main --depth=1
+          git worktree add /tmp/main-baseline origin/main
+
+      - name: Run benchmarks on main baseline
+        if: github.event_name == 'pull_request'
+        working-directory: /tmp/main-baseline
+        run: |
+          python -m pytest tests/benchmarks/ \
+            --benchmark-only \
+            --benchmark-json=benchmark-main.json \
+            --benchmark-min-rounds=5 \
+            -p no:cacheprovider -q
+
+      - name: Compare benchmarks against main (fail on >20% regression)
+        if: github.event_name == 'pull_request'
+        run: |
+          python scripts/compare_benchmarks.py \
+            --baseline /tmp/main-baseline/benchmark-main.json \
+            --current benchmark-head.json \
+            --threshold 0.20
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark-head.json
+            /tmp/main-baseline/benchmark-main.json
+          if-no-files-found: ignore
