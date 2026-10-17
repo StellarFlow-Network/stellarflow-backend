@@ -42,6 +42,7 @@ import { getCircuitBreakerService } from "./services/circuitBreakerService";
 import { governanceTimelockService } from "./services/governanceTimelockService";
 import { governanceWebhookBroadcaster } from "./services/governanceWebhookBroadcaster";
 import { governanceResultExportWorker } from "./services/governanceResultExportWorker";
+import { governanceQuorumVerificationService } from "./services/governanceQuorumVerificationService";
 import { getRegionalHealthService } from "./services/regionalHealthService";
 import { storageRentBumpService } from "./services/storageRentBumpService";
 import { getOrderBookSnapshotEngine } from "./services/orderBookSnapshotEngine";
@@ -368,6 +369,7 @@ const shutdown = async (signal: "SIGINT" | "SIGTERM"): Promise<void> => {
     governanceTimelockService.stop();
     governanceWebhookBroadcaster.stop();
     governanceResultExportWorker.stop();
+    governanceQuorumVerificationService.stop();
     liquidityRebalancingWorker?.stop();
     ammReserveDivergenceDetector?.stop();
     apyWorker.stop();
@@ -666,6 +668,19 @@ httpServer.listen(PORT, async () => {
   } catch (err) {
     console.warn(
       "Governance result export worker not started:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // DAO Governance Proposal Quorum Verification Service
+  try {
+    governanceQuorumVerificationService.start().catch((err: Error) => {
+      console.error("Failed to start governance quorum verification service:", err);
+    });
+    console.log("Governance quorum verification service started");
+  } catch (err) {
+    console.warn(
+      "Governance quorum verification service not started:",
       err instanceof Error ? err.message : err,
     );
   }
