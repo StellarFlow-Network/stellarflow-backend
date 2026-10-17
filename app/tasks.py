@@ -1003,3 +1003,40 @@ def record_sla_metrics_task(self) -> Dict[str, Any]:
             "status": "error",
             "error": str(exc),
         }
+
+
+# ---------------------------------------------------------------------------
+# Issue #1315 — Automated Redis Cache Eviction & Memory Usage Monitor
+# ---------------------------------------------------------------------------
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.monitor_redis_memory",
+    autoretry_for=(OSError,),
+    retry_backoff=True,
+    max_retries=3,
+)
+def monitor_redis_memory_task(
+    self,
+    threshold_percent: float = 85.0,
+    batch_size: int = 100,
+    max_evictions: int = 5000,
+) -> Dict[str, Any]:
+    """Monitor Redis memory usage and evict volatile analytics keys if above 85%.
+
+    Executes targeted key eviction on volatile analytics cache namespaces
+    while preserving critical session keys, and notifies devops channels.
+
+    Failures propagate so Celery records them and the OSError retry policy
+    applies; a silently successful task would hide a Redis outage.
+
+    Returns:
+        Dictionary with eviction execution statistics and memory status.
+    """
+    from app.services.redis_memory_monitor import run_redis_memory_monitor
+
+    return run_redis_memory_monitor(
+        threshold_percent=threshold_percent,
+        batch_size=batch_size,
+        max_evictions=max_evictions,
+    )
