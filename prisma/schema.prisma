@@ -719,6 +719,18 @@ model PoolVolumeAnalytics {
   @@index([poolId, timestamp])
 }
 
+model PoolRewardEmission {
+  id              String    @id @default(uuid())
+  poolId          String    @db.VarChar(50)
+  tokenCode       String    @db.VarChar(16)
+  amountPerSecond Decimal   @db.Decimal(30, 12)
+  tokenPriceUsd   Decimal   @db.Decimal(30, 10)
+  startsAt        DateTime  @db.Timestamp(3)
+  endsAt          DateTime? @db.Timestamp(3)
+
+  @@index([poolId, startsAt, endsAt])
+}
+
 model GovernanceProposal {
   id              Int       @id @default(autoincrement())
   proposalId      String    @unique

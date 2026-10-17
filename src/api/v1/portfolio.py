@@ -29,8 +29,24 @@ from app.models import (
     WalletSummary,
     YieldRewardItem,
 )
+from src.services.portfolio_balance_sync import get_portfolio_balances
 
 router = APIRouter(prefix="/portfolio", tags=["Portfolio"])
+
+
+@router.get(
+    "/{address}/balances",
+    summary="Get multi-chain portfolio balances",
+    description=(
+        "Returns the most recently synchronized Stellar, Soroban-indexer, and "
+        "configured EVM token balances for an address."
+    ),
+)
+async def get_multi_chain_balances(
+    address: str = Path(..., min_length=1, max_length=128),
+) -> dict:
+    """Serve a 30-second Redis-cached balance snapshot for the requested address."""
+    return await get_portfolio_balances(address)
 
 
 @router.get(

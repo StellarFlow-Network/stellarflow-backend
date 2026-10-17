@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.api.v1.router import v1_router
 from src.cache.redis_cache import redis_cache
+from src.services.pool_market_metrics import close_pool_metrics_pool
+from src.services.portfolio_balance_sync import portfolio_balance_refresh_loop
+from src.services.sandwich_attack_detector import mempool_sandwich_worker
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +19,19 @@ async def lifespan(app: FastAPI):
     """Application lifecycle manager for startup and shutdown events."""
     logger.info("Initializing FastAPI StellarFlow Analytics Application...")
     await redis_cache.connect()
-    yield
-    logger.info("Shutting down FastAPI application and disconnecting Redis...")
-    await redis_cache.disconnect()
+    workers = [
+        asyncio.create_task(portfolio_balance_refresh_loop()),
+        asyncio.create_task(mempool_sandwich_worker()),
+    ]
+    try:
+        yield
+    finally:
+        logger.info("Shutting down FastAPI background workers...")
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, return_exceptions=True)
+        await close_pool_metrics_pool()
+        await redis_cache.disconnect()
 
 
 app = FastAPI(
